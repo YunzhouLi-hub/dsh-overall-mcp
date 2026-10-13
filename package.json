@@ -1,0 +1,40 @@
+{
+  "name": "dsh-overall-mcp",
+  "version": "0.1.0",
+  "description": "Overall MCP for DeepSeek Harness: first-run host-wide MCP config scan + auto-import, plus live aggregation of open MCP catalogs (official registry / Smithery / Docker MCP / awesome-remote / awesome-mcp-servers) for search and one-click install.",
+  "keywords": ["deepseek-harness", "dsh", "dsh-plugin", "mcp", "model-context-protocol", "scanner", "catalog"],
+  "license": "MIT",
+  "type": "module",
+  "main": "index.js",
+  "engines": { "node": "^22.19.0 || >=24.0.0" },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client/client.js",
+    "./lib/scanner.js": "./lib/scanner.js",
+    "./lib/catalog.js": "./lib/catalog.js",
+    "./lib/media.js": "./lib/media.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "scripts": {
+    "lint": "node --check index.js && node --check lib/scanner.js && node --check lib/catalog.js && node --check lib/media.js && node --check client/client.js",
+    "test": "node --test test/scanner.test.mjs test/catalog.test.mjs test/schema-guard.test.mjs test/updates.test.mjs test/media.test.mjs",
+    "test:layout": "node tools/layout-probe.mjs"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/dsh-mcp-client": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-tools": "^0.2.0-rc.2"
+  },
+  "publishConfig": { "access": "public" }
+}

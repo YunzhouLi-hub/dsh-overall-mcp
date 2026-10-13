@@ -1,0 +1,18 @@
+# 依赖（本地插件靠 DSH 的 node_modules 解析，仓库里不装）
+node_modules/
+
+# 打包产物
+*.tgz
+dist/
+
+# 编辑器与系统噪声
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 日志（探针与宿主都可能留下）
+*.log
+
+# 探针跑出来的临时产物
+tools/out/

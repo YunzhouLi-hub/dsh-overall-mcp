@@ -1,0 +1,1957 @@
+// client/client.js — dsh-overall-mcp client plugin (web / desktop).
+//
+// Client plugin format verified against @deepseek-ai/dsh-client-ui-settings:
+// registered via window.__ModuleLoader__.load({id, factory}), factory(require)
+// returns exports with `inject` and `apply(ctx)`. The settings entry is
+// registered into the `settings.section` list slot with FLAT options wrapped in
+// `slots.inject` (the shape used by working desktop plugins dshmarket and
+// dsh-mcp-panel).
+//
+// Two tabs:
+//   「已注册」 — servers grouped by import source (collapsible, per-group switch)
+//   「MCP 市场」— live discovery of available MCP servers from the public
+//                 catalogs (official registry / Smithery / PulseMCP)
+//
+// Host API (Connection-authenticated same-origin fetch routes, index.js):
+//   GET  /api/overall-mcp/servers
+//   GET  /api/overall-mcp/scan
+//   GET/POST /api/overall-mcp/catalog           { query?, source?, limit?, refresh? }
+//   POST /api/overall-mcp/install               { item }
+//   POST /api/overall-mcp/set-enabled           { name, enabled }
+//   POST /api/overall-mcp/set-source-enabled    { source, enabled }
+//   POST /api/overall-mcp/remove                { name }
+
+window.__ModuleLoader__.load({
+	id: "dsh-overall-mcp",
+	factory: (require) => {
+		var module = { exports: {} };
+		var exports = module.exports;
+		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
+		var react = require("react");
+		var createElement = react.createElement;
+		var useState = react.useState;
+		var useEffect = react.useEffect;
+		var useMemo = react.useMemo;
+		var useRef = react.useRef;
+
+		const API = "/api/overall-mcp";
+		// Shown in the page head's version chip. The bundle cannot read
+		// package.json at runtime, so `tools/client-smoke.mjs` asserts the two
+		// stay equal — a version chip that lies is worse than no chip.
+		const CLIENT_VERSION = "0.1.0";
+
+		async function api(path, options) {
+			const res = await fetch(API + path, {
+				headers: { "content-type": "application/json" },
+				...options,
+			});
+			const body = await res.json().catch(() => ({}));
+			if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+			return body;
+		}
+
+		/** Friendly titles for the known import sources. */
+		const SOURCE_LABELS = {
+			"claude-desktop": "Claude Desktop",
+			"claude-code": "Claude Code",
+			"cursor": "Cursor",
+			"vscode": "VS Code",
+			"vscode-insiders": "VS Code Insiders",
+			"windsurf": "Windsurf",
+			"codex-cli": "Codex CLI",
+			"gemini-cli": "Gemini CLI",
+			"manual": "手动添加",
+			"catalog:official-registry": "官方 Registry",
+			"catalog:smithery": "Smithery",
+			"catalog:docker-catalog": "Docker MCP Catalog",
+			"catalog:awesome-remote": "Awesome 远程",
+			"catalog:awesome-list": "Awesome 清单",
+			"catalog:pulsemcp": "PulseMCP",
+		};
+
+		function sourceLabel(source) {
+			const key = source || "manual";
+			if (SOURCE_LABELS[key]) return SOURCE_LABELS[key];
+			if (key.startsWith("catalog:")) return `目录 · ${key.slice("catalog:".length)}`;
+			return key;
+		}
+
+		/** Market source ids (as returned by the catalog endpoint). */
+		const MARKET_SOURCES = [
+			["", "全部市场"],
+			["official-registry", "官方 Registry"],
+			["smithery", "Smithery"],
+			["docker-catalog", "Docker MCP Catalog"],
+			["awesome-remote", "Awesome 远程"],
+			["awesome-list", "Awesome 清单"],
+		];
+
+		/** Sort choices for the market listing. */
+		const SORT_OPTIONS = [
+			["default", "默认（综合推荐）"],
+			["quality", "质量最高"],
+			["installs", "使用量最多"],
+			["stars", "Star 最多"],
+			["updated", "最近更新"],
+			["name", "名称 A→Z"],
+		];
+
+		/** Page-size choices; the market holds thousands of entries. */
+		const PAGE_SIZES = [20, 50, 100];
+
+		/** Compact source names for the per-source counters line. */
+		const SOURCE_SHORT = {
+			"official-registry": "官方",
+			smithery: "Smithery",
+			"docker-catalog": "Docker",
+			"awesome-remote": "远程",
+			"awesome-list": "Awesome",
+		};
+
+		// Theme-adaptive palette. The DSH shell owns the real tokens
+		// (--dsw-alias-*); the literals are fallbacks for a shell older than this
+		// bundle. Neutral surfaces are translucent grey rather than white so the
+		// page reads as native in BOTH themes — a hard-coded white card on the
+		// dark theme is the single most obvious "this does not belong here" tell.
+		const T = {
+			cardBg: "var(--dsw-alias-bg-primary, #fff)",
+			soft: "rgba(128,128,128,0.08)",
+			soft2: "rgba(128,128,128,0.12)",
+			text: "var(--dsw-alias-text-primary, #1d2129)",
+			text2: "var(--dsw-alias-text-secondary, #4e5969)",
+			text3: "var(--dsw-alias-text-tertiary, #86909c)",
+			text4: "var(--dsw-alias-text-quaternary, #a9aeb8)",
+			line: "rgba(128,128,128,0.18)",
+			line2: "rgba(128,128,128,0.10)",
+			brand: "#4d6bfe",
+			green: "#00b42a",
+			amber: "#ff7d00",
+			blue: "#165dff",
+			red: "#f53f3f",
+		};
+
+		const styles = {
+			page: { display: "grid", gap: 12, fontSize: 14, lineHeight: 1.6, color: T.text },
+			toolbar: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" },
+			// ---- page head, ported from the v4 prototype ----------------------
+			// Two rows: identity + actions, then the sub-line. The brand mark is
+			// the only illustration in the whole page; everything else is text.
+			pageHead: { display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" },
+			headLeft: { display: "grid", gap: 5, minWidth: 0, flex: 1 },
+			titleRow: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", minWidth: 0 },
+			pageTitle: { fontSize: 18, fontWeight: 700, color: T.text, lineHeight: 1.2 },
+			versionChip: {
+				fontSize: 11, padding: "1px 7px", borderRadius: 999,
+				background: T.soft, color: T.text3, whiteSpace: "nowrap",
+			},
+			pageSub: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", fontSize: 12, color: T.text3 },
+			pageSubLink: { color: T.brand, textDecoration: "none" },
+			headActs: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", flexShrink: 0 },
+			// Floating return-to-top: it only exists once there is somewhere to
+			// return from, so a short page never carries a dead control.
+			toTop: {
+				position: "fixed", right: 22, bottom: 22, zIndex: 40,
+				width: 34, height: 34, padding: 0, borderRadius: 999,
+				display: "grid", placeItems: "center", fontSize: 15, lineHeight: 1,
+				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text2,
+				cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,.16)",
+			},
+			spacer: { marginLeft: "auto" },
+			button: {
+				padding: "5px 12px", borderRadius: 8, cursor: "pointer", fontSize: 13,
+				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text,
+			},
+			// The primary action is the page's single brand-coloured element:
+			// one accent per view, not a rainbow of competing blues.
+			primary: { background: T.brand, borderColor: T.brand, color: "#fff", fontWeight: 600 },
+			// Underline tabs: the label sits on a rule, and the active rule is
+			// the accent. Filled pill tabs read as buttons and fight the content.
+			tabBar: { display: "flex", gap: 22, borderBottom: `1px solid ${T.line}`, marginBottom: 4 },
+			tab: {
+				padding: "9px 1px 8px", background: "transparent", cursor: "pointer", fontSize: 14,
+				color: T.text3, border: "none", borderBottom: "2px solid transparent",
+			},
+			tabActive: { color: T.text, fontWeight: 600, borderBottomColor: T.brand },
+			stats: { display: "flex", gap: 14, flexWrap: "wrap", fontSize: 12, color: T.text3 },
+			filters: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" },
+			select: {
+				padding: "6px 10px", borderRadius: 8, fontSize: 13,
+				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text,
+			},
+			searchBox: {
+				flex: 1, minWidth: 180, padding: "7px 12px", borderRadius: 8, fontSize: 13,
+				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text,
+			},
+			// The market search is the primary control of its view, so it is
+			// shaped like one: a pill that spans the row.
+			searchPill: {
+				flex: 1, minWidth: 220, padding: "8px 16px", borderRadius: 999, fontSize: 13,
+				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text,
+			},
+			group: { border: `1px solid ${T.line}`, borderRadius: 12, overflow: "hidden" },
+			groupHead: { display: "flex", gap: 10, alignItems: "center", padding: "10px 12px", background: T.soft },
+			groupTitle: { fontWeight: 600 },
+			badge: { fontSize: 12, padding: "1px 8px", borderRadius: 999, background: T.soft2, color: T.text2 },
+			pager: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", paddingTop: 4 },
+			groupChips: { display: "flex", gap: 6, flexWrap: "wrap" },
+			chip: {
+				padding: "4px 12px", borderRadius: 999, fontSize: 12, cursor: "pointer",
+				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text2,
+			},
+			chipActive: { background: T.brand, color: "#fff", fontWeight: 600, borderColor: T.brand },
+			updateBadge: {
+				fontSize: 12, padding: "1px 8px", borderRadius: 999,
+				background: "rgba(0,180,42,0.12)", color: T.green, fontWeight: 600,
+			},
+			groupBody: { display: "grid", gap: 1, padding: "6px 8px 10px" },
+			row: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "7px 10px", borderRadius: 8 },
+			name: { fontWeight: 600, minWidth: 130 },
+			meta: { color: T.text3, fontSize: 12 },
+			dot: (state) => ({
+				width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+				background: state === "on" ? T.green
+					: state === "off" ? "#f53f3f"
+						: state === "external" ? T.blue
+							: "rgba(128,128,128,0.6)",
+			}),
+			// ---- market cards (v4: masonry columns, not a rigid grid) ----
+			// A masonry column flow lets a card with a long description stay tall
+			// without forcing its whole row to match it — the ragged bottom edge
+			// is what makes a 5k-entry catalogue scannable.
+			cardColumns: { columns: "3 268px", columnGap: 14 },
+			card: {
+				breakInside: "avoid", WebkitColumnBreakInside: "avoid",
+				marginBottom: 14, display: "grid", gap: 9,
+				padding: "14px 16px 12px", borderRadius: 12,
+				border: `1px solid ${T.line}`, background: T.cardBg,
+				color: T.text, textAlign: "left", cursor: "pointer",
+			},
+			// `minWidth: 0` is load-bearing: this is a *grid* item inside
+			// cardLeft's auto track, so its default `min-width:auto` resolves
+			// to min-content — and a `white-space:nowrap` title's min-content
+			// is its full text. Without it a long name widens the track past
+			// the card and shoves the install/detail buttons over the edge.
+			cardHead: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", minWidth: 0 },
+			// Header split: identity column (grows) + action column (fixed).
+			cardHd: { display: "flex", gap: 12, alignItems: "flex-start" },
+			cardLeft: { display: "grid", gap: 4, flex: 1, minWidth: 0 },
+			cardCta: { display: "flex", flexDirection: "column", gap: 6, alignItems: "stretch", flexShrink: 0 },
+			cardBody: { display: "grid", gap: 9, flex: 1, minWidth: 0, outline: "none" },
+			cardName: {
+				fontWeight: 700, fontSize: 15, color: T.text, textDecoration: "none",
+				overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%",
+			},
+			cardAuthor: { display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: T.text3, minWidth: 0 },
+			// The author row's own tail: the separator and the version the
+			// source published, both muted so the author name stays the anchor.
+			cardDot: { color: T.text4 },
+			cardVer: { color: T.text4 },
+			// The prototype's GitHub mark, beside the title. Muted at rest so it
+			// never competes with the name, and never a second click target for
+			// the card body — the anchor stops propagation in its handler.
+			ghIcon: {
+				display: "inline-flex", alignItems: "center", flexShrink: 0,
+				color: T.text3, textDecoration: "none",
+			},
+			statRow: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 12, color: T.text3 },
+			stat: { display: "inline-flex", gap: 3, alignItems: "center", textDecoration: "none", color: "inherit" },
+			statB: { fontWeight: 600, color: T.text2 },
+			statSep: { color: T.text4 },
+			desc: {
+				fontSize: 12.5, lineHeight: 1.55, color: T.text2,
+				display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden",
+			},
+			tags: { display: "flex", gap: 5, flexWrap: "wrap" },
+			tag: { fontSize: 11, padding: "2px 8px", borderRadius: 999, background: T.soft, color: T.text2 },
+			sourceTag: {
+				fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 600,
+				background: "rgba(77,107,254,0.10)", color: T.brand,
+			},
+			verified: {
+				fontSize: 11, padding: "1px 7px", borderRadius: 999, fontWeight: 600,
+				background: "rgba(22,95,255,0.12)", color: T.blue,
+			},
+			deprecated: {
+				fontSize: 11, padding: "1px 7px", borderRadius: 999, fontWeight: 600,
+				background: "rgba(255,125,0,0.14)", color: T.amber,
+			},
+			warnLine: { fontSize: 11, lineHeight: 1.5, color: T.amber },
+			installed: {
+				fontSize: 11, padding: "1px 7px", borderRadius: 999, fontWeight: 600,
+				background: "rgba(0,180,42,0.12)", color: T.green,
+			},
+			// The card's preview strip: real repository pictures, scrolled by
+			// hand at each image's own aspect ratio. The nav buttons float over
+			// the strip's edges, so inline styles cannot express them.
+			mediaRow: { position: "relative", minWidth: 0 },
+			mediaStrip: {
+				display: "flex", gap: 8, alignItems: "stretch", overflowX: "auto",
+				scrollSnapType: "x mandatory", paddingBottom: 2, minWidth: 0,
+				scrollbarWidth: "none",
+			},
+			mediaSlide: {
+				flexShrink: 0, borderRadius: 10, overflow: "hidden", scrollSnapAlign: "start",
+				border: `1px solid ${T.line2}`, background: T.soft, display: "block",
+			},
+			mediaImg: { width: "100%", height: "100%", objectFit: "cover", display: "block" },
+			mediaNav: {
+				position: "absolute", top: "50%", transform: "translateY(-50%)", zIndex: 2,
+				width: 26, height: 26, padding: 0, borderRadius: "50%", cursor: "pointer",
+				display: "grid", placeItems: "center", fontSize: 15, lineHeight: 1,
+				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text2,
+				boxShadow: "0 1px 4px rgba(0,0,0,0.14)",
+			},
+			code: {
+				display: "flex", gap: 6, alignItems: "center", minWidth: 0,
+				padding: "7px 10px", borderRadius: 8, background: T.soft,
+				fontSize: 11.5, color: T.text2,
+				fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+			},
+			codeText: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+			caret: { color: T.brand, fontWeight: 700, flexShrink: 0 },
+			cardFt: {
+				display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between",
+				borderTop: `1px solid ${T.line2}`, paddingTop: 10,
+			},
+			iconBtn: {
+				width: 28, height: 28, padding: 0, borderRadius: 8, display: "grid", placeItems: "center",
+				cursor: "pointer", fontSize: 13, lineHeight: 1,
+				border: "1px solid transparent", background: "transparent", color: T.text3,
+			},
+			// ---- detail panel (v4: a wide sheet, header facts, sticky footer) ----
+			overlay: {
+				position: "fixed", inset: 0, zIndex: 50, display: "grid", placeItems: "center",
+				background: "rgba(0,0,0,0.45)", padding: 24, overflow: "auto",
+			},
+			detailPanel: {
+				width: "min(760px, 100%)", maxHeight: "100%", overflow: "auto",
+				display: "grid", gap: 14, padding: 0,
+				borderRadius: 14, border: `1px solid ${T.line}`,
+				background: T.cardBg, color: T.text,
+			},
+			detailHead: {
+				display: "grid", gap: 10, padding: "18px 20px 16px",
+				borderBottom: `1px solid ${T.line2}`, background: T.soft,
+			},
+			detailIdentity: { display: "flex", gap: 12, alignItems: "center", minWidth: 0 },
+			detailTitle: { fontWeight: 700, fontSize: 19, lineHeight: 1.3, minWidth: 0 },
+			detailSub: { fontSize: 12, color: T.text3, marginTop: 2 },
+			detailBadges: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginLeft: "auto" },
+			detailDesc: { fontSize: 13, lineHeight: 1.65, margin: 0, whiteSpace: "pre-wrap", color: T.text2 },
+			detailBody: { display: "grid", gap: 14, padding: "0 20px" },
+			detailFacts: { display: "grid", gap: 5, padding: "12px 14px", borderRadius: 10, background: T.soft, fontSize: 12 },
+			detailRow: { display: "flex", gap: 10 },
+			detailKey: { color: T.text3, minWidth: 64, flexShrink: 0 },
+			detailVal: { minWidth: 0, wordBreak: "break-word", color: T.text2 },
+			detailLinks: { display: "flex", gap: 8, flexWrap: "wrap" },
+			linkChip: {
+				padding: "5px 12px", borderRadius: 999, fontSize: 12, textDecoration: "none",
+				border: `1px solid ${T.line}`, color: T.text2, background: T.cardBg,
+			},
+			detailActions: {
+				display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap",
+				padding: "14px 20px", borderTop: `1px solid ${T.line2}`, background: T.soft,
+			},
+			cmdBox: { display: "grid", gap: 4, padding: "12px 14px", borderRadius: 10, background: T.soft },
+			cmd: {
+				fontSize: 12, color: T.text2, userSelect: "all",
+				fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+				wordBreak: "break-all",
+			},
+			ghBox: { display: "grid", gap: 9, padding: "14px 16px", borderRadius: 10, border: `1px solid ${T.line}`, background: T.cardBg },
+			ghHead: { fontWeight: 600, fontSize: 11, color: T.text3, letterSpacing: 0.5 },
+			ghRepo: { fontWeight: 600, fontSize: 14, color: T.brand, textDecoration: "none" },
+			ghStats: { display: "flex", gap: 18, flexWrap: "wrap" },
+			ghStat: { display: "inline-flex", gap: 5, alignItems: "baseline", fontSize: 13 },
+			ghStatNum: { fontWeight: 700, fontSize: 15, color: T.text },
+			ghStatLab: { color: T.text3, fontSize: 12 },
+			message: { fontSize: 13, color: T.text2 },
+			error: { fontSize: 13, color: "#f53f3f" },
+			hint: { fontSize: 12, color: T.text3 },
+		};
+
+		/** Small toggle switch mirroring the Skills Manager group switches. */
+		function Switch({ on, disabled, onToggle, title }) {
+			return createElement("button", {
+				type: "button", title, role: "switch",
+				"aria-checked": on ? "true" : "false",
+				disabled,
+				onClick: (event) => { event.stopPropagation(); onToggle(); },
+				style: {
+					width: 38, height: 21, flexShrink: 0, cursor: disabled ? "default" : "pointer",
+					borderRadius: 999, border: "none", padding: 2, position: "relative",
+					background: on ? "#22a55b" : "rgba(128,128,128,0.45)", transition: "background 120ms ease",
+				},
+			}, createElement("span", {
+				style: {
+					display: "block", width: 17, height: 17, borderRadius: "50%", background: "#fff",
+					transform: on ? "translateX(17px)" : "translateX(0)", transition: "transform 120ms ease",
+				},
+			}));
+		}
+
+		function ServerRow({ server, busy, onToggle, onRemove, onUpdate }) {
+			const enabled = server.enabled !== false;
+			const provided = server.providedExternally === true;
+			const state = provided ? "external" : enabled ? (server.connected ? "on" : "idle") : "off";
+			const status = server.error ? `连接失败：${server.error}`
+				: provided ? "已由其他插件提供（跳过重复挂载）"
+					: enabled ? (server.connected ? "已连接" : "未连接") : "已停用";
+			const prefix = server.serverName ? `工具前缀 mcp__${server.serverName}__` : "";
+			const pkg = server.package ? `${server.package.name}@${server.package.version ?? "latest"}` : "";
+			const update = server.update;
+			const newVersion = update?.updateAvailable ? update.latest : null;
+			return createElement("div", { style: styles.row }, [
+				createElement("span", { key: "dot", style: styles.dot(state) }),
+				createElement("span", { key: "name", style: styles.name }, server.name),
+				createElement("span", { key: "meta", style: styles.meta },
+					[server.transport, status, prefix, pkg].filter(Boolean).join(" · ")),
+				newVersion
+					? createElement("span", { key: "newv", style: styles.updateBadge }, `可更新 → ${newVersion}`)
+					: null,
+				createElement("span", { key: "actions", style: { display: "flex", gap: 6, alignItems: "center", ...styles.spacer } }, [
+					newVersion
+						? createElement("button", {
+								key: "update", type: "button",
+								style: { ...styles.button, ...styles.primary }, disabled: busy,
+								onClick: () => onUpdate(server.name),
+							}, "更新")
+						: null,
+					createElement("button", {
+						key: "toggle", type: "button", style: styles.button, disabled: busy,
+						onClick: () => onToggle(server.name, !enabled),
+					}, enabled ? "停用" : "启用"),
+					createElement("button", {
+						key: "remove", type: "button", style: styles.button, disabled: busy,
+						onClick: () => onRemove(server.name),
+					}, "移除"),
+				]),
+			]);
+		}
+
+		function SourceGroup({ source, servers, busy, collapsed, onToggleCollapsed, onToggleSource, onToggleServer, onRemove, onUpdate }) {
+			const enabledCount = servers.filter((s) => s.enabled !== false).length;
+			const allOn = enabledCount === servers.length && servers.length > 0;
+			return createElement("div", { style: styles.group }, [
+				createElement("div", {
+					key: "head", style: { ...styles.groupHead, cursor: "pointer" },
+					onClick: onToggleCollapsed,
+				}, [
+					createElement("span", { key: "chev", style: styles.meta }, collapsed ? "▸" : "▾"),
+					createElement("span", { key: "title", style: styles.groupTitle }, sourceLabel(source)),
+					createElement("span", { key: "count", style: styles.badge },
+						`${servers.length} 个 · ${enabledCount} 已启用`),
+					createElement("span", { key: "switch", style: { ...styles.spacer, display: "flex", alignItems: "center", gap: 8 } }, [
+						createElement("span", { key: "label", style: styles.meta }, allOn ? "全部停用" : "全部启用"),
+						createElement(Switch, {
+							key: "sw", on: allOn, disabled: busy,
+							title: allOn ? "停用该来源的全部服务器" : "启用该来源的全部服务器",
+							onToggle: () => onToggleSource(source, !allOn),
+						}),
+					]),
+				]),
+				collapsed ? null : createElement("div", { key: "body", style: styles.groupBody },
+					servers.map((server) => createElement(ServerRow, {
+						key: server.name, server, busy,
+						onToggle: onToggleServer, onRemove, onUpdate,
+					}))),
+			]);
+		}
+
+		/** One marketplace entry, rendered as a dsh-market-style card. */
+		/**
+		 * Injects hover/transition rules once. Inline styles cannot express
+		 * :hover or keyframes, and a market with no hover feedback reads dead;
+		 * these classes only decorate — every layout fact stays inline, so the
+		 * component still renders correctly if the sheet never loads.
+		 */
+		function ensureStyles() {
+			if (typeof document === "undefined" || document.getElementById("omkt-styles")) return;
+			const el = document.createElement("style");
+			el.id = "omkt-styles";
+			el.textContent = [
+				// Cards lift on hover; the border takes the accent so the lift
+				// reads as "this is the thing under your cursor" and not as a
+				// shadow the layout did not ask for.
+				".omkt-card{transition:border-color .15s ease,box-shadow .15s ease}",
+				".omkt-card:hover{border-color:rgba(77,107,254,.55);box-shadow:0 6px 18px rgba(0,0,0,.10)}",
+				".omkt-card:focus-visible{outline:2px solid #4d6bfe;outline-offset:2px}",
+				".omkt-title{color:inherit;text-decoration:none}",
+				".omkt-title:hover{color:#4d6bfe}",
+				".omkt-btn,.omkt-chip,.omkt-link{transition:border-color .12s ease,background .12s ease,color .12s ease}",
+				".omkt-btn:hover{border-color:rgba(128,128,128,.75)}",
+				".omkt-btn-primary{background:#4d6bfe;border-color:#4d6bfe;color:#fff;font-weight:600}",
+				".omkt-btn-primary:hover{background:#3b5be0;border-color:#3b5be0}",
+				".omkt-btn:disabled{opacity:.55;cursor:default}",
+				".omkt-icon:hover{background:rgba(128,128,128,.14)}",
+				// The GitHub mark beside a card title: inked on hover only, so a
+				// list of cards stays quiet but the repo is always one click away.
+				".omkt-gh{transition:color .12s ease}",
+				".omkt-gh:hover{color:#4d6bfe}",
+				".omkt-icon-on{color:#f53f3f}",
+				".omkt-icon-on:hover{background:rgba(245,63,63,.12);color:#f53f3f}",
+				".omkt-link:hover{border-color:#4d6bfe;color:#4d6bfe}",
+				".omkt-panel{animation:omkt-in .16s ease}",
+				// The preview strip hides its scrollbar (the nav buttons do the
+				// scrolling) and fades each image in as it decodes, so a strip of
+				// README screenshots never pops in as a wall of pixels.
+				".omkt-media::-webkit-scrollbar{display:none}",
+				".omkt-media-slide img{animation:omkt-fade .2s ease}",
+				".omkt-media-nav:hover{background:rgba(128,128,128,.16)}",
+				"@keyframes omkt-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}",
+				"@keyframes omkt-fade{from{opacity:0}to{opacity:1}}",
+			].join("\n");
+			document.head.appendChild(el);
+		}
+
+		/** One big number + small label, for the GitHub stat row. */
+		function ghStat(label, value) {
+			return createElement("span", { style: styles.ghStat }, [
+				createElement("b", { key: "n", style: styles.ghStatNum }, compact(value)),
+				createElement("span", { key: "l", style: styles.ghStatLab }, label),
+			]);
+		}
+
+			/**
+			 * The card's preview strip: the repository's own pictures.
+			 *
+			 * v4 puts a carousel under the description, and the plugin market
+			 * fills that slot with screenshots. No MCP catalogue publishes one,
+			 * so the strip shows what the repo itself offers — README
+			 * screenshots first, GitHub's generated social card when the README
+			 * has none. Horizontal scroll at each image's own aspect ratio,
+			 * never auto-advancing: a screenshot is something you choose to
+			 * look at, not something that changes while you read.
+			 *
+			 * A repo with neither renders nothing at all. No placeholder, no
+			 * invented graphic — an empty slot is honest and a fake one is not.
+			 */
+			function MediaStrip({ media, height = 116 }) {
+				const strip = useRef(null);
+				const slides = media?.images?.length
+					? media.images
+					: media?.og
+						? [{ url: media.og, alt: "GitHub 仓库预览图" }]
+						: [];
+				if (!slides.length) return null;
+				const scrollBy = (dir) => {
+					const node = strip.current;
+					if (node) node.scrollBy({ left: dir * node.clientWidth * 0.8, behavior: "smooth" });
+				};
+				return createElement("div", { key: "media", style: styles.mediaRow }, [
+					slides.length > 1
+						? createElement("button", {
+							key: "prev", type: "button", className: "omkt-media-nav", style: { ...styles.mediaNav, left: 4 },
+							title: "上一张", "aria-label": "上一张",
+							onClick: (e) => { e.stopPropagation(); scrollBy(-1); },
+						}, "‹")
+						: null,
+					createElement("div", {
+						key: "strip", ref: strip, className: "omkt-media", style: { ...styles.mediaStrip, height },
+						onClick: (e) => e.stopPropagation(),
+					}, slides.map((slide, i) => createElement(MediaSlide, {
+						key: slide.url, slide, height, index: i,
+					}))),
+					slides.length > 1
+						? createElement("button", {
+							key: "next", type: "button", className: "omkt-media-nav", style: { ...styles.mediaNav, right: 4 },
+							title: "下一张", "aria-label": "下一张",
+							onClick: (e) => { e.stopPropagation(); scrollBy(1); },
+						}, "›")
+						: null,
+				].filter(Boolean));
+			}
+
+			/**
+			 * One picture in the strip.
+			 *
+			 * The image is fetched through a resize proxy first (the same one
+			 * the plugin market uses) because README images are routinely
+			 * several megabytes, and falls back to the original URL when the
+			 * proxy is unreachable. A slide that fails on both is removed from
+			 * the strip rather than left as a broken frame.
+			 */
+			function MediaSlide({ slide, height, index }) {
+				const [src, setSrc] = useState(() => thumbUrl(slide.url, Math.round(height * 2)));
+				const [failed, setFailed] = useState(false);
+				const [box, setBox] = useState(null);
+				if (failed) return null;
+				return createElement("span", {
+					className: "omkt-media-slide", title: slide.alt || undefined,
+					style: {
+						...styles.mediaSlide,
+						height,
+						width: box ? Math.round(height * box) : Math.round(height * 1.6),
+					},
+				}, createElement("img", {
+					src, alt: slide.alt || "仓库预览图", loading: index < 3 ? "eager" : "lazy", decoding: "async",
+					style: styles.mediaImg,
+					onLoad: (e) => {
+						const img = e.currentTarget;
+						if (img.naturalWidth && img.naturalHeight) setBox(img.naturalWidth / img.naturalHeight);
+					},
+					onError: () => {
+						// The proxy failed once; the original URL may still answer.
+						if (src !== slide.url) setSrc(slide.url);
+						else setFailed(true);
+					},
+				}));
+			}
+
+			/** The plugin market's resize proxy: same host, same parameters. */
+			function thumbUrl(url, h = 260) {
+				return `https://images.weserv.nl/?url=${encodeURIComponent(String(url).replace(/^https?:\/\//, ''))}&h=${h}&fit=inside&we=1`;
+			}
+
+		/**
+		 * One marketplace entry, rendered as a dsh-market-style card (v4).
+		 *
+		 * The whole card is the detail entry point, and the NAME is the front
+		 * door: a real anchor that navigates to the repository / upstream site /
+		 * registry listing, in that order. The body is a `div role=button`
+		 * rather than a `<button>` because HTML forbids interactive content
+		 * inside a button — that nesting is what once made the card's links
+		 * race its click handler and "not go anywhere".
+		 */
+		function MarketCard({ item, stats, media, busy, onInstall, onOpen, onToggleFavorite }) {
+			const repo = repoKeyOf(item);
+			const enriched = repo ? (stats ?? {})[repo] : null;
+			const repoMedia = repo ? (media ?? {})[repo] : null;
+			const stars = starCountOf(item, stats);
+			const author = enriched?.author ?? item.author;
+			const description = item.description || enriched?.description || "（无描述）";
+			const tags = [...(item.tags ?? []), ...((enriched?.topics ?? []).slice(0, 3))]
+				.filter((t, i, arr) => t && arr.indexOf(t) === i)
+				.slice(0, 4);
+			// Smithery's repository field is its own listing when the upstream
+			// project is unknown, so that listing is the honest front door too.
+			const registryPage = item.source === "smithery" && item.qualifiedName
+				? `https://smithery.ai/servers/${item.qualifiedName}`
+				: null;
+			const homepage = enriched?.homepage || item.homepage || null;
+			const titleHref = item.repository
+				|| (homepage && homepage !== item.repository ? homepage : null)
+				|| registryPage
+				|| null;
+			// Transport is a fact like any other: the card states how this
+			// server reaches the machine, because "local process" and "remote
+			// endpoint" are different trust decisions.
+			const transport = item.transport && item.transport !== "unknown"
+				? item.transport === "stdio" ? "本地进程（stdio）" : "远程端点（streamable-http）"
+				: null;
+			const updatedAt = enriched?.pushedAt ?? item.updatedAt ?? null;
+
+			const installCmd = item.install
+				? item.install.transport === "stdio"
+					? [item.install.command, ...(item.install.args ?? [])].join(" ")
+					: item.install.url
+				: null;
+
+			return createElement("article", {
+				className: "omkt-card", style: styles.card,
+				title: `${item.title}${author ? ` · @${author}` : ""}`,
+			}, [
+				// The clickable surface. It is a `div role=button` rather than a
+				// `<button>`: HTML forbids interactive content inside a button,
+				// and that nesting is what once made the card's own links race
+				// its click handler and "not go anywhere". Everything a click
+				// can act on lives outside this div — the CTA column and the
+				// footer below.
+				createElement("div", {
+					key: "body", style: styles.cardBody, role: "button", tabIndex: 0,
+					onClick: () => onOpen(item),
+					onKeyDown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(item); } },
+				}, [
+					// 1. header: identity on the left, the two things you came
+					//    for on the right.
+					createElement("div", { key: "hd", style: styles.cardHd }, [
+						createElement("div", { key: "left", style: styles.cardLeft }, [
+							// name row: the title is the anchor; the source tag
+							// names where the entry came from, because five
+							// catalogs feed one list.
+							createElement("div", { key: "head", style: styles.cardHead }, [
+								titleHref
+						? createElement("a", {
+							key: "t", className: "omkt-title", href: titleHref,
+							target: "_blank", rel: "noreferrer", title: titleHref,
+							style: styles.cardName,
+							onClick: (e) => e.stopPropagation(),
+						}, item.title)
+						: createElement("span", { key: "t", style: styles.cardName, title: item.title }, item.title),
+					// The repository, one click from the card itself. Only for
+					// entries whose repository really is a GitHub repo: for
+					// Smithery that field points at its own listing, which is
+					// not what a GitHub mark promises.
+					repo && item.repository
+						? createElement("a", {
+							key: "gh", className: "omkt-gh", href: item.repository,
+							target: "_blank", rel: "noreferrer", title: `GitHub 仓库：${repo}`,
+							"aria-label": `GitHub 仓库：${repo}`, style: styles.ghIcon,
+							onClick: (e) => e.stopPropagation(),
+						}, githubMark(14))
+						: null,
+					createElement("span", { key: "src", style: styles.sourceTag },
+						SOURCE_LABELS[`catalog:${item.source}`] ?? item.source),
+					item.verified ? createElement("span", { key: "v", style: styles.verified, title: "上游已认证" }, "✓ 认证") : null,
+					item.official ? createElement("span", { key: "o", style: styles.badge }, "官方") : null,
+					item.installed ? createElement("span", { key: "inst", style: styles.installed }, "已安装") : null,
+					// A lifecycle flag the upstream actually published. Only
+					// `deprecated` is stated; an absent status is NOT shown as
+					// active, because for two of the five sources nobody scanned.
+					item.deprecated
+						? createElement("span", { key: "dep", style: styles.deprecated, title: item.statusMessage || "上游已标记为废弃" }, "已废弃")
+						: null,
+				].filter(Boolean)),
+
+				// 2. author row — and, when the source published one, the
+				//    version. It rides here rather than in the stat row because
+				//    "whose is this and which build" is one thought.
+				createElement("div", { key: "author", style: styles.cardAuthor }, [
+					createElement(Avatar, { key: "av", item, author, size: 20, src: item.icon ?? enriched?.avatar }),
+					createElement("span", { key: "n", title: author ? `@${author}` : undefined },
+						author ? `@${author}` : "作者未标注"),
+					item.version
+						? [
+							createElement("span", { key: "d", style: styles.cardDot }, "·"),
+							createElement("span", { key: "v", style: styles.cardVer, title: `版本 ${item.version}` },
+								`v${item.version}`),
+						]
+						: null,
+				].filter(Boolean)),
+
+				// 3. stat row — every number is a link when it has one, so a
+				//    figure is never a dead end. Separators are part of the list
+				//    rather than CSS margins, so the row can wrap without the
+				//    dots ending up stranded at a line start.
+				(() => {
+					const cells = [
+						typeof stars === "number"
+							? createElement("a", {
+								key: "st", className: "omkt-link", style: styles.stat, href: item.repository || "#",
+								target: "_blank", rel: "noreferrer", title: "GitHub Star",
+								onClick: (e) => e.stopPropagation(),
+							}, [
+								createElement("span", { key: "g" }, "★"),
+								createElement("b", { key: "n", style: styles.statB }, compact(stars)),
+							])
+							: null,
+						typeof item.installs === "number"
+							? createElement("span", { key: "in", style: styles.stat, title: item.installsLabel || "使用量" }, [
+								createElement("span", { key: "g" }, "↓"),
+								createElement("b", { key: "n", style: styles.statB }, compact(item.installs)),
+							])
+							: null,
+						typeof enriched?.forks === "number"
+							? createElement("span", { key: "fk", style: styles.stat, title: "GitHub Fork" }, [
+								createElement("span", { key: "g" }, "⑂"),
+								createElement("b", { key: "n", style: styles.statB }, compact(enriched.forks)),
+							])
+							: null,
+						enriched?.license
+							? createElement("span", { key: "lic", style: styles.stat, title: "开源许可证" }, enriched.license)
+							: null,
+						updatedAt
+							? createElement("span", { key: "up", style: styles.stat, title: "最近更新" },
+								`更新于 ${String(updatedAt).slice(0, 10)}`)
+							: null,
+						transport
+							? createElement("span", { key: "tr", style: styles.stat, title: "安装方式" }, transport)
+							: null,
+					].filter(Boolean);
+					if (!cells.length) return null;
+					return createElement("div", { key: "stats", style: styles.statRow },
+						cells.flatMap((cell, i) => (i === 0 ? [cell] : [
+							createElement("span", { key: `s${i}`, style: styles.statSep }, "·"),
+							cell,
+						])));
+				})(),
+					]), // left column (name / author / stats)
+					// Right column: the primary action plus a shortcut into the
+					// detail panel. Buttons, not links — nothing navigates here.
+					createElement("div", { key: "cta", style: styles.cardCta }, [
+						item.installed
+							? createElement("span", { key: "i", style: styles.installed }, "已安装")
+							: item.installable
+								? createElement("button", {
+									key: "install", type: "button", className: "omkt-btn omkt-btn-primary",
+									style: { ...styles.button, ...styles.primary, padding: "5px 14px", fontSize: 12 },
+									disabled: busy,
+									onClick: (e) => { e.stopPropagation(); onInstall(item); },
+								}, busy ? "处理中…" : item.deprecated ? "仍要安装" : "安装")
+								: createElement("span", { key: "m", style: styles.hint }, "需手动配置"),
+						createElement("button", {
+							key: "detail", type: "button", className: "omkt-btn",
+							style: { ...styles.button, padding: "5px 12px", fontSize: 12 },
+							onClick: (e) => { e.stopPropagation(); onOpen(item); },
+						}, "详情"),
+					]),
+				]), // header
+
+				// 4. description, clamped to two lines so every card in a column
+				//    keeps the same silhouette.
+				createElement("div", { key: "desc", style: styles.desc }, description.slice(0, 160)),
+
+				// The upstream's own words, when it deprecated this entry.
+				item.deprecated && item.statusMessage
+					? createElement("div", { key: "why", style: styles.warnLine }, `上游说明：${item.statusMessage}`)
+					: null,
+
+				// 5. the repository's own pictures, in the carousel slot v4
+				//    reserves for a preview — README screenshots first, GitHub's
+				//    social card when there are none.
+				createElement(MediaStrip, { key: "media", media: repoMedia }),
+
+				// 6. the exact command the plugin would run — shown on the card
+				//    because "what will this do to my machine" is the first
+				//    question an install button raises.
+				installCmd
+					? createElement("div", { key: "code", style: styles.code, title: installCmd }, [
+						createElement("span", { key: "c", style: styles.caret }, "›_"),
+						createElement("span", { key: "t", style: styles.codeText }, installCmd),
+					])
+					: null,
+				]), // body (clickable surface)
+
+				// 7. footer: tags on the left, the actions a card can decide by
+				//    itself on the right. It sits OUTSIDE the role=button body
+				//    so starring or ⋯ never also opens the detail panel.
+				createElement("div", { key: "ft", style: styles.cardFt }, [
+					tags.length
+						? createElement("div", { key: "tags", style: { ...styles.tags, minWidth: 0 } },
+							tags.map((t) => createElement("span", { key: t, style: styles.tag }, t)))
+						: createElement("span", { key: "notags", style: styles.hint },
+							item.installable ? "可一键安装" : "需手动配置"),
+					createElement("span", { key: "acts", style: { display: "flex", gap: 4, flexShrink: 0 } }, [
+						createElement("button", {
+							key: "fav", type: "button",
+							className: `omkt-icon${item.favorite ? " omkt-icon-on" : ""}`,
+							style: styles.iconBtn,
+							title: item.favorite ? "取消收藏" : "收藏",
+							"aria-pressed": item.favorite ? "true" : "false",
+							onClick: (e) => { e.stopPropagation(); onToggleFavorite(item); },
+						}, item.favorite ? "♥" : "♡"),
+						createElement("button", {
+							key: "more", type: "button", className: "omkt-icon",
+							style: styles.iconBtn, title: "查看详情",
+							onClick: (e) => { e.stopPropagation(); onOpen(item); },
+						}, "⋯"),
+					]),
+				]),
+			]);
+		}
+
+
+		/** `owner/repo` for a GitHub-backed card, else null (enrichment key). */
+		function repoKeyOf(item) {
+			const m = String(item?.repository ?? "").match(/^https?:\/\/(?:www\.)?github\.com\/([^/\s]+)\/([^/\s#?]+)/i);
+			return m ? `${m[1]}/${m[2].replace(/\.git$/i, "")}` : null;
+		}
+
+		/**
+		 * Quality score for one entry, shown as the "默认（综合推荐）" order.
+		 *
+		 * Provenance first (官方认证 > 已认证 > 官方实现 > 其余), then popularity.
+		 * Popularity is deliberately last and log-scaled: the numbers come from
+		 * three different sources with three different units, so they can break a
+		 * tie but must never outrank a verified entry.
+		 *
+		 * @param stats the GitHub enrichment map — no catalog publishes stars, so
+		 *   `item.stars` alone would make this term dead code.
+		 */
+		function qualityOf(item, stats) {
+			let score = 0;
+			if (item.verified) score += 400;
+			if (item.official) score += 300;
+			if (item.install) score += 120;
+			if (typeof item.installs === "number") score += Math.min(200, Math.log10(item.installs + 1) * 40);
+			const stars = starCountOf(item, stats);
+			if (typeof stars === "number") score += Math.min(200, Math.log10(stars + 1) * 40);
+			if (item.deprecated) score -= 500;
+			return score;
+		}
+
+		/** Star count from the GitHub enrichment, falling back to the catalog's own. */
+		function starCountOf(item, stats) {
+			const repo = repoKeyOf(item);
+			const enriched = repo ? stats?.[repo] : null;
+			return enriched?.stars ?? item.stars;
+		}
+
+		/**
+		 * Compare two market entries under a user-chosen sort.
+		 *
+		 * `default` is quality (above). The others each key on ONE field so the
+		 * order is explainable, and every field falls back to quality rather than
+		 * to 0 — an entry the source published no number for is not thereby the
+		 * least popular one.
+		 *
+		 * For a descending sort an entry that HAS the number still outranks one
+		 * that does not, so a missing value sorts last rather than tying with
+		 * every real value and being resolved by quality alone.
+		 */
+		function compareMarket(a, b, sort, stats) {
+			const qa = qualityOf(a, stats);
+			const qb = qualityOf(b, stats);
+			const desc = (x, y) => {
+				const hasX = typeof x === "number";
+				const hasY = typeof y === "number";
+				if (hasX && hasY) return x !== y ? y - x : 0;
+				if (hasX) return -1;   // a real number beats a missing one
+				if (hasY) return 1;
+				return 0;
+			};
+			switch (sort) {
+				case "installs":
+					return desc(a.installs, b.installs) || qb - qa;
+				case "stars":
+					return desc(starCountOf(a, stats), starCountOf(b, stats)) || qb - qa;
+				case "updated": {
+					const ta = Date.parse(a.updatedAt ?? "") || 0;
+					const tb = Date.parse(b.updatedAt ?? "") || 0;
+					return (tb - ta) || qb - qa;
+				}
+				case "name":
+					return a.title.localeCompare(b.title) || qb - qa;
+				default:
+					return qb - qa;
+			}
+		}
+
+		/**
+		 * 5364 -> 5.3k, for the headline market total.
+		 *
+		 * Truncated rather than rounded: a rounded total can display a number
+		 * larger than the real count (5364 -> "5.4k"), which reads as an
+		 * overstatement when the user then pages through and finds 5.3k.
+		 */
+		function compactCount(n) {
+			const v = Number(n);
+			if (!Number.isFinite(v) || v < 1000) return String(v ?? 0);
+			if (v >= 1e6) return `${Math.floor(v / 1e5) / 10}M`;
+			return `${Math.floor(v / 100) / 10}k`;
+		}
+
+		/** 12345 -> 12.3k, for the compact star/usage counters (truncated). */
+		function compact(n) {
+			const v = Number(n) || 0;
+			if (v >= 1e6) return `${Math.floor(v / 1e5) / 10}M`;
+			if (v >= 1e3) return `${Math.floor(v / 100) / 10}k`;
+			return String(v);
+		}
+
+		/**
+		 * Icon with a coloured initial fallback when there is no avatar URL.
+		 *
+		 * The fallback hue is derived from the title, so the same entry keeps
+		 * the same colour across renders and across page opens — a random hue
+		 * per render would make the mosaic shimmer for no reason.
+		 */
+		function Avatar({ item, author, src, size = 36 }) {
+			const [failed, setFailed] = useState(false);
+			const label = String(item.title || author || "?").replace(/[^A-Za-z0-9\u4e00-\u9fa5]/g, "").slice(0, 1).toUpperCase() || "?";
+			const box = {
+				width: size, height: size, borderRadius: Math.max(6, Math.round(size / 4)),
+				flexShrink: 0, objectFit: "cover", background: "rgba(128,128,128,0.15)",
+			};
+			if (src && !failed) {
+				return createElement("img", {
+					src, alt: "", width: size, height: size, loading: "lazy",
+					onError: () => setFailed(true), style: box,
+				});
+			}
+			let hash = 0;
+			for (const ch of String(item.title ?? "")) hash = (hash * 31 + ch.codePointAt(0)) % 360;
+			return createElement("div", {
+				style: {
+					...box, display: "grid", placeItems: "center",
+					fontWeight: 700, fontSize: Math.round(size * 0.42), color: "#fff",
+					background: `hsl(${hash} 52% 46%)`,
+				},
+			}, label);
+		}
+
+		/**
+		 * The page's brand mark: a constellation hub — one accent centre with
+		 * five satellites, i.e. "many servers, one registry".
+		 *
+		 * The satellites and spokes are `currentColor` (the prototype hard-codes
+		 * near-black, which vanishes in the dark theme); only the hub keeps the
+		 * brand blue, so the accent stays a single point.
+		 */
+		function brandMark(size = 22) {
+			const dot = (cx, cy, r) => createElement("circle", { key: `c${cx}-${cy}`, cx, cy, r, fill: "currentColor" });
+			return createElement("svg", {
+				width: size, height: size, viewBox: "0 0 32 32",
+				role: "img", "aria-label": "Overall MCP", focusable: "false",
+				style: { flexShrink: 0 },
+			}, [
+				createElement("g", {
+					key: "spokes", fill: "none", stroke: "currentColor",
+					strokeWidth: 1.6, strokeLinecap: "round",
+				}, createElement("path", {
+					d: "M16 16 L8 8 M16 16 L24 8 M16 16 L7 20 M16 16 L25 20 M16 16 L16 26",
+				})),
+				createElement("circle", { key: "hub", cx: 16, cy: 16, r: 3.2, fill: T.brand }),
+				dot(8, 8, 2.2),
+				dot(24, 8, 2.2),
+				dot(7, 20, 2),
+				dot(25, 20, 2),
+				dot(16, 26, 2),
+			]);
+		}
+
+		/**
+		 * The GitHub mark, inline.
+		 *
+		 * Drawn rather than linked as an icon font or an <img> so it inherits
+		 * `currentColor` and therefore the surrounding text colour — one glyph
+		 * that works in both the light and the dark theme without a second asset.
+		 * The path is GitHub's own octocat mark (the same one the plugin market
+		 * uses for its repository badge).
+		 */
+		function githubMark(size = 14) {
+			return createElement("svg", {
+				width: size, height: size, viewBox: "0 0 16 16",
+				fill: "currentColor", "aria-hidden": "true", focusable: "false",
+			}, createElement("path", {
+				d: "M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z",
+			}));
+		}
+
+		/**
+		 * A labelled row in the detail panel.
+		 *
+		 * Positional arguments, deliberately: this is called as a plain function
+		 * (`DetailRow("来源", value)`), so a `{ children }` destructure would read
+		 * the second argument as undefined and render the label with no value —
+		 * the exact bug this panel shipped with once.
+		 */
+		function DetailRow(label, value) {
+			return createElement("div", { style: styles.detailRow }, [
+				createElement("span", { key: "k", style: styles.detailKey }, label),
+				createElement("span", { key: "v", style: styles.detailVal }, value ?? "—"),
+			]);
+		}
+
+		/** A clickable external link chip. */
+		function LinkChip({ href, label, title }) {
+			if (!href) return null;
+			return createElement("a", {
+				href, target: "_blank", rel: "noreferrer", title: title || href,
+				className: "omkt-link", style: styles.linkChip,
+			}, label);
+		}
+
+		/**
+		 * Full detail panel for one market entry, modelled on dshmarket's install
+		 * dialog (which is the detail surface its cards open).
+		 *
+		 * Every link the catalog knows about is offered — the upstream's own site,
+		 * the repository, and the install command — because a market entry is only
+		 * half the story: the user needs the source of truth before deciding.
+		 */
+		function MarketDetail({ item, stats, media, busy, onClose, onInstall, onToggleFavorite }) {
+			const repo = repoKeyOf(item);
+			const enriched = repo ? (stats ?? {})[repo] : null;
+			const repoMedia = repo ? (media ?? {})[repo] : null;
+			const stars = starCountOf(item, stats);
+			const author = enriched?.author ?? item.author;
+			const description = item.description || enriched?.description || "（无描述）";
+			const tags = [...(item.tags ?? []), ...((enriched?.topics ?? []).slice(0, 3))]
+				.filter((t, i, arr) => t && arr.indexOf(t) === i);
+			// Prefer the upstream's own site over the repository for "官网"; a
+			// GitHub repository is the source of truth for the local-server lists,
+			// and the two Awesome lists only ever have that.
+			const homepage = item.homepage && item.homepage !== item.repository ? item.homepage : null;
+			const installCmd = item.install
+				? item.install.transport === "stdio"
+					? [item.install.command, ...(item.install.args ?? [])].join(" ")
+					: item.install.url
+				: null;
+			// Smithery's `repository`/`homepage` point at its own listing rather
+			// than the upstream project, so neither is a useful "官网" — but its
+			// listing IS the only upstream page there is, and a card that reaches
+			// nothing is worse than one that reaches the registry that hosts it.
+			// Verified: smithery.ai/server/<name> 308-redirects to /servers/<name>.
+			const registryPage = item.source === "smithery" && item.qualifiedName
+				? `https://smithery.ai/servers/${item.qualifiedName}`
+				: null;
+			// GitHub access on this network class is intermittent (measured: TCP
+			// connect timeout for hours, then 200 again). gh-proxy.com serves
+			// repo pages today — dshmarket measured it as 403 in 2026-09 and its
+			// own note says re-measure rather than infer, which is why both the
+			// direct link and this mirror are offered side by side.
+			const ghMirror = repo && item.repository
+				? `https://gh-proxy.com/${item.repository}`
+				: null;
+			const titleHref = item.repository || homepage || registryPage || null;
+
+			return createElement("div", {
+				style: styles.overlay,
+				onClick: (e) => { if (e.target === e.currentTarget) onClose(); },
+			}, [
+				createElement("div", { key: "panel", className: "omkt-panel", style: styles.detailPanel }, [
+					// ---- header: identity + provenance ----
+					createElement("div", { key: "head", style: styles.detailHead }, [
+						createElement("div", { key: "id", style: styles.detailIdentity }, [
+							createElement(Avatar, { key: "av", item, author, size: 56, src: item.icon ?? enriched?.avatar }),
+							createElement("div", { key: "t", style: { minWidth: 0 } }, [
+								titleHref
+									? createElement("a", {
+										key: "n", className: "omkt-title", href: titleHref,
+										target: "_blank", rel: "noreferrer", title: titleHref,
+										style: styles.detailTitle,
+									}, item.title)
+									: createElement("div", { key: "n", style: styles.detailTitle }, item.title),
+								createElement("div", { key: "m", style: styles.detailSub }, [
+									SOURCE_LABELS[`catalog:${item.source}`] ?? item.source,
+									author ? `@${author}` : null,
+									item.version ? `v${item.version}` : null,
+									typeof stars === "number" ? `★ ${compact(stars)}` : null,
+								].filter(Boolean).join(" · ")),
+							]),
+							createElement("div", { key: "b", style: styles.detailBadges }, [
+								item.verified ? createElement("span", { key: "v", style: styles.verified }, "✓ 认证") : null,
+								item.official ? createElement("span", { key: "o", style: styles.badge }, "官方") : null,
+								item.installed ? createElement("span", { key: "i", style: styles.installed }, "已安装") : null,
+								item.deprecated ? createElement("span", { key: "d", style: styles.deprecated }, "已废弃") : null,
+							].filter(Boolean)),
+						]),
+						createElement("p", { key: "desc", style: styles.detailDesc }, description),
+						tags.length
+							? createElement("div", { key: "tags", style: styles.tags },
+								tags.map((t) => createElement("span", { key: t, style: styles.tag }, t)))
+							: null,
+						item.deprecated && item.statusMessage
+							? createElement("div", { key: "why", style: styles.warnLine }, `上游说明：${item.statusMessage}`)
+							: null,
+					]),
+
+					// ---- body: facts ----
+					createElement("div", { key: "body", style: styles.detailBody }, [
+					// The repository's own pictures, bigger than on the card.
+					// Shown first because it is the only part of this panel a
+					// screenshot can answer, and absent when the repo has none.
+					createElement(MediaStrip, { key: "media", media: repoMedia, height: 200 }),
+					// facts, each labelled so nothing is ambiguous
+					createElement("div", { key: "facts", style: styles.detailFacts }, [
+						DetailRow("来源", SOURCE_LABELS[`catalog:${item.source}`] ?? item.source),
+						DetailRow("作者", author ? `@${author}` : "—"),
+						DetailRow("版本", item.version ?? "—"),
+						DetailRow("传输", item.transport && item.transport !== "unknown" ? item.transport : "—"),
+						DetailRow("Star", typeof enriched?.stars === "number" ? String(enriched.stars)
+							: typeof item.stars === "number" ? String(item.stars) : "目录未提供"),
+						DetailRow("使用量",
+							typeof item.installs === "number"
+								? `${item.installs} ${item.installsLabel ?? "次使用"}${item.installsWindow ? `（${item.installsWindow}）` : ""}`
+								: "该来源不发布"),
+						DetailRow("更新时间", (enriched?.pushedAt ?? item.updatedAt)?.slice(0, 10) || "该来源不提供"),
+						DetailRow("安装方式",
+							item.installable
+								? item.install.transport === "stdio" ? "本地进程（stdio）" : "远程端点（streamable-http）"
+								: "需手动配置"),
+						item.install?.transport === "streamable-http"
+							? DetailRow("端点", item.install.url)
+							: null,
+					].filter(Boolean)),
+
+					// The GitHub block: what the API enrichment knows about the
+					// repository, as plain labelled facts. Absent numbers stay absent —
+					// no catalog publishes GitHub data, and a missing number must not
+					// read as zero any more than it may sort as one.
+					repo ? createElement("div", { key: "gh", style: styles.ghBox }, [
+						createElement("div", { key: "h", style: styles.ghHead }, "GITHUB 仓库"),
+						createElement("a", {
+							key: "r", className: "omkt-title", href: item.repository,
+							target: "_blank", rel: "noreferrer", style: styles.ghRepo,
+						}, repo),
+						enriched
+							? [
+								createElement("div", { key: "s", style: styles.ghStats }, [
+									typeof enriched.stars === "number" ? ghStat("Star", enriched.stars) : null,
+									typeof enriched.forks === "number" ? ghStat("Fork", enriched.forks) : null,
+									typeof enriched.openIssues === "number" ? ghStat("Issue", enriched.openIssues) : null,
+									typeof enriched.watchers === "number" ? ghStat("Watch", enriched.watchers) : null,
+								].filter(Boolean)),
+								...(enriched.archived
+									? [createElement("div", { key: "arc", style: styles.warnLine }, "该仓库已被作者归档（Archived）")]
+									: []),
+								...(enriched.language || enriched.license || enriched.pushedAt || enriched.createdAt
+									? [
+										enriched.language ? DetailRow("语言", enriched.language) : null,
+										enriched.license ? DetailRow("许可证", enriched.license) : null,
+										enriched.pushedAt ? DetailRow("最近推送", enriched.pushedAt.slice(0, 10)) : null,
+										enriched.createdAt ? DetailRow("创建于", enriched.createdAt.slice(0, 10)) : null,
+									].filter(Boolean)
+									: []),
+							]
+							: createElement("div", { key: "n", style: styles.hint },
+								"GitHub 信息暂不可用（可能受限流或网络影响；其余信息不受影响）"),
+						]) : null,
+
+					// the exact command the plugin would run, so nothing is hidden
+					installCmd
+						? createElement("div", { key: "cmd", style: styles.cmdBox }, [
+							createElement("div", { key: "l", style: styles.detailKey }, "将执行的命令"),
+							createElement("code", { key: "c", style: styles.cmd }, installCmd),
+						])
+						: null,
+
+					// links — the point of this panel. Built from data, not from
+					// rendered elements, so the dedupe is on the URL itself: an
+					// entry whose website IS its endpoint shows one chip, not two.
+					(() => {
+						const candidates = [
+							[homepage, "官网"],
+							[item.repository, repo ? "GitHub 仓库" : "主页"],
+							// GitHub access on this network class is intermittent; the
+							// mirror chip is the fallback that works while it is down.
+							[ghMirror, "GitHub 镜像"],
+							// A hosted endpoint IS its address: showing it lets the
+							// user point any other MCP client at the same server.
+							[item.install?.transport === "streamable-http" ? item.install.url : null, "MCP 端点"],
+							[registryPage, "Smithery 页面"],
+						].filter(([href]) => typeof href === "string" && href.length > 0);
+						const seen = new Set();
+						const unique = candidates.filter(([href]) => {
+							if (seen.has(href)) return false;
+							seen.add(href);
+							return true;
+						});
+						return createElement("div", { key: "links", style: styles.detailLinks },
+							unique.map(([href, label]) => LinkChip({ href, label, title: href })));
+					})(),
+					]),
+					// actions
+					createElement("div", { key: "act", style: styles.detailActions }, [
+						item.installed
+							? createElement("span", { key: "i", style: styles.installed }, "已安装")
+							: item.installable
+								? createElement("button", {
+									key: "install", type: "button", className: "omkt-btn omkt-btn-primary",
+									style: { ...styles.button, ...styles.primary }, disabled: busy,
+									onClick: () => { onInstall(item); onClose(); },
+								}, busy ? "处理中…" : item.deprecated ? "仍要安装" : "安装")
+								: createElement("span", { key: "m", style: styles.hint },
+									item.repository ? "该来源未提供安装命令，请按仓库说明手动配置" : "无可安装信息"),
+						onToggleFavorite
+							? createElement("button", {
+								key: "fav", type: "button",
+								className: `omkt-btn${item.favorite ? " omkt-icon-on" : ""}`,
+								style: styles.button,
+								onClick: () => onToggleFavorite(item),
+							}, item.favorite ? "♥ 已收藏" : "♡ 收藏")
+							: null,
+						createElement("span", { key: "spacer", style: styles.spacer }),
+						createElement("button", { key: "cancel", type: "button", className: "omkt-btn", style: styles.button, onClick: onClose }, "关闭"),
+					]),
+				]),
+			]);
+		}
+
+		function Section({ close }) {
+			ensureStyles();
+			const [tab, setTab] = useState("registry");
+
+			// ---- registry tab state ----
+			const [servers, setServers] = useState(null);
+			const [busy, setBusy] = useState(false);
+			const [error, setError] = useState("");
+			const [message, setMessage] = useState("");
+			const [sourceFilter, setSourceFilter] = useState("");
+			const [stateFilter, setStateFilter] = useState("");
+			const [nameFilter, setNameFilter] = useState("");
+			const [collapsed, setCollapsed] = useState(() => new Set());
+
+			// ---- market tab state ----
+			const [market, setMarket] = useState(null);
+			const [marketBusy, setMarketBusy] = useState(false);
+			const [marketError, setMarketError] = useState("");
+			const [marketQuery, setMarketQuery] = useState("");
+			const [marketSource, setMarketSource] = useState("");
+			const [marketAt, setMarketAt] = useState("");
+			const [repoStats, setRepoStats] = useState({});
+			const [repoMedia, setRepoMedia] = useState({});
+			const [starNote, setStarNote] = useState("");
+			const [marketSort, setMarketSort] = useState("default");
+			const [marketGroup, setMarketGroup] = useState("");
+			const [marketPage, setMarketPage] = useState(0);
+			const [pageSize, setPageSize] = useState(20);
+			const [detail, setDetail] = useState(null);
+			const pageRef = useRef(null);
+			const scrollerRef = useRef(null);
+			const [showTop, setShowTop] = useState(false);
+
+			async function refresh() {
+				const body = await api("/servers");
+				setServers(body.servers);
+				return body.servers;
+			}
+
+			useEffect(() => {
+				refresh().catch((err) => setError(String(err.message || err)));
+			}, []);
+
+			async function loadMarket(options = {}) {
+				setMarketBusy(true); setMarketError("");
+				try {
+					const body = await api("/catalog", {
+						method: "POST",
+						body: JSON.stringify({
+							query: options.query ?? marketQuery,
+							source: options.source ?? marketSource,
+							limit: 10000,
+							refresh: options.refresh === true,
+						}),
+					});
+					setMarket(body);
+					setMarketAt(body.fetchedAt ? new Date(body.fetchedAt).toLocaleTimeString() : "");
+					// A new listing invalidates the page you were on.
+					setMarketPage(0);
+					enrichStars(body.items ?? [], options.refresh === true);
+					enrichMedia(body.items ?? [], options.refresh === true);
+				} catch (err) {
+					const text = String(err.message || err);
+					// A bare 404 means the host bundle running in this window predates
+					// the market route (the plugin was updated while the app was open).
+					setMarketError(text.includes("404")
+						? "宿主插件还是旧版本（缺少 /api/overall-mcp/catalog）。请完全退出 DSH 后重新打开，或在本页刷新一次再试。"
+						: text);
+				} finally {
+					setMarketBusy(false);
+				}
+			}
+
+			/**
+			 * Star counts are not part of the public catalogs: the cards render
+			 * first without them and a single bounded, cached request fills in the
+			 * visible GitHub repositories afterwards. Never blocks or fails the tab.
+			 *
+			 * The window is wider than the fold because the interleaved market puts
+			 * only one community-index card per round; a first-screen window would
+			 * often contain no GitHub repository at all. Still capped so the
+			 * unauthenticated GitHub budget (60/h) survives repeated page opens.
+			 */
+			function enrichStars(items, refresh) {
+				const repos = [];
+				const seen = new Set();
+				for (const item of items) {
+					const key = repoKeyOf(item);
+					if (!key || seen.has(key)) continue;
+					// Skip repos already answered: paging back must not re-spend the
+					// unauthenticated GitHub budget on entries we already have.
+					if (repoStats[key]) continue;
+					seen.add(key);
+					repos.push(key);
+					if (repos.length >= 30) break;   // stay inside the GitHub rate budget
+				}
+				if (!repos.length) return;
+				api("/repo-stats", { method: "POST", body: JSON.stringify({ repos, refresh }) })
+					.then((body) => {
+						setRepoStats((prev) => ({ ...prev, ...(body.stats ?? {}) }));
+						if (body.rateLimited) setStarNote("GitHub 未认证接口每小时仅 60 次，已达上限；Star 将在下个整点后补齐");
+					})
+					.catch(() => {});
+			}
+
+			/**
+			 * Preview pictures for the cards, one bounded request per market load.
+			 *
+			 * READMEs are fetched by the host, not the page: they run to a
+			 * megabyte on the big awesome lists and the raw host answers bursts
+			 * with a rate limit. Only the ranked URLs come back, cached for
+			 * hours, so paging through the market costs one request once.
+			 *
+			 * Failures are silent on purpose: a card without a picture is a
+			 * complete card, and a broken strip must never take the tab down.
+			 */
+			function enrichMedia(items, refresh) {
+				const repos = [];
+				const seen = new Set();
+				for (const item of items) {
+					const key = repoKeyOf(item);
+					if (!key || seen.has(key)) continue;
+					if (repoMedia[key]) continue;
+					seen.add(key);
+					repos.push(key);
+					if (repos.length >= 24) break;
+				}
+				if (!repos.length) return;
+				api("/repo-media", { method: "POST", body: JSON.stringify({ repos, refresh }) })
+					.then((body) => setRepoMedia((prev) => ({ ...prev, ...(body.media ?? {}) })))
+					.catch(() => {});
+			}
+
+			// The market lists itself the first time its tab is opened.
+			useEffect(() => {
+				if (tab === "market" && market === null && !marketBusy) loadMarket({});
+			}, [tab]);
+
+			async function run(fn, okMessage) {
+				setBusy(true); setError(""); setMessage("");
+				try {
+					const value = await fn();
+					await refresh();
+					if (okMessage) setMessage(okMessage(value));
+				} catch (err) {
+					setError(String(err.message || err));
+				} finally {
+					setBusy(false);
+				}
+			}
+
+			const doScan = () => run(
+				() => api("/scan", { method: "POST" }),
+				(r) => `扫描完成：新增 ${r.added.length} 台，跳过 ${r.skipped.length} 台（${r.scannedFiles} 个配置文件）`,
+			);
+			const doToggle = (name, enabled) => run(
+				() => api("/set-enabled", { method: "POST", body: JSON.stringify({ name, enabled }) }),
+				(r) => `${r.name} ${r.enabled ? "已启用并连接" : "已停用"}`,
+			);
+			const doToggleSource = (source, enabled) => run(
+				() => api("/set-source-enabled", { method: "POST", body: JSON.stringify({ source, enabled }) }),
+				(r) => `${sourceLabel(r.source)}：${r.changed} 台已${r.enabled ? "启用" : "停用"}`,
+			);
+			const doRemove = (name) => run(
+				() => api("/remove", { method: "POST", body: JSON.stringify({ name }) }),
+				(r) => `${r.removed} 已移除`,
+			);
+			const doCheckUpdates = () => run(
+				() => api("/updates", { method: "POST" }),
+				(r) => r.updatable > 0
+					? `检查完成：${r.checked} 个可检测，其中 ${r.updatable} 个有可用更新`
+					: `检查完成：${r.checked} 个可检测，均已是最新版本`,
+			);
+
+			/**
+			 * Write everything this page knows to a file the user owns.
+			 *
+			 * Built client-side from state the page already holds rather than
+			 * from a new host route: the host's own logs are not this plugin's
+			 * to export, and a bug report needs exactly this — which catalogs
+			 * answered, with how many entries, and what the page did with them.
+			 */
+			function doExportLog() {
+				try {
+					const payload = {
+						exportedAt: new Date().toISOString(),
+						plugin: { id: "dsh-overall-mcp", version: CLIENT_VERSION },
+						registry: {
+							total: stats.total, enabled: stats.enabled, disabled: stats.disabled,
+							connected: stats.connected, failed: stats.failed, servers,
+						},
+						market: market
+							? {
+								total: market.total, counts: market.counts ?? null,
+								cached: market.cached === true, fetchedAt: market.fetchedAt ?? null,
+								returned: marketItems?.length ?? 0,
+							}
+							: null,
+						// The view's own state, because "it looked wrong" is
+						// almost always a filter or a page nobody wrote down.
+						view: {
+							tab, marketQuery, marketSource, marketSort,
+							marketGroup, pageSize, page: marketPage + 1,
+						},
+						errors: { registry: error || marketError || null, market: marketError || null },
+					};
+					const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+					const url = URL.createObjectURL(blob);
+					const a = document.createElement("a");
+					a.href = url;
+					a.download = `overall-mcp-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`;
+					document.body.appendChild(a);
+					a.click();
+					a.remove();
+					setTimeout(() => URL.revokeObjectURL(url), 1000);
+					setMessage(`已导出日志：${stats.total} 台服务器、${marketItems?.length ?? 0} 条市场条目`);
+				} catch (err) {
+					setError(`导出失败：${String(err.message || err)}`);
+				}
+			}
+
+			// Return-to-top: the settings panel scrolls its own body, not the
+			// window, so the listener goes on the first scrollable ancestor and
+			// falls back to the window when there is none.
+			useEffect(() => {
+				if (typeof document === "undefined" || typeof getComputedStyle !== "function") return undefined;
+				const node = pageRef.current;
+				if (!node) return undefined;
+				let el = node.parentElement;
+				let target = null;
+				while (el && el !== document.body) {
+					const overflowY = getComputedStyle(el).overflowY;
+					if (overflowY === "auto" || overflowY === "scroll") { target = el; break; }
+					el = el.parentElement;
+				}
+				scrollerRef.current = target;
+				const read = () => (target ? target.scrollTop
+					: (typeof window === "undefined" ? 0 : window.scrollY));
+				const onScroll = () => setShowTop(read() > 400);
+				const host = target ?? (typeof window === "undefined" ? null : window);
+				if (!host) return undefined;
+				host.addEventListener("scroll", onScroll, { passive: true });
+				onScroll();
+				return () => host.removeEventListener("scroll", onScroll);
+			}, []);
+
+			function backToTop() {
+				const target = scrollerRef.current;
+				if (target && typeof target.scrollTo === "function") target.scrollTo({ top: 0, behavior: "smooth" });
+				else if (typeof window !== "undefined" && typeof window.scrollTo === "function") {
+					window.scrollTo({ top: 0, behavior: "smooth" });
+				}
+			}
+			const doUpdate = async (name) => {
+				setBusy(true); setError(""); setMessage("");
+				try {
+					const result = await api("/update", { method: "POST", body: JSON.stringify({ name }) });
+					await refresh();
+					setMessage(result.updated
+						? `${result.name} 已从 ${result.from} 更新到 ${result.to}${result.reconnected ? " 并重连" : ""}`
+						: `${result.name} 无需更新（${result.reason}）`);
+				} catch (err) {
+					setError(String(err.message || err));
+				} finally {
+					setBusy(false);
+				}
+			};
+			/**
+			 * Toggle a market entry's bookmark.
+			 *
+			 * The host is the source of truth (it persists with the registry),
+			 * but the page patches its own copy of the listing too: re-fetching
+			 * the whole catalogue to move one star would push ~2 MB through the
+			 * connection carrier for a decoration. The next browse, install or
+			 * page open reconciles the two.
+			 */
+			const doToggleFavorite = async (item) => {
+				const key = `${item.source}:${item.id ?? item.title}`;
+				const next = !item.favorite;
+				setMarket((prev) => (prev?.items
+					? { ...prev, items: prev.items.map((i) => (i === item ? { ...i, favorite: next } : i)) }
+					: prev));
+				setDetail((prev) => (prev === item ? { ...prev, favorite: next } : prev));
+				try {
+					await api("/favorite", { method: "POST", body: JSON.stringify({ key }) });
+				} catch (err) {
+					// Roll the optimistic flip back — a bookmark that lies about
+					// being saved is worse than one that never moved.
+					setMarket((prev) => (prev?.items
+						? { ...prev, items: prev.items.map((i) => (i === item ? { ...i, favorite: !next } : i)) }
+						: prev));
+					setDetail((prev) => (prev === item ? { ...prev, favorite: !next } : prev));
+					setError(String(err.message || err));
+				}
+			};
+
+			const doInstall = async (item) => {
+				setError(""); setMessage("");
+				setBusy(true);
+				try {
+					const result = await api("/install", { method: "POST", body: JSON.stringify({ item }) });
+					await refresh();
+					await loadMarket({});
+					setMessage(`${result.installed} 已安装并连接`);
+				} catch (err) {
+					setError(String(err.message || err));
+				} finally {
+					setBusy(false);
+				}
+			};
+
+			const all = servers || [];
+			const stats = {
+				total: all.length,
+				enabled: all.filter((s) => s.enabled !== false).length,
+				disabled: all.filter((s) => s.enabled === false).length,
+				connected: all.filter((s) => s.connected).length,
+				failed: all.filter((s) => s.error).length,
+			};
+
+			const sourceOptions = useMemo(() => {
+				const set = new Set(all.map((s) => s.source || "manual"));
+				return [...set].sort();
+			}, [servers]);
+
+			const groups = useMemo(() => {
+				const needle = nameFilter.trim().toLowerCase();
+				const bySource = new Map();
+				for (const server of all) {
+					const source = server.source || "manual";
+					if (sourceFilter && source !== sourceFilter) continue;
+					if (stateFilter === "enabled" && server.enabled === false) continue;
+					if (stateFilter === "disabled" && server.enabled !== false) continue;
+					if (stateFilter === "connected" && !server.connected) continue;
+					if (stateFilter === "failed" && !server.error) continue;
+					if (needle && !server.name.toLowerCase().includes(needle)) continue;
+					if (!bySource.has(source)) bySource.set(source, []);
+					bySource.get(source).push(server);
+				}
+				return [...bySource.entries()]
+					.map(([source, list]) => [source, list.sort((a, b) => a.name.localeCompare(b.name))])
+					.sort((a, b) => a[0].localeCompare(b[0]));
+			}, [servers, sourceFilter, stateFilter, nameFilter]);
+
+			const toggleCollapsed = (source) => setCollapsed((prev) => {
+				const next = new Set(prev);
+				if (next.has(source)) next.delete(source); else next.add(source);
+				return next;
+			});
+
+			const marketItems = market?.items ?? null;
+			const installedCount = marketItems ? marketItems.filter((i) => i.installed).length : 0;
+
+			// Functional groups present in the CURRENT listing, with counts,
+			// sorted by size — the chip row offers exactly what the filter can
+			// deliver. `group` is the host-side consolidation of the two community
+			// lists' ~75 headings into 19 functional groups (Finance and Finance
+			// & Fintech become 金融支付); the three registries publish no category,
+			// so their entries sit under 未分类 rather than being hidden.
+			const groupOptions = useMemo(() => {
+				if (!marketItems) return [];
+				const counts = new Map();
+				let uncategorized = 0;
+				for (const item of marketItems) {
+					if (item.group) counts.set(item.group, (counts.get(item.group) ?? 0) + 1);
+					else uncategorized += 1;
+				}
+				const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+				return uncategorized > 0 ? [...sorted, ["__none__", uncategorized]] : sorted;
+			}, [marketItems]);
+
+			// The host sends the whole merged listing (~5.4k items — upstream cost
+			// is identical for a capped slice); ordering and paging are a view
+			// concern, so they are applied here and never re-fetched. Memoized:
+			// sorting five thousand entries on every render (page flip, star
+			// enrichment, busy toggles) is tens of milliseconds of jank for nothing.
+			const sortedItems = useMemo(() => (marketItems
+				? marketItems
+					.filter((i) => !marketGroup
+						|| (marketGroup === "__none__" ? !i.group : i.group === marketGroup))
+					.slice().sort((a, b) => compareMarket(a, b, marketSort, repoStats))
+				: null), [marketItems, marketGroup, marketSort, repoStats]);
+			const pageCount = sortedItems ? Math.max(1, Math.ceil(sortedItems.length / pageSize)) : 0;
+			const safePage = Math.min(marketPage, pageCount - 1);
+			const pageItems = sortedItems
+				? sortedItems.slice(safePage * pageSize, safePage * pageSize + pageSize)
+				: null;
+			// Star enrichment is scoped to what the current page actually shows, so
+			// paging does not burn the GitHub budget on entries nobody is looking at.
+			const visibleRepos = (pageItems ?? [])
+				.map((i) => repoKeyOf(i))
+				.filter((k) => k && !(repoStats[k]?.stars !== undefined && repoStats[k]))
+				.slice(0, 30);
+
+			return createElement("div", { style: styles.page, ref: pageRef }, [
+				// ---- page head (v4 prototype): identity, then actions ----
+				// The primary action follows the tab, because each tab has one
+				// action that matters and two primary buttons is none.
+				createElement("div", { key: "head", style: styles.pageHead }, [
+					createElement("div", { key: "hd-left", style: styles.headLeft }, [
+						createElement("div", { key: "hd-title", style: styles.titleRow }, [
+							brandMark(22),
+							createElement("strong", { key: "n", style: styles.pageTitle }, "总体 MCP"),
+							createElement("span", { key: "hd-ver", style: styles.versionChip, title: "插件版本" },
+								`v${CLIENT_VERSION}`),
+						]),
+						createElement("div", { key: "hd-sub", style: styles.pageSub }, [
+							"宿主机扫描 · 市场发现 · 一键接入 · ",
+							createElement("a", {
+								key: "a", className: "omkt-link", style: styles.pageSubLink,
+								href: "https://github.com/punkpeye/awesome-mcp-servers#contributing",
+								target: "_blank", rel: "noreferrer",
+								title: "收录标准与提交方式（awesome-mcp-servers 贡献指南）",
+							}, "申请收录插件 ↗"),
+						]),
+					]),
+					createElement("div", { key: "hd-acts", style: styles.headActs }, [
+						tab === "market"
+							? createElement("button", {
+								key: "hd-primary", type: "button", className: "omkt-btn omkt-btn-primary",
+								style: { ...styles.button, ...styles.primary }, disabled: marketBusy,
+								onClick: () => loadMarket({ refresh: true }),
+							}, marketBusy ? "更新中…" : "更新插件市场")
+							: createElement("button", {
+								key: "hd-primary", type: "button", className: "omkt-btn omkt-btn-primary",
+								style: { ...styles.button, ...styles.primary }, disabled: busy, onClick: doScan,
+							}, "重新扫描宿主机"),
+						// Both tabs keep the other tab's primary action one click
+						// away, as a secondary button: switching tabs to rescan is
+						// a detour nobody wants to discover.
+						tab === "market"
+							? createElement("button", {
+								key: "hd-secondary", type: "button", className: "omkt-btn", style: styles.button,
+								disabled: busy, onClick: doScan,
+							}, "重新扫描宿主机")
+							: createElement("button", {
+								key: "hd-secondary", type: "button", className: "omkt-btn", style: styles.button,
+								disabled: marketBusy,
+								onClick: () => { setTab("market"); if (market === null) loadMarket({}); },
+							}, "打开 MCP 市场"),
+						createElement("button", {
+							key: "hd-updates", type: "button", className: "omkt-btn", style: styles.button,
+							disabled: busy, onClick: doCheckUpdates,
+						}, "检查更新"),
+						createElement("button", {
+							key: "hd-log", type: "button", className: "omkt-btn", style: styles.button,
+							onClick: doExportLog,
+						}, "⤓ 导出日志"),
+						close ? createElement("button", { key: "hd-close", type: "button", style: styles.button, onClick: close }, "关闭") : null,
+					]),
+				]),
+
+				createElement("div", { key: "tabs", style: styles.tabBar }, [
+					createElement("button", {
+						key: "registry", type: "button",
+						style: { ...styles.tab, ...(tab === "registry" ? styles.tabActive : {}) },
+						onClick: () => setTab("registry"),
+					}, `已注册${servers ? ` (${stats.total})` : ""}`),
+					createElement("button", {
+						key: "market", type: "button",
+						style: { ...styles.tab, ...(tab === "market" ? styles.tabActive : {}) },
+						onClick: () => setTab("market"),
+					}, `MCP 市场${market ? ` (${compactCount(market.total ?? marketItems.length)})` : ""}`),
+				]),
+
+				error ? createElement("div", { key: "error", style: styles.error }, error) : null,
+				message ? createElement("div", { key: "message", style: styles.message }, message) : null,
+
+				// ---------------- registry tab ----------------
+				tab === "registry" ? createElement("div", { key: "reg", style: styles.page }, [
+					createElement("div", { key: "stats", style: styles.stats }, [
+						createElement("span", { key: "t" }, `${stats.total} 台服务器`),
+						createElement("span", { key: "e" }, `${stats.enabled} 已启用`),
+						createElement("span", { key: "d" }, `${stats.disabled} 已停用`),
+						createElement("span", { key: "c" }, `${stats.connected} 已连接`),
+						stats.failed ? createElement("span", { key: "f", style: styles.error }, `${stats.failed} 连接异常`) : null,
+					]),
+					!error && servers === null ? createElement("div", { key: "loading", style: styles.message }, "加载中…") : null,
+					servers ? createElement("div", { key: "filters", style: styles.filters }, [
+						createElement("select", {
+							key: "source", style: styles.select, value: sourceFilter,
+							onChange: (e) => setSourceFilter(e.target.value),
+						}, [
+							createElement("option", { key: "", value: "" }, "全部来源"),
+							...sourceOptions.map((s) => createElement("option", { key: s, value: s }, sourceLabel(s))),
+						]),
+						createElement("select", {
+							key: "state", style: styles.select, value: stateFilter,
+							onChange: (e) => setStateFilter(e.target.value),
+						}, [
+							createElement("option", { key: "", value: "" }, "全部状态"),
+							createElement("option", { key: "enabled", value: "enabled" }, "已启用"),
+							createElement("option", { key: "disabled", value: "disabled" }, "已停用"),
+							createElement("option", { key: "connected", value: "connected" }, "已连接"),
+							createElement("option", { key: "failed", value: "failed" }, "连接异常"),
+						]),
+						createElement("input", {
+							key: "name", style: styles.searchBox, value: nameFilter,
+							placeholder: "搜索服务器名称…",
+							onChange: (e) => setNameFilter(e.target.value),
+						}),
+					]) : null,
+					servers && servers.length === 0
+						? createElement("div", { key: "empty", style: styles.message },
+							"注册表为空，点击「重新扫描宿主机」导入已有 MCP 配置。")
+						: null,
+					servers && servers.length > 0 && groups.length === 0
+						? createElement("div", { key: "nomatch", style: styles.message }, "没有符合筛选条件的服务器。")
+						: null,
+					...groups.map(([source, list]) => createElement(SourceGroup, {
+						key: source, source, servers: list, busy,
+						collapsed: collapsed.has(source),
+						onToggleCollapsed: () => toggleCollapsed(source),
+						onToggleSource: doToggleSource,
+						onToggleServer: doToggle,
+						onRemove: doRemove,
+						onUpdate: doUpdate,
+					})),
+				]) : null,
+
+				// ---------------- market tab ----------------
+				tab === "market" ? createElement("div", { key: "mkt", style: styles.page }, [
+					createElement("div", { key: "stats", style: styles.stats }, [
+						createElement("span", { key: "t" },
+						market ? `${compactCount(market.total ?? marketItems.length)} 个可用 MCP` : "正在发现…"),
+						market && market.counts
+							? createElement("span", { key: "c" }, Object.entries(market.counts)
+								.map(([s, n]) => `${SOURCE_SHORT[s] ?? s} ${n}`).join(" · "))
+							: null,
+						market ? createElement("span", { key: "i" }, `其中 ${installedCount} 个已安装`) : null,
+						marketGroup && sortedItems
+							? createElement("span", { key: "filt" },
+								`「${marketGroup === "__none__" ? "未分类" : marketGroup}」筛选后 ${sortedItems.length} 条`)
+							: null,
+						sortedItems
+							? createElement("span", { key: "p" }, `第 ${safePage + 1} / ${pageCount} 页 · 每页 ${pageSize} 条`)
+							: null,
+						marketAt ? createElement("span", { key: "at" }, `更新于 ${marketAt}${market && market.cached ? "（缓存）" : ""}`) : null,
+					]),
+					createElement("div", { key: "filters", style: styles.filters }, [
+						createElement("input", {
+							key: "q", style: styles.searchPill, value: marketQuery, disabled: marketBusy,
+							placeholder: "搜索市场（如 github、database、browser…）",
+							onChange: (e) => setMarketQuery(e.target.value),
+							onKeyDown: (e) => { if (e.key === "Enter") loadMarket({}); },
+						}),
+						createElement("button", {
+							key: "go", type: "button", className: "omkt-btn omkt-btn-primary",
+							style: { ...styles.button, ...styles.primary }, disabled: marketBusy,
+							onClick: () => loadMarket({}),
+						}, marketBusy ? "搜索中…" : "搜索"),
+						createElement("select", {
+							key: "src", style: styles.select, value: marketSource,
+							onChange: (e) => {
+								setMarketSource(e.target.value);
+								// A new listing may not hold the selected group;
+								// leaving it set would filter everything out.
+								setMarketGroup("");
+								loadMarket({ source: e.target.value });
+							},
+						}, MARKET_SOURCES.map(([value, label]) => createElement("option", { key: value, value }, label))),
+						createElement("select", {
+							key: "sort", style: styles.select, value: marketSort,
+							onChange: (e) => { setMarketSort(e.target.value); setMarketPage(0); },
+						}, SORT_OPTIONS.map(([value, label]) => createElement("option", { key: value, value }, label))),
+						createElement("button", {
+							key: "refresh", type: "button", className: "omkt-btn", style: styles.button, disabled: marketBusy,
+							onClick: () => loadMarket({ refresh: true }),
+						}, marketBusy ? "拉取中…" : "刷新"),
+					]),
+					// Functional-group chips, laid out in a wrapped row like the
+					// plugin market's category bar: 全部 first, then every group
+					// the listing holds with its count, 未分类 last. Clicking the
+					// active chip returns to 全部. Client-side only — the whole
+					// listing is loaded, so switching is free.
+					//
+					// A listing where NOTHING carries a group means the host is
+					// older than this page (group is computed host-side at DSH
+					// startup). Saying that is far more useful than a chip row of
+					// just 全部/未分类, which reads as "the taxonomy is broken".
+					groupOptions.length > 1 || (groupOptions.length === 1 && groupOptions[0][0] !== "__none__")
+						? createElement("div", { key: "groups", style: styles.groupChips }, [
+							createElement("button", {
+								key: "", type: "button", className: "omkt-chip",
+								style: { ...styles.chip, ...(!marketGroup ? styles.chipActive : {}) },
+								onClick: () => { setMarketGroup(""); setMarketPage(0); },
+							}, `全部 (${marketItems.length})`),
+							...groupOptions.map(([name]) => {
+								const active = marketGroup === name;
+								return createElement("button", {
+									key: name, type: "button", className: "omkt-chip",
+									style: { ...styles.chip, ...(active ? styles.chipActive : {}) },
+									onClick: () => { setMarketGroup(active ? "" : name); setMarketPage(0); },
+								// No per-group counts (user request): the total lives on 全部 alone;
+							// group order still follows size, so the shape of the taxonomy shows.
+							}, name === "__none__" ? "未分类" : name);
+							}),
+						])
+						: null,
+					// Old host, new page: every item lacks `group`, so the chip row
+					// would degrade to 全部/未分类 and look broken. Name the cause.
+					!marketBusy && marketItems && marketItems.length > 0
+						&& !marketItems.some((i) => i.group)
+						? createElement("div", { key: "oldhost", style: styles.hint },
+							"分类功能需要新版宿主插件：请完全退出 DSH（桌面版注意托盘图标）后重新打开。")
+						: null,
+					marketBusy ? createElement("div", { key: "loading", style: styles.message }, "正在从市场拉取…") : null,
+					marketError ? createElement("div", { key: "err", style: styles.error }, marketError) : null,
+					market && market.errors && market.errors.length
+						? createElement("div", { key: "warn", style: styles.hint },
+							`部分来源不可用：${market.errors.map((e) => e.source).join("、")}`)
+						: null,
+					starNote ? createElement("div", { key: "star", style: styles.hint }, starNote) : null,
+					pageItems && pageItems.length === 0 && !marketBusy
+						? createElement("div", { key: "none", style: styles.message }, "没有匹配的 MCP。")
+						: null,
+					pageItems && pageItems.length
+						? createElement("div", { key: "grid", style: styles.cardColumns },
+							pageItems.map((item) => createElement(MarketCard, {
+								key: `${item.source}:${item.id ?? item.title}`,
+								item, stats: repoStats, media: repoMedia, busy,
+								onInstall: doInstall, onOpen: setDetail,
+								onToggleFavorite: doToggleFavorite,
+							})))
+						: null,
+
+					sortedItems && pageCount > 1
+						? createElement("div", { key: "pager", style: styles.pager }, [
+							createElement("select", {
+								key: "size", style: styles.select, value: pageSize,
+								onChange: (e) => { setPageSize(Number(e.target.value)); setMarketPage(0); },
+							}, PAGE_SIZES.map((n) => createElement("option", { key: n, value: n }, `每页 ${n} 条`))),
+							createElement("span", { key: "spacer", style: styles.spacer }),
+							createElement("button", {
+								key: "first", type: "button", style: styles.button, disabled: safePage === 0,
+								onClick: () => setMarketPage(0),
+							}, "« 首页"),
+							createElement("button", {
+								key: "prev", type: "button", style: styles.button, disabled: safePage === 0,
+								onClick: () => setMarketPage(safePage - 1),
+							}, "‹ 上一页"),
+							createElement("span", { key: "info", style: styles.meta }, `${safePage + 1} / ${pageCount}`),
+							createElement("button", {
+								key: "next", type: "button", style: styles.button, disabled: safePage >= pageCount - 1,
+								onClick: () => setMarketPage(safePage + 1),
+							}, "下一页 ›"),
+							createElement("button", {
+								key: "last", type: "button", style: styles.button, disabled: safePage >= pageCount - 1,
+								onClick: () => setMarketPage(pageCount - 1),
+							}, "末页 »"),
+						])
+						: null,
+				]) : null,
+
+				createElement("div", { key: "hint", style: styles.hint },
+					"已启用服务器的工具以 mcp__<服务器名>__<工具名> 形式在对话中直接可用；数据保存在 $DSH_HOME/overall-mcp/。"),
+
+				// The detail overlay is a sibling of the page content, not a child
+				// of the market tab, so it survives a tab switch and closes cleanly.
+				detail
+					? createElement(MarketDetail, {
+							key: "detail", item: detail, stats: repoStats, media: repoMedia, busy,
+							onClose: () => setDetail(null),
+							onInstall: doInstall,
+							onToggleFavorite: doToggleFavorite,
+						})
+					: null,
+
+				// Fixed, and only while there is something to scroll back from.
+				showTop
+					? createElement("button", {
+						key: "top", type: "button", className: "omkt-btn", style: styles.toTop,
+						title: "回到顶部", "aria-label": "回到顶部", onClick: backToTop,
+					}, "↑")
+					: null,
+			]);
+		}
+
+		function apply(ctx) {
+			// Registration contract verified against working desktop plugins
+			// (dshmarket, dsh-mcp-panel): the entry options are FLAT (id/order/label)
+			// and the registration is wrapped in `slots.inject(slotName, …)`, whose
+			// returned disposer releases the entry on fiber disposal.
+			ctx.slots.inject("settings.section", () => {
+				const off = ctx.slots.register(
+					{ name: "settings.section", id: "overall-mcp", order: 100, label: "Overall MCP" },
+					Section,
+				);
+				return typeof off === "function" ? off : () => {};
+			});
+		}
+
+		exports.apply = apply;
+		exports.inject = ["slots"];
+		// Exposed for tools/render-detail.mjs and tools/render-card.mjs only:
+		// the detail panel once shipped with labels and no values, and the card
+		// once shipped its front-door link inside a <button> (click raced the
+		// navigation). No test that avoids real rendering could catch either.
+		exports.__test = { MarketDetail, MarketCard, DetailRow, LinkChip, version: CLIENT_VERSION };
+		// Section is exported for tools/render-market-tab.mjs: the market tab's
+		// chrome (stat line, filters, masonry wrapper, favourite wiring) exists
+		// nowhere else, and a wrong state name or prop only throws at render.
+		exports.Section = Section;
+		return module.exports;
+	},
+});

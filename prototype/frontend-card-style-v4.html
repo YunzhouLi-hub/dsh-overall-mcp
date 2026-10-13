@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCP 市场 — UI 原型 v4</title>
+<style>
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+:root{
+  --bg:#f5f5f5; --surface:#fff; --text:#111; --text-2:#4a4a4a; --muted:#8a8a8a;
+  --line:#e6e6e6; --line-2:#eee; --brand:#4D6BFE;
+  --radius:12px; --radius-sm:8px;
+  --font:"Inter",ui-sans-serif,-apple-system,system-ui,"Segoe UI","PingFang SC","Hiragino Sans GB","Noto Sans SC","Microsoft YaHei",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --shadow:0 1px 2px rgba(0,0,0,.04), 0 0 0 1px rgba(0,0,0,.02);
+}
+[data-theme="dark"]{
+  --bg:#121212; --surface:#1c1c1c; --text:#f2f2f2; --text-2:#b5b5b5; --muted:#888;
+  --line:#2e2e2e; --line-2:#262626; --brand:#6b85ff;
+  --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box} button,input,select{font:inherit}
+body{margin:0;background:var(--bg);color:var(--text);font:13.5px/1.55 var(--font);-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:20px 20px 100px}
+
+/* ===== Page header (plugin market) ===== */
+.page-hd{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:10px}
+.page-hd-left{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.brand-ico{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px}
+.page-title{font-size:18px;font-weight:700;letter-spacing:-.02em;margin:0}
+.page-ver{font-size:12px;color:var(--muted);font-weight:500}
+.page-hd-right{display:flex;align-items:center;gap:14px;flex-shrink:0}
+.btn{border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:8px;padding:7px 14px;font-size:13px;font-weight:500;cursor:pointer;transition:opacity .12s,background .12s}
+.btn:hover{background:#f3f3f3}
+.btn-primary{background:#111;border-color:#111;color:#fff}
+.btn-primary:hover{opacity:.85;background:#111;color:#fff}
+.btn-primary:disabled{opacity:.4;cursor:default}
+.btn-text{border:none;background:transparent;color:var(--muted);padding:7px 4px}
+.btn-text:hover{color:var(--text);background:transparent}
+.btn-outline{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:6px 12px;font-size:12.5px;color:var(--text-2);display:inline-flex;align-items:center;gap:6px}
+[data-theme="dark"] .btn-primary{background:#f2f2f2;border-color:#f2f2f2;color:#111}
+[data-theme="dark"] .btn:hover{background:#2a2a2a}
+
+.page-sub{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+.page-sub p{margin:0;font-size:12.5px;color:var(--muted)}
+.page-sub a{color:var(--text-2);text-decoration:none;border-bottom:1px solid var(--line)}
+.page-sub a:hover{color:var(--brand)}
+
+/* tabs */
+.tabs{display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--line);margin-bottom:14px;overflow-x:auto}
+.tab{padding:10px 12px;font-size:13.5px;font-weight:500;color:var(--muted);cursor:pointer;position:relative;white-space:nowrap;border:none;background:none}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--text);font-weight:600}
+.tab.active::after{content:"";position:absolute;left:8px;right:8px;bottom:-1px;height:2px;background:#111;border-radius:2px}
+[data-theme="dark"] .tab.active::after{background:#f2f2f2}
+.tabs .sp{flex:1}
+.tab-link{margin-left:auto;padding:10px 8px;font-size:13px;color:var(--muted);text-decoration:none}
+.tab-link:hover{color:var(--text)}
+
+/* search */
+.search{display:flex;align-items:center;gap:10px;width:100%;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:11px 16px;margin-bottom:12px;color:var(--muted)}
+.search input{flex:1;border:0;outline:0;background:transparent;font-size:14px;color:var(--text)}
+.search input::placeholder{color:var(--muted)}
+
+/* filters row */
+.filters{display:flex;align-items:center;gap:8px;margin-bottom:18px}
+.chips{display:flex;gap:8px;flex:1;overflow-x:auto;padding-bottom:2px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;padding:5px 12px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--text-2);font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap}
+.chip:hover{background:#f3f3f3}
+.chip.active{background:#efefef;border-color:#ddd;color:var(--text);font-weight:600}
+.filter-btn{flex:none;border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:6px 12px;font-size:12.5px;color:var(--text-2);cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+.meta-line{font-size:12px;color:var(--muted);margin:-6px 0 14px;display:flex;gap:14px}
+.meta-line b{color:var(--text-2);font-weight:600}
+
+/* ===== Cards masonry ===== */
+.grid{column-count:2;column-gap:14px}
+@media (min-width:1100px){.grid{column-count:3}}
+@media (max-width:720px){.grid{column-count:1}}
+.card{break-inside:avoid;display:flex;flex-direction:column;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin:0 0 14px;box-shadow:var(--shadow);cursor:pointer;transition:box-shadow .15s,border-color .15s}
+.card:hover{border-color:#d4d4d4;box-shadow:0 4px 14px rgba(0,0,0,.06)}
+
+.card-hd{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.card-hd-left{min-width:0;flex:1}
+.name-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.title{font-size:15px;font-weight:700;color:var(--text);text-decoration:none;letter-spacing:-.015em}
+.title:hover{color:var(--brand)}
+.gh{color:var(--muted);display:inline-flex;opacity:.7}
+.gh:hover{opacity:1;color:var(--text)}
+.badge{font-size:11px;padding:1px 7px;border-radius:999px;background:#f3f3f3;color:var(--text-2);font-weight:500}
+.badge.v{background:rgba(77,107,254,.1);color:var(--brand)}
+.badge.o{background:#f3f0ff;color:#6b5ce7}
+.badge.d{background:#fff7e8;color:#b7791f}
+.badge.i{background:#eaf8f3;color:#0f8f6d}
+.muted-badge{font-size:11px;color:var(--muted);padding:4px 0}
+
+.author-row{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-2);margin-bottom:4px}
+.avatar{width:18px;height:18px;border-radius:50%;object-fit:cover;background:#eee}
+.author{font-weight:500;color:var(--text-2)}
+.ver,.dot,.src{color:var(--muted)}
+.stats-row{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+
+.card-cta{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0}
+.card-cta .btn-primary{border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600}
+.card-cta .btn-text{font-size:12px}
+
+.desc{margin:0;font-size:13px;color:var(--text-2);line-height:1.6;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+
+/* carousel */
+.carousel{position:relative;margin:2px 0 0}
+.car-track{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;padding-bottom:2px}
+.car-track::-webkit-scrollbar{display:none}
+.slide{flex:none;width:72%;aspect-ratio:16/10;border-radius:10px;scroll-snap-align:start;display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-end;padding:12px;border:1px solid var(--line-2);color:var(--text-2)}
+.slide span{font-size:12px;font-weight:600;color:var(--text)}
+.slide em{font-style:normal;font-size:11px;color:var(--muted);margin-top:2px}
+.car-btn{position:absolute;top:50%;transform:translateY(-60%);width:24px;height:24px;border-radius:50%;border:1px solid var(--line);background:rgba(255,255,255,.92);color:var(--text-2);cursor:pointer;display:grid;place-items:center;font-size:14px;z-index:2;padding:0;line-height:1}
+.car-btn.prev{left:6px}.car-btn.next{right:6px}
+.car-btn:hover{background:#fff;color:var(--text)}
+.car-bar{height:3px;background:#ebebeb;border-radius:99px;margin-top:8px;overflow:hidden}
+.car-bar i{display:block;height:100%;width:36%;background:#c4c4c4;border-radius:99px}
+
+.compat{margin-top:2px}
+.compat code{display:inline-block;font:11.5px/1.4 var(--mono);color:var(--muted);background:#f7f7f7;border:1px solid var(--line);border-radius:6px;padding:3px 8px}
+[data-theme="dark"] .compat code{background:#222;border-color:#333}
+
+.card-ft{display:flex;align-items:center;gap:8px;margin-top:2px}
+.tags{display:flex;gap:6px;flex-wrap:wrap;flex:1;min-width:0}
+.tag{font-size:11.5px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--text-2)}
+.ft-acts{display:flex;align-items:center;gap:2px;flex-shrink:0;margin-left:auto}
+.icon-btn{border:none;background:transparent;color:var(--muted);font-size:12px;padding:4px 6px;cursor:pointer;border-radius:6px}
+.icon-btn:hover{background:#f3f3f3;color:var(--text)}
+
+.pager{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:12.5px;color:var(--text-2)}
+.pager .btn{border-radius:8px;padding:6px 12px;font-size:12.5px}
+.note{margin-top:28px;font-size:12px;color:var(--muted);border-top:1px solid var(--line);padding-top:14px;line-height:1.7}
+
+/* overlay keep */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);backdrop-filter:blur(4px);display:grid;place-items:center;padding:28px;z-index:50;overflow:auto}
+.panel{width:min(680px,100%);max-height:calc(100vh - 56px);overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:0 24px 64px rgba(0,0,0,.14);padding:22px;display:flex;flex-direction:column;gap:14px}
+.p-head{display:flex;gap:12px;align-items:flex-start}
+.p-head .avatar{width:44px;height:44px;border-radius:10px}
+.p-title{font-size:17px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.p-sub{font-size:12px;color:var(--muted);margin-top:2px}
+.p-x{margin-left:auto}
+.p-desc{font-size:13.5px;color:var(--text-2);margin:0;white-space:pre-wrap}
+.gh-box{border:1px solid var(--line);border-radius:var(--radius);padding:14px;background:var(--bg);display:flex;flex-direction:column;gap:10px}
+.gh-head{font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--muted)}
+.gh-repo{font-weight:600;font-size:14px;color:var(--brand);text-decoration:none;font-family:var(--mono)}
+.gh-stats{display:flex;gap:20px;flex-wrap:wrap}
+.gh-stat{display:flex;flex-direction:column}.gh-stat b{font-size:15px}.gh-stat span{font-size:11px;color:var(--muted)}
+.facts{display:grid;gap:6px;font-size:12.5px}
+.fact{display:flex;gap:12px}.fact .k{color:var(--muted);min-width:76px}.fact .v{color:var(--text-2);word-break:break-word}
+.cmd-box{border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:10px 12px}
+.cmd{font:12px var(--mono);color:var(--text-2);word-break:break-all;user-select:all}
+.links{display:flex;gap:8px;flex-wrap:wrap}
+.link-chip{padding:5px 12px;border-radius:999px;border:1px solid var(--line);font-size:12px;color:var(--text-2);text-decoration:none}
+.link-chip:hover{background:#f3f3f3;color:var(--text)}
+.p-act{display:flex;gap:8px;border-top:1px solid var(--line-2);padding-top:14px}
+.ghost-btn{border:1px solid var(--line);background:var(--surface);color:var(--text-2);border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer}
+
+.to-top{position:fixed;right:22px;bottom:22px;width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow);cursor:pointer;display:grid;place-items:center;color:var(--muted);z-index:40;font-size:16px}
+.to-top:hover{color:var(--text)}
+
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="page-hd">
+    <div class="page-hd-left">
+      <span class="brand-ico"><svg role="img" aria-label="MCP" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="22" height="22"> <!-- A: constellation hub — center node + 5 satellites, "万物互联" --> <g fill="none" stroke="#0d0d0d" stroke-width="1.6" stroke-linecap="round"> <path d="M16 16 L8 8 M16 16 L24 8 M16 16 L7 20 M16 16 L25 20 M16 16 L16 26"/> </g> <circle cx="16" cy="16" r="3.2" fill="#4D6BFE"/> <circle cx="8" cy="8" r="2.2" fill="#0d0d0d"/> <circle cx="24" cy="8" r="2.2" fill="#0d0d0d"/> <circle cx="7" cy="20" r="2" fill="#0d0d0d"/> <circle cx="25" cy="20" r="2" fill="#0d0d0d"/> <circle cx="16" cy="26" r="2" fill="#0d0d0d"/> </svg></span>
+      <h1 class="page-title">总体 MCP</h1>
+      <span class="page-ver">mcp-market · 原型</span>
+    </div>
+    <div class="page-hd-right">
+      <button class="btn btn-primary" type="button">更新插件市场</button>
+      <button class="btn-text" type="button" onclick="toggleTheme()">深/浅色</button>
+      <button class="btn-text" type="button">重启前都不再提醒</button>
+    </div>
+  </div>
+
+  <div class="page-sub">
+    <p>宿主机扫描 · 市场发现 · 一键接入 · <a href="#">申请收录插件 ↗</a></p>
+    <button class="btn-outline" type="button">⤓ 导出日志</button>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active">发现</div>
+    <div class="tab">已注册 (6)</div>
+    <div class="tab">MCP 市场 (5,362)</div>
+    <div class="tab">已安装</div>
+    <div class="tab">已屏蔽</div>
+    <div class="tab">高级</div>
+    <a class="tab-link" href="#">任务</a>
+  </div>
+
+  <div class="search">
+    <span aria-hidden="true">🔍</span>
+    <input placeholder="搜索名称、描述、安装命令…">
+  </div>
+
+  <div class="filters">
+    <div class="chips">
+      <span class="chip active">全部 (5,362)</span>
+      <span class="chip">金融支付</span>
+      <span class="chip">开发工具</span>
+      <span class="chip">搜索与知识</span>
+      <span class="chip">办公协作</span>
+      <span class="chip">多媒体创作</span>
+      <span class="chip">数据与存储</span>
+      <span class="chip">安全与身份</span>
+      <span class="chip">云与运维</span>
+      <span class="chip">社交媒体</span>
+      <span class="chip">浏览器自动化</span>
+      <span class="chip">语音与语言</span>
+      <span class="chip">出行与生活</span>
+      <span class="chip">医疗健康</span>
+      <span class="chip">未分类</span>
+    </div>
+    <button class="filter-btn" type="button">筛选 ▾</button>
+  </div>
+
+  <div class="meta-line">
+    <span><b>5,362</b> 个可用 MCP</span>
+    <span>第 <b>1</b> / 269 页</span>
+    <span>每页 20 条</span>
+    <span style="margin-left:auto">示例数据 · 原型</span>
+  </div>
+
+  <div class="grid">
+
+    <article class="card">
+      <div class="card-hd">
+        <div class="card-hd-left">
+          <div class="name-row">
+            <a class="title" href="#" onclick="event.stopPropagation()">github</a>
+            <a class="gh" href="#" title="GitHub" onclick="event.stopPropagation()" aria-label="GitHub">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            </a>
+            <span class="badge v">✓ 认证</span><span class="badge o">官方</span>
+          </div>
+          <div class="author-row">
+            <img class="avatar" src="https://github.com/modelcontextprotocol.png?size=80" alt="">
+            <span class="author">modelcontextprotocol</span>
+            <span class="dot">·</span>
+            <span class="ver">v1.0.3</span>
+          </div>
+          <div class="stats-row">
+            <span>↓ 22.4k / 近30天</span>
+            <span class="dot">·</span>
+            <span>★ 22.4k</span>
+            <span class="dot">·</span>
+            <span class="src">官方 Registry</span>
+          </div>
+        </div>
+        <div class="card-cta">
+          <button class="btn btn-primary">安装</button>
+          <button class="btn btn-text">详情</button>
+        </div>
+      </div>
+      <p class="desc">MCP server for using the GitHub API, enabling file operations, repository management, search functionality, and more.</p>
+      <div class="carousel" data-carousel>
+        <button class="car-btn prev" type="button" aria-label="上一张" onclick="event.stopPropagation();carouselNav(this,-1)">‹</button>
+        <div class="car-track"><div class="slide" style="background:#f5f3ff"><span>github</span><em>预览 1</em></div><div class="slide" style="background:#eef2ff"><span>github</span><em>预览 2</em></div><div class="slide" style="background:#f0fdf4"><span>github</span><em>预览 3</em></div></div>
+        <button class="car-btn next" type="button" aria-label="下一张" onclick="event.stopPropagation();carouselNav(this,1)">›</button>
+        <div class="car-bar"><i></i></div>
+      </div>
+      <div class="compat"><code>MCP · stdio</code></div>
+      <div class="card-ft">
+        <div class="tags"><span class="tag">官方</span><span class="tag">TypeScript</span><span class="tag">npm</span></div>
+        <div class="ft-acts">
+          <button type="button" class="icon-btn" title="收藏" onclick="event.stopPropagation()" aria-label="收藏"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4h10a1 1 0 0 1 1 1v15l-6-3.5L6 20V5a1 1 0 0 1 1-1z"/></svg></button>
+          <button type="button" class="icon-btn" title="评论" onclick="event.stopPropagation()" aria-label="评论"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 3v-3H6a2 2 0 0 1-2-2V6z"/></svg> 评论</button>
+          <button type="button" class="icon-btn" title="更多" onclick="event.stopPropagation()" aria-label="更多">···</button>
+        </div>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="card-hd">
+        <div class="card-hd-left">
+          <div class="name-row">
+            <a class="title" href="#" onclick="event.stopPropagation()">awesome-mcp-servers</a>
+            <a class="gh" href="#" title="GitHub" onclick="event.stopPropagation()" aria-label="GitHub">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            </a>
+            <span class="badge">需手动配置</span>
+          </div>
+          <div class="author-row">
+            <img class="avatar" src="https://github.com/punkpeye.png?size=80" alt="">
+            <span class="author">punkpeye</span>
+            <span class="dot">·</span>
+            <span class="ver">—</span>
+          </div>
+          <div class="stats-row">
+            <span>↓ 96.3k / 近30天</span>
+            <span class="dot">·</span>
+            <span>★ 96.3k</span>
+            <span class="dot">·</span>
+            <span class="src">Awesome 清单</span>
+          </div>
+        </div>
+        <div class="card-cta">
+          <span class="badge muted-badge">需手动配置</span>
+          <button class="btn btn-text">详情</button>
+        </div>
+      </div>
+      <p class="desc">A collection of MCP servers. 社区维护的最大 MCP 服务器清单，按功能分类。</p>
+      <div class="carousel" data-carousel>
+        <button class="car-btn prev" type="button" aria-label="上一张" onclick="event.stopPropagation();carouselNav(this,-1)">‹</button>
+        <div class="car-track"><div class="slide" style="background:#eef2ff"><span>awesome-mcp-servers</span><em>预览 1</em></div><div class="slide" style="background:#f0fdf4"><span>awesome-mcp-servers</span><em>预览 2</em></div><div class="slide" style="background:#fff7ed"><span>awesome-mcp-servers</span><em>预览 3</em></div></div>
+        <button class="car-btn next" type="button" aria-label="下一张" onclick="event.stopPropagation();carouselNav(this,1)">›</button>
+        <div class="car-bar"><i></i></div>
+      </div>
+      <div class="compat"><code>MCP</code></div>
+      <div class="card-ft">
+        <div class="tags"><span class="tag">搜索与知识</span><span class="tag">清单</span></div>
+        <div class="ft-acts">
+          <button type="button" class="icon-btn" title="收藏" onclick="event.stopPropagation()" aria-label="收藏"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4h10a1 1 0 0 1 1 1v15l-6-3.5L6 20V5a1 1 0 0 1 1-1z"/></svg></button>
+          <button type="button" class="icon-btn" title="评论" onclick="event.stopPropagation()" aria-label="评论"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 3v-3H6a2 2 0 0 1-2-2V6z"/></svg> 评论</button>
+          <button type="button" class="icon-btn" title="更多" onclick="event.stopPropagation()" aria-label="更多">···</button>
+        </div>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="card-hd">
+        <div class="card-hd-left">
+          <div class="name-row">
+            <a class="title" href="#" onclick="event.stopPropagation()">Neon</a>
+            <a class="gh" href="#" title="GitHub" onclick="event.stopPropagation()" aria-label="GitHub">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            </a>
+            <span class="badge v">✓ 认证</span>
+          </div>
+          <div class="author-row">
+            <img class="avatar" src="https://github.com/neondatabase.png?size=80" alt="">
+            <span class="author">mcp.neon.com</span>
+            <span class="dot">·</span>
+            <span class="ver">—</span>
+          </div>
+          <div class="stats-row">
+            <span>↓ — / 近30天</span>
+            <span class="dot">·</span>
+            <span>★ —</span>
+            <span class="dot">·</span>
+            <span class="src">远程清单</span>
+          </div>
+        </div>
+        <div class="card-cta">
+          <button class="btn btn-primary">安装</button>
+          <button class="btn btn-text">详情</button>
+        </div>
+      </div>
+      <p class="desc">Serverless Postgres. 托管端点，任何 MCP 客户端都可以直接指向同一地址。</p>
+      <div class="carousel" data-carousel>
+        <button class="car-btn prev" type="button" aria-label="上一张" onclick="event.stopPropagation();carouselNav(this,-1)">‹</button>
+        <div class="car-track"><div class="slide" style="background:#fff7ed"><span>Neon</span><em>预览 1</em></div><div class="slide" style="background:#fdf2f8"><span>Neon</span><em>预览 2</em></div><div class="slide" style="background:#f5f3ff"><span>Neon</span><em>预览 3</em></div></div>
+        <button class="car-btn next" type="button" aria-label="下一张" onclick="event.stopPropagation();carouselNav(this,1)">›</button>
+        <div class="car-bar"><i></i></div>
+      </div>
+      <div class="compat"><code>MCP · remote</code></div>
+      <div class="card-ft">
+        <div class="tags"><span class="tag">数据与存储</span><span class="tag">远程</span><span class="tag">免登录</span></div>
+        <div class="ft-acts">
+          <button type="button" class="icon-btn" title="收藏" onclick="event.stopPropagation()" aria-label="收藏"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4h10a1 1 0 0 1 1 1v15l-6-3.5L6 20V5a1 1 0 0 1 1-1z"/></svg></button>
+          <button type="button" class="icon-btn" title="评论" onclick="event.stopPropagation()" aria-label="评论"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 3v-3H6a2 2 0 0 1-2-2V6z"/></svg> 评论</button>
+          <button type="button" class="icon-btn" title="更多" onclick="event.stopPropagation()" aria-label="更多">···</button>
+        </div>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="card-hd">
+        <div class="card-hd-left">
+          <div class="name-row">
+            <a class="title" href="#" onclick="event.stopPropagation()">Brave Search</a>
+            <a class="gh" href="#" title="GitHub" onclick="event.stopPropagation()" aria-label="GitHub">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            </a>
+            <span class="badge i">已安装</span>
+          </div>
+          <div class="author-row">
+            <img class="avatar" src="https://github.com/smithery-ai.png?size=80" alt="">
+            <span class="author">brave</span>
+            <span class="dot">·</span>
+            <span class="ver">v2.0.1</span>
+          </div>
+          <div class="stats-row">
+            <span>↓ 8.8 万次启动</span>
+            <span class="dot">·</span>
+            <span>★ 21.9k</span>
+            <span class="dot">·</span>
+            <span class="src">Smithery</span>
+          </div>
+        </div>
+        <div class="card-cta">
+          <button class="btn btn-primary" disabled >已安装</button>
+          <button class="btn btn-text">详情</button>
+        </div>
+      </div>
+      <p class="desc">Web search. 通过 Brave Search API 进行网页与新闻检索。</p>
+      <div class="carousel" data-carousel>
+        <button class="car-btn prev" type="button" aria-label="上一张" onclick="event.stopPropagation();carouselNav(this,-1)">‹</button>
+        <div class="car-track"><div class="slide" style="background:#f0fdf4"><span>Brave Search</span><em>预览 1</em></div><div class="slide" style="background:#fff7ed"><span>Brave Search</span><em>预览 2</em></div><div class="slide" style="background:#fdf2f8"><span>Brave Search</span><em>预览 3</em></div></div>
+        <button class="car-btn next" type="button" aria-label="下一张" onclick="event.stopPropagation();carouselNav(this,1)">›</button>
+        <div class="car-bar"><i></i></div>
+      </div>
+      <div class="compat"><code>MCP · stdio</code></div>
+      <div class="card-ft">
+        <div class="tags"><span class="tag">搜索与知识</span><span class="tag">npm</span></div>
+        <div class="ft-acts">
+          <button type="button" class="icon-btn" title="收藏" onclick="event.stopPropagation()" aria-label="收藏"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4h10a1 1 0 0 1 1 1v15l-6-3.5L6 20V5a1 1 0 0 1 1-1z"/></svg></button>
+          <button type="button" class="icon-btn" title="评论" onclick="event.stopPropagation()" aria-label="评论"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 3v-3H6a2 2 0 0 1-2-2V6z"/></svg> 评论</button>
+          <button type="button" class="icon-btn" title="更多" onclick="event.stopPropagation()" aria-label="更多">···</button>
+        </div>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="card-hd">
+        <div class="card-hd-left">
+          <div class="name-row">
+            <a class="title" href="#" onclick="event.stopPropagation()">postgres</a>
+            <a class="gh" href="#" title="GitHub" onclick="event.stopPropagation()" aria-label="GitHub">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            </a>
+            <span class="badge o">官方</span><span class="badge d">已废弃</span>
+          </div>
+          <div class="author-row">
+            <img class="avatar" src="https://github.com/modelcontextprotocol.png?size=80" alt="">
+            <span class="author">modelcontextprotocol</span>
+            <span class="dot">·</span>
+            <span class="ver">v0.2.0</span>
+          </div>
+          <div class="stats-row">
+            <span>↓ — / 近30天</span>
+            <span class="dot">·</span>
+            <span>★ —</span>
+            <span class="dot">·</span>
+            <span class="src">官方 Registry</span>
+          </div>
+        </div>
+        <div class="card-cta">
+          <button class="btn btn-primary">仍要安装</button>
+          <button class="btn btn-text">详情</button>
+        </div>
+      </div>
+      <p class="desc">Read-only access to PostgreSQL databases. 上游说明：请改用 sqlite 官方实现。</p>
+      <div class="carousel" data-carousel>
+        <button class="car-btn prev" type="button" aria-label="上一张" onclick="event.stopPropagation();carouselNav(this,-1)">‹</button>
+        <div class="car-track"><div class="slide" style="background:#f0fdf4"><span>postgres</span><em>预览 1</em></div><div class="slide" style="background:#fff7ed"><span>postgres</span><em>预览 2</em></div><div class="slide" style="background:#fdf2f8"><span>postgres</span><em>预览 3</em></div></div>
+        <button class="car-btn next" type="button" aria-label="下一张" onclick="event.stopPropagation();carouselNav(this,1)">›</button>
+        <div class="car-bar"><i></i></div>
+      </div>
+      <div class="compat"><code>MCP · stdio</code></div>
+      <div class="card-ft">
+        <div class="tags"><span class="tag">数据与存储</span><span class="tag">Python</span></div>
+        <div class="ft-acts">
+          <button type="button" class="icon-btn" title="收藏" onclick="event.stopPropagation()" aria-label="收藏"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4h10a1 1 0 0 1 1 1v15l-6-3.5L6 20V5a1 1 0 0 1 1-1z"/></svg></button>
+          <button type="button" class="icon-btn" title="评论" onclick="event.stopPropagation()" aria-label="评论"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 3v-3H6a2 2 0 0 1-2-2V6z"/></svg> 评论</button>
+          <button type="button" class="icon-btn" title="更多" onclick="event.stopPropagation()" aria-label="更多">···</button>
+        </div>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="card-hd">
+        <div class="card-hd-left">
+          <div class="name-row">
+            <a class="title" href="#" onclick="event.stopPropagation()">notion-mcp-server</a>
+            <a class="gh" href="#" title="GitHub" onclick="event.stopPropagation()" aria-label="GitHub">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            </a>
+            
+          </div>
+          <div class="author-row">
+            <img class="avatar" src="https://github.com/makenotion.png?size=80" alt="">
+            <span class="author">makenotion</span>
+            <span class="dot">·</span>
+            <span class="ver">—</span>
+          </div>
+          <div class="stats-row">
+            <span>↓ 4.2k / 近30天</span>
+            <span class="dot">·</span>
+            <span>★ 4.2k</span>
+            <span class="dot">·</span>
+            <span class="src">Awesome 清单</span>
+          </div>
+        </div>
+        <div class="card-cta">
+          <button class="btn btn-primary">安装</button>
+          <button class="btn btn-text">详情</button>
+        </div>
+      </div>
+      <p class="desc">Official Notion MCP server. 读写 Notion 页面、数据库与评论。</p>
+      <div class="carousel" data-carousel>
+        <button class="car-btn prev" type="button" aria-label="上一张" onclick="event.stopPropagation();carouselNav(this,-1)">‹</button>
+        <div class="car-track"><div class="slide" style="background:#eef2ff"><span>notion-mcp-server</span><em>预览 1</em></div><div class="slide" style="background:#f0fdf4"><span>notion-mcp-server</span><em>预览 2</em></div><div class="slide" style="background:#fff7ed"><span>notion-mcp-server</span><em>预览 3</em></div></div>
+        <button class="car-btn next" type="button" aria-label="下一张" onclick="event.stopPropagation();carouselNav(this,1)">›</button>
+        <div class="car-bar"><i></i></div>
+      </div>
+      <div class="compat"><code>MCP</code></div>
+      <div class="card-ft">
+        <div class="tags"><span class="tag">办公协作</span><span class="tag">TypeScript</span><span class="tag">需 API Key</span></div>
+        <div class="ft-acts">
+          <button type="button" class="icon-btn" title="收藏" onclick="event.stopPropagation()" aria-label="收藏"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4h10a1 1 0 0 1 1 1v15l-6-3.5L6 20V5a1 1 0 0 1 1-1z"/></svg></button>
+          <button type="button" class="icon-btn" title="评论" onclick="event.stopPropagation()" aria-label="评论"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 3v-3H6a2 2 0 0 1-2-2V6z"/></svg> 评论</button>
+          <button type="button" class="icon-btn" title="更多" onclick="event.stopPropagation()" aria-label="更多">···</button>
+        </div>
+      </div>
+    </article>
+  </div>
+
+  <div class="pager">
+    <button class="btn">« 首页</button>
+    <button class="btn">‹ 上一页</button>
+    <span>1 / 269</span>
+    <button class="btn">下一页 ›</button>
+    <button class="btn">末页 »</button>
+  </div>
+
+  <div class="note">
+    原型说明：卡片为 <b>.card</b> 重复结构；详情弹窗见下方（已打开状态）。
+    颜色集中在 :root CSS 变量。改样式、改布局、增删字段都可以，直接把这个文件改完发回即可。
+  </div>
+</div>
+
+<div class="overlay" onclick="if(event.target===this)this.remove()">
+  <div class="panel">
+    <div class="p-head">
+      <img class="avatar" src="https://github.com/modelcontextprotocol.png?size=80" alt="">
+      <div>
+        <div class="p-title">
+          <a href="#" style="color:inherit;text-decoration:none">github</a>
+          <span class="badge v">✓ 认证</span><span class="badge o">官方</span>
+        </div>
+        <div class="p-sub">官方 Registry · @modelcontextprotocol · v1.0.3 · stdio · ★ 22.4k</div>
+      </div>
+      <button class="ghost-btn p-x" onclick="this.closest('.overlay').remove()">关闭</button>
+    </div>
+
+    <p class="p-desc">MCP server for using the GitHub API, enabling file operations, repository management, search functionality, and more.</p>
+
+    <div class="tags">
+      <span class="tag">官方</span><span class="tag">TypeScript</span><span class="tag">npm</span><span class="tag">开发工具</span>
+    </div>
+
+    <!-- GitHub 仓库区块 -->
+    <div class="gh-box">
+      <div class="gh-head">GITHUB 仓库</div>
+      <a class="gh-repo" href="#">modelcontextprotocol/servers</a>
+      <div class="gh-stats">
+        <div class="gh-stat"><b>22.4k</b><span>★ Star</span></div>
+        <div class="gh-stat"><b>1.9k</b><span>Fork</span></div>
+        <div class="gh-stat"><b>117</b><span>Issue</span></div>
+        <div class="gh-stat"><b>312</b><span>Watch</span></div>
+        <div class="gh-stat"><b>MIT</b><span>许可证</span></div>
+      </div>
+      <div class="facts">
+        <div class="fact"><span class="k">语言</span><span class="v">TypeScript</span></div>
+        <div class="fact"><span class="k">最近推送</span><span class="v">2026-10-09</span></div>
+        <div class="fact"><span class="k">创建于</span><span class="v">2024-11-30</span></div>
+      </div>
+    </div>
+
+    <!-- 事实表 -->
+    <div class="facts">
+      <div class="fact"><span class="k">来源</span><span class="v">官方 Registry</span></div>
+      <div class="fact"><span class="k">作者</span><span class="v">@modelcontextprotocol</span></div>
+      <div class="fact"><span class="k">版本</span><span class="v">1.0.3</span></div>
+      <div class="fact"><span class="k">传输</span><span class="v">本地进程（stdio）</span></div>
+      <div class="fact"><span class="k">安装方式</span><span class="v">npx 包 → npx -y @modelcontextprotocol/server-github</span></div>
+    </div>
+
+    <!-- 将执行的命令 -->
+    <div class="cmd-box">
+      <div class="gh-head">将执行的命令</div>
+      <div class="cmd">npx -y @modelcontextprotocol/server-github</div>
+    </div>
+
+    <!-- 链接组 -->
+    <div class="links">
+      <a class="link-chip" href="#">官网</a>
+      <a class="link-chip" href="#">GitHub 仓库</a>
+      <a class="link-chip" href="#">GitHub 镜像</a>
+      <a class="link-chip" href="#">Smithery 页面</a>
+    </div>
+
+    <div class="p-act">
+      <button class="btn btn-primary">安装</button>
+      <button class="btn" onclick="this.closest('.overlay').remove()">取消</button>
+    </div>
+  </div>
+</div>
+
+<button class="to-top" type="button" onclick="window.scrollTo({top:0,behavior:'smooth'})" aria-label="回到顶部">↑</button>
+
+<script>
+function toggleTheme(){
+  const el=document.documentElement;
+  el.dataset.theme = el.dataset.theme==='dark' ? 'light' : 'dark';
+}
+function carouselNav(btn, dir){
+  const root=btn.closest('[data-carousel]');
+  const track=root.querySelector('.car-track');
+  const slide=track.querySelector('.slide');
+  if(!slide) return;
+  track.scrollBy({left: dir * (slide.offsetWidth + 8), behavior:'smooth'});
+}
+</script>
+</body>
+</html>

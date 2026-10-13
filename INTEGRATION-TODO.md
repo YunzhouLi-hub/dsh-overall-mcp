@@ -1,0 +1,28 @@
+# INTEGRATION-TODO
+
+状态更新（2026-10）：核心 API 已通过解包官方 peer 依赖源码核对（peer-audit/ 下：
+cordis@4.0.4、dsh-tools@0.0.1-rc.1、dsh-mcp-client@0.0.1-rc.1、dsh-client-ui-settings@0.0.1-rc.1），
+index.js 与 client/client.js 已按真实接口重写。剩余项是**真实 dsh 环境实测**：
+
+- [x] cordis 插件形态：`{name, inject:['tools'], async apply(ctx)}`；无 'ready' 事件，初始化写在 apply 内
+- [x] dsh-mcp-client 接法：`ctx.plugin(mcpClient, {transport, serverName, ...})` → Fiber；`fiber.dispose()` 卸载
+- [x] 工具注册：`defineTool` + `ctx.tools.register(def)`（返回 disposer，已挂 ctx.effect）
+- [x] 客户端：`window.__ModuleLoader__.load` + `ctx.slots.register({name:'settings.section', options:{id,order,label}}, Component)`
+- [x] **试装验证**（2026-10-12）：`dsh plugin --profile web add ./dsh-overall-mcp` 成功（peerDeps 需对齐 0.2.0-rc.2）；`--dump-config` 确认 composition 挂载；实际启动 web profile：首装扫描导入 6 台服务器（claude-desktop 4 / claude-code 1 / cursor 1），python 文档服务器成功握手（ListToolsRequest），注册表与报告落盘 `$DSH_HOME/overall-mcp/`
+- [ ] **端到端**：对话中调用 overall_mcp_list / search / install，确认 mcp__<name>__<tool> 工具出现
+- [x] 远程目录实测（2026-10-12）：Smithery 搜索返回 items[] 字段可用；官方目录/PulseMCP 已聚合进结果（search "github" 命中 smithery+official）
+- [x] 客户端交互式界面（2026-10-12）：发现宿主 `connection.fetch.register()` 官方模式（同 dsh-client-ui-deliverables，Connection 鉴权 + 浏览器 cookie）；index.js 注册 6 个 `/api/overall-mcp/*` 路由（servers/scan/search/install/set-enabled/remove），client.js 重写为交互式（服务器列表+启停/移除、重扫描、目录搜索+一键安装）。实测全部 200：list 返回实时连接状态、set-enabled 即时生效、install(smithery github)→remove 成功
+- [x] **桌面版崩溃修复**（2026-10-12）：根因=serverName 全局唯一冲突——桌面端 dsh-mcp-connector/dsh-mcp-panel 挂载同名 mcp-client 条目，我方 `ctx.plugin(mcpClient)` 子 fiber 异步抛 "already in use"，Electron 启动审计（dsh-app-boot auditStartupEntries）把失败 fiber 记为致命弹恢复框（CLI 仅 warning）。修复：connect() 用 `await fiber.await()` 捕获启动错误，冲突时依次降级 `<name>`→`<name>-om`→`<name>-om2`（dispose 后重试）；首装扫描 try/catch 包裹；publicList 增加 serverName/connectError。修复后在 16-bundle 完整克隆环境中本插件正常激活，web profile 实测 rea 自动降级 rea-om。崩溃恢复流程曾重置桌面 bundles 与用户偏好，已从 .bak 恢复（cordis.patch.yml 回写 + 16 项 bundles 还原）
+- [ ] 桌面版最终确认：用户重启 DSH 桌面版后确认设置区块与 API 正常（connection 服务在 Electron 下经 IPC 载体可用，dsh-host-webserver 注释说明 Electron 用 file://+IPC）
+- [x] **桌面版客户端注册 API 修正**（2026-10-12）：崩溃实为客户端条目——web 前端 boot 客户端插件（`window.__ModuleLoader__` + cordis client runtime），fiber state=failed 时抛 `web boot: N entry did not activate`。原来写成 `slots.register({name, options:{id,order,label}}, Comp)`（slot 声明形式）导致 apply 抛错；对照可用的 dshmarket / dsh-mcp-panel 源码，正确形式是 `ctx.slots.inject("settings.section", () => ctx.slots.register({name, id, order, label}, Comp))`（扁平字段 + inject 包裹 + 返回 disposer）。已修正并新增 tools/client-smoke.mjs 模拟 loader 断言注册形状。桌面版已可正常打开并显示 Overall MCP 页面
+- [x] serverName 冲突策略实测（2026-10-12）：web profile 实测 rea 因全局 patch 的 rea-mcp 占用而自动降级 rea-om，连接正常
+- [x] **按来源分组界面 + 分组批量启停**（2026-10-12）：client.js 重写为分组视图（对齐 Skills Manager 来源分组）：顶部统计（总数/已启用/已停用/已连接/连接异常）、来源+状态筛选、名称搜索、按 source 聚合的可折叠分组（组头显示数量与已启用计数 + 总开关）、行内显示工具前缀 `mcp__<serverName>__`。新增后端 `/api/overall-mcp/set-source-enabled` 与模型工具 `overall_mcp_set_source_enabled`；实测停用/启用 claude-desktop 组各影响 4 台且状态正确回读
+- [x] 目录条目的 source 分组核验：从目录安装的条目归入「Smithery / 官方 Registry / Awesome 清单」分组（label 映射已实现）
+- [x] **MCP 市场（自动发现市面上的 MCP）**（2026-10-12）：新增 `/api/overall-mcp/catalog`（GET/POST，支持 query/source/limit/refresh）与模型工具 `overall_mcp_catalog`；`lib/catalog.js` 新增 `browseCatalog`（无关键词也能浏览）与 `fetchAwesomeList`；客户端新增「MCP 市场」标签页（打开自动拉取、来源筛选、搜索、刷新、安装状态与仓库链接）。实测：三源合计 188 条（官方 100 / Smithery 10 / Awesome 120），无源错误；query=github 命中 12 条
+- [x] 市场源实测与修正（2026-10-12）：官方 Registry 记录嵌套在 `server` 字段（原扁平解析导致 0 条，已修复并支持 `packages`/`remotes`）；Smithery 用 `displayName`（已采用）；**PulseMCP 公开 API 已日落**（v0beta 410 API_SUNSET，其他路径 404）→ 移出默认来源，适配器保留；Glama API 需 Key → 不纳入。第三源改为 punkpeye/awesome-mcp-servers 社区清单（仅发现 + 仓库链接）
+- [x] 市场两处缺陷修复（2026-10-12）：(1) 缓存曾固化"已安装"快照 → 改为只缓存原始列表、每次读取重算标记，实测安装后立即显示「已安装」；(2) 安装请求曾阻塞 >120s（首次 npx 下载）→ 连接等待改为有界 8 秒，超时返回 `starting: true` 并后台续连，实测安装 8.0s 返回
+- [ ] 待复验：桌面版重启后查看「MCP 市场」标签页的实际渲染与安装流程
+- [x] **坏 schema 打挂整轮对话的修复**（2026-10-12）：用户报 `Invalid schema for function 'mcp__rea-om__analyze_javascript_application': "^[^\\0]*$" is not a "regex"`。根因：我们那条从 Cursor 配置导入的 `npx rea-agents@6.1.0` 发布的 REA schema 用 `\0`（全局安装版用 `\x00`，合规），DeepSeek 正则校验拒绝后**整个请求失败**。两层修复：**(1) 不再重复挂载** —— serverName 冲突判定为「已由其他插件提供」(`provided-externally`)，不再加 `-om` 后缀造重复工具集（该重复正是把坏 schema 带进请求的原因）；**(2) schema 守卫** —— 新增 `lib/schema-guard.js`（`\0`→`\x00`；反向引用/lookbehind/`\p{...}` 等不可移植写法则删除 `pattern`），通过为 `mcp__*` 包装 `ctx.tools.register` 生效，卸载时还原。取证端点 `GET /api/overall-mcp/tools`。实测：用故意带 `^[^\0]*$` 的 fixture MCP 服务器（`tools/fixture-bad-schema-mcp.mjs`）安装后，注册到的 schema 为 `^[^\x00]*$`；REA 条目状态变为 `provided-externally`，`mcp__rea-om__*` 不再出现。新增 5 例 schema-guard 单测（共 20 例）
+- [ ] 待用户确认：桌面版重启后，此前那条报错不再出现
+- [x] **版本检查与更新**（2026-10-12）：新增 `lib/updates.js`（解析 `npx`/`uvx`/Windows `cmd.exe /c` 包调用、npm/PyPI 最新版本查询、prerelease 感知的版本比较、按精确版本重写参数）；宿主新增 `/api/overall-mcp/updates`、`/api/overall-mcp/update` 与模型工具 `overall_mcp_check_updates` / `overall_mcp_update`；界面新增「检查更新」按钮与行内 `可更新 → x.y.z` +「更新」。实测真实案例：注册表里从 Cursor 导入的 `npx rea-agents@6.1.0` 被检测出落后（npm 最新 6.4.0），一键更新后 args 变为 `rea-agents@6.4.0`，复查 updatable=0。直接命令类服务器（codegraph / python server.py）如实报不可检测，不猜测
+- [x] REA 版本核查（2026-10-12）：全局安装 `rea-agents` = **6.4.0**（npm 最新），即 `mcp__rea__` 用的就是最新版；此前报错的 6.1.0 来自我们从 Cursor 配置导入的旧 pin，现已更新为 6.4.0（且该条目因重名被判定 `provided-externally`，实际运行的是全局 6.4.0）

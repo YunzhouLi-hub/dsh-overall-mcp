@@ -1,0 +1,5 @@
+# Host composition patch for dsh-overall-mcp.
+# Inserts the overall-mcp plugin into the web profile for every session.
+- insert:
+    - id: overall-mcp
+      name: dsh-overall-mcp

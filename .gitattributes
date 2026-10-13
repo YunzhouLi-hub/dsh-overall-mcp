@@ -1,0 +1,8 @@
+# 仓库里一律 LF：这些文件都是 LF，显式声明可避免 Windows 上出现整文件级 EOL 噪音
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
