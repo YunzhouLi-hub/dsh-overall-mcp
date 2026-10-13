@@ -62,14 +62,14 @@ const MARKET = {
       id: 'official:ac.snag/snag', title: 'snag', source: 'official-registry', author: 'ac.snag',
       description: 'Evidence capture for agents.', transport: 'stdio',
       install: { transport: 'stdio', command: 'npx', args: ['-y', '@snag/mcp'] },
-      repository: 'https://github.com/snag/mcp', version: '1.0.0',
+      repository: 'https://github.com/snag/mcp', version: '1.0.0', group: '开发工具',
       installable: true, installed: true, favorite: true,
     },
     {
       id: 'awesome:Gatyh/3dtexel-mcp', title: '3dtexel-mcp', source: 'awesome-list', author: 'Gatyh',
       description: '3D texture search over MCP.', transport: 'stdio',
       install: { transport: 'stdio', command: 'npx', args: ['-y', '3dtexel-mcp'] },
-      repository: 'https://github.com/Gatyh/3dtexel-mcp', version: null,
+      repository: 'https://github.com/Gatyh/3dtexel-mcp', version: null, group: '搜索与知识',
       installable: true, installed: false, favorite: false,
     },
     {
@@ -210,10 +210,10 @@ loadedNodes = walk(await render());
 tabButtons = walk(findByKey(loadedNodes, 'tabs')[0]).filter((n) => n.type === 'button');
 assert.deepEqual(tabButtons.map(textOf), ['已注册 (1)', 'MCP 市场 (3)'], 'market tab counts the listings');
 
-// The market page owns its stat line; every card also renders a fact row
-// under the same key, so take the page's own child rather than any match.
-// A child list can arrive as one nested array (createElement's rest args), so
-// flatten a level before looking for keys.
+// v4 splits the market chrome into three rows with one job each: the search
+// pill, then chips + compact filters, then a meta line of bold numbers. The
+// counts that are facts about the catalogue rather than controls moved to a
+// quiet line of their own, so assert each row where it now lives.
 function directChildren(node) {
   const out = [];
   const push = (c) => {
@@ -226,20 +226,46 @@ function directChildren(node) {
 }
 const marketPage = findByKey(loadedNodes, 'mkt')[0];
 assert.ok(marketPage, 'market page container present');
-const stats = directChildren(marketPage).filter((n) => n.props?.key === 'stats');
-assert.equal(stats.length, 1, 'stat line present');
-const statsText = textOf(stats[0]);
-assert.ok(statsText.includes('3 个可用 MCP'), `stat line names the total — got: ${statsText}`);
-assert.ok(statsText.includes('其中 1 个已安装'), 'stat line names the installed count');
-assert.ok(statsText.includes('官方 1'), 'stat line names per-source counts');
+const marketOwn = directChildren(marketPage);
+
+const searchRow = marketOwn.filter((n) => n.props?.key === 'search');
+assert.equal(searchRow.length, 1, 'search row present');
+const searchText = textOf(searchRow[0]);
+assert.ok(searchText.includes('🔍'), `search row carries its icon — got: ${searchText}`);
+assert.ok(searchText.includes('搜索'), 'search row keeps an explicit trigger');
+
+const metaRow = marketOwn.filter((n) => n.props?.key === 'meta');
+assert.equal(metaRow.length, 1, 'meta line present');
+const metaText = textOf(metaRow[0]);
+assert.ok(metaText.includes('3 个可用 MCP'), `meta line names the total — got: ${metaText}`);
+assert.ok(metaText.includes('第 1 / 1 页'), 'meta line names the page');
+assert.ok(metaText.includes('每页 20 条'), 'meta line names the page size');
+
+// The controls live inside the chip row's line, and the chips scroll there.
+const filters = marketOwn.filter((n) => n.props?.key === 'filters');
+assert.equal(filters.length, 1, 'filter row present');
+const chipRow = findByKey(walk(filters[0]), 'groups');
+assert.equal(chipRow.length, 1, 'chip row sits inside the filter line');
+assert.ok(walk(filters[0]).some((n) => n.type === 'select'), 'filter line carries the source/sort selects');
+assert.ok(walk(filters[0]).some((n) => n.type === 'button' && textOf(n) === '刷新'), 'filter line carries refresh');
+
+const sourceLine = marketOwn.filter((n) => n.props?.key === 'srcline');
+assert.equal(sourceLine.length, 1, 'per-source line present');
+const sourceText = textOf(sourceLine[0]);
+assert.ok(sourceText.includes('官方 1'), 'per-source line names the sources');
+assert.ok(sourceText.includes('其中 1 个已安装'), 'per-source line names the installed count');
 
 const search = loadedNodes.find((n) => n.type === 'input'
-  && String(n.props?.placeholder ?? '').includes('搜索市场'));
+  && String(n.props?.placeholder ?? '').includes('搜索'));
 assert.ok(search, 'market search input present');
 
 // --- 4. the masonry wrapper holds one rendered card per entry --------------
 const grids = findByKey(loadedNodes, 'grid');
 assert.equal(grids.length, 1, 'card grid present');
+// The column count is a media query in the injected sheet (inline styles
+// cannot express one), so the class is the hook that makes it bite. Without
+// it the grid falls back to two columns on a wide pane.
+assert.equal(grids[0].props?.className, 'omkt-grid', 'grid carries the breakpoint class');
 const cards = walk(grids[0]).filter((n) => n.type === 'article');
 assert.equal(cards.length, 3, `one card per listing (got ${cards.length})`);
 const ctaButtonsAll = [];

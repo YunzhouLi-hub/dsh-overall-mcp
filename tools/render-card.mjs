@@ -179,8 +179,13 @@ for (const { name, item, titleHref, installable } of samples) {
   assert.match(text, /22\.4k/, 'star count missing from the card face');
   assert.match(text, /87\.5k/, 'install count missing from the card face');
   assert.match(text, /更新于 2026-03-11/, 'update date missing from the card face');
-  assert.match(text, /本地进程（stdio）/, 'install method missing from the card face');
-  console.log('ok  card face states Star / 使用量 / 更新时间 / 安装方式 as static facts');
+  // v4 puts the transport in a small compatibility chip and keeps the shell
+  // command for the detail panel. The card must still say WHICH KIND of thing
+  // this is — the chip is that statement — but a wall of monospace on every
+  // card is exactly what the prototype drops.
+  assert.match(text, /MCP · stdio/, 'compatibility chip missing from the card face');
+  assert.doesNotMatch(text, /npx -y @snag\/mcp/, 'the install command belongs to the detail panel, not the card');
+  console.log('ok  card face states Star / 使用量 / 更新时间 / 传输 as static facts, command stays in the panel');
 }
 
 // ---- 6. the preview strip shows the repository's own pictures ------------
@@ -211,8 +216,10 @@ for (const { name, item, titleHref, installable } of samples) {
   const nodes = walk(tree);
   const imgs = nodes.filter((n) => n.type === 'img');
   assert.equal(imgs.length, 2, `expected one <img> per README picture, got ${imgs.length}`);
+  // v4 sizes the carousel slide at ~72% of the card, which on a 370px column
+  // is ~166px tall; the strip asks the proxy for a 2x copy of that.
   assert.equal(imgs[0].props.src,
-    'https://images.weserv.nl/?url=raw.githubusercontent.com%2Fx%2Fy%2FHEAD%2Fdocs%2Fa.png&h=232&fit=inside&we=1',
+    'https://images.weserv.nl/?url=raw.githubusercontent.com%2Fx%2Fy%2FHEAD%2Fdocs%2Fa.png&h=332&fit=inside&we=1',
     'picture is not fetched through the resize proxy');
   assert.equal(imgs[0].props.alt, '架构图', 'picture alt is dropped');
   assert.ok(imgs[1].props.loading === 'lazy' || imgs[1].props.loading === 'eager',

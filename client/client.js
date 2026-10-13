@@ -131,49 +131,121 @@ window.__ModuleLoader__.load({
 		};
 
 		const styles = {
-			page: { display: "grid", gap: 12, fontSize: 14, lineHeight: 1.6, color: T.text },
+			page: { display: "grid", gap: 12, fontSize: 13.5, lineHeight: 1.55, color: T.text },
 			toolbar: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" },
 			// ---- page head, ported from the v4 prototype ----------------------
 			// Two rows: identity + actions, then the sub-line. The brand mark is
 			// the only illustration in the whole page; everything else is text.
-			pageHead: { display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" },
-			headLeft: { display: "grid", gap: 5, minWidth: 0, flex: 1 },
-			titleRow: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", minWidth: 0 },
-			pageTitle: { fontSize: 18, fontWeight: 700, color: T.text, lineHeight: 1.2 },
-			versionChip: {
-				fontSize: 11, padding: "1px 7px", borderRadius: 999,
-				background: T.soft, color: T.text3, whiteSpace: "nowrap",
+			// v4's header is two rows: identity + actions on the first, the
+			// sub-line on its own row below so the outlined log button can sit
+			// at its far end. Stacking all four controls into one row is what
+			// made the old head read as a toolbar.
+			pageHead: { display: "grid", gap: 10, marginBottom: 14 },
+			// Row A: identity on the left, the page's controls on the right.
+			headRow: {
+				display: "flex", gap: 16, alignItems: "flex-start",
+				justifyContent: "space-between", flexWrap: "wrap",
 			},
-			pageSub: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", fontSize: 12, color: T.text3 },
-			pageSubLink: { color: T.brand, textDecoration: "none" },
-			headActs: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", flexShrink: 0 },
+			// Row B: the sub-line and the one outlined control that belongs with
+			// it, so the first row keeps a single filled button.
+			headSubRow: {
+				display: "flex", gap: 12, alignItems: "center",
+				justifyContent: "space-between", flexWrap: "wrap",
+			},
+			titleRow: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", minWidth: 0 },
+			pageTitle: {
+				fontSize: 18, fontWeight: 700, color: T.text,
+				lineHeight: 1.2, letterSpacing: "-0.02em",
+			},
+			// v4 states the version as plain muted text beside the title, not as
+			// a chip: it is a fact about the page, not a status to decode.
+			versionChip: { fontSize: 12, color: T.text3, fontWeight: 500, whiteSpace: "nowrap" },
+			pageSub: { display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", minWidth: 0 },
+			pageSubText: { margin: 0, fontSize: 12.5, color: T.text3 },
+			pageSubLink: { color: T.text2, textDecoration: "none", borderBottom: `1px solid ${T.line}` },
+			headActs: { display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", flexShrink: 0 },
 			// Floating return-to-top: it only exists once there is somewhere to
 			// return from, so a short page never carries a dead control.
 			toTop: {
 				position: "fixed", right: 22, bottom: 22, zIndex: 40,
-				width: 34, height: 34, padding: 0, borderRadius: 999,
-				display: "grid", placeItems: "center", fontSize: 15, lineHeight: 1,
+				width: 40, height: 40, padding: 0, borderRadius: 999,
+				display: "grid", placeItems: "center", fontSize: 16, lineHeight: 1,
 				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text2,
-				cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,.16)",
+				cursor: "pointer", boxShadow: "0 1px 2px rgba(0,0,0,.04)",
 			},
 			spacer: { marginLeft: "auto" },
 			button: {
-				padding: "5px 12px", borderRadius: 8, cursor: "pointer", fontSize: 13,
+				padding: "7px 14px", borderRadius: 8, cursor: "pointer", fontSize: 13,
+				fontWeight: 500,
 				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text,
 			},
-			// The primary action is the page's single brand-coloured element:
-			// one accent per view, not a rainbow of competing blues.
-			primary: { background: T.brand, borderColor: T.brand, color: "#fff", fontWeight: 600 },
-			// Underline tabs: the label sits on a rule, and the active rule is
-			// the accent. Filled pill tabs read as buttons and fight the content.
-			tabBar: { display: "flex", gap: 22, borderBottom: `1px solid ${T.line}`, marginBottom: 4 },
-			tab: {
-				padding: "9px 1px 8px", background: "transparent", cursor: "pointer", fontSize: 14,
-				color: T.text3, border: "none", borderBottom: "2px solid transparent",
+			// v4's primary is INK, not accent: exactly one filled button per
+			// view, with the accent spent on links, tab rules and badges
+			// instead. `T.text` on `T.cardBg` is v4's own light/dark pair
+			// (#111/#fff ↔ #f2f2f2/#111) without needing a second rule.
+			primary: { background: T.text, borderColor: T.text, color: T.cardBg, fontWeight: 600 },
+			// v4's `.btn-text`: borderless and muted, so it never competes with
+			// the one filled control beside it.
+			textBtn: {
+				padding: "7px 4px", borderRadius: 8, cursor: "pointer", fontSize: 13,
+				fontWeight: 500, border: "none", background: "transparent", color: T.text3,
 			},
-			tabActive: { color: T.text, fontWeight: 600, borderBottomColor: T.brand },
+			// v4's `.btn-outline`, used by 导出日志 alone.
+			outlineBtn: {
+				padding: "6px 12px", borderRadius: 8, cursor: "pointer", fontSize: 12.5,
+				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text2,
+				display: "inline-flex", alignItems: "center", gap: 6,
+			},
+			// Underline tabs: the label sits on a rule and the active rule is
+			// ink, not accent. v4 insets the rule by 8px on each side; the
+			// inline border spans the label instead, which at a 12px tab pad
+			// is the same 2px rule under the same word.
+			tabBar: {
+				display: "flex", gap: 2, alignItems: "center",
+				borderBottom: `1px solid ${T.line}`, marginBottom: 14, overflowX: "auto",
+			},
+			tab: {
+				padding: "10px 12px", background: "transparent", cursor: "pointer", fontSize: 13.5,
+				fontWeight: 500, color: T.text3, border: "none", whiteSpace: "nowrap",
+				borderBottom: "2px solid transparent",
+			},
+			tabActive: { color: T.text, fontWeight: 600, borderBottomColor: T.text },
 			stats: { display: "flex", gap: 14, flexWrap: "wrap", fontSize: 12, color: T.text3 },
-			filters: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" },
+			// v4's market chrome is three rows, and each row has one job: a
+			// search pill, a chip row with the page's compact controls at its
+			// end, then a meta line of bold numbers. Five controls in one row
+			// is what made the old page read as a form.
+			searchWrap: {
+				display: "flex", gap: 10, alignItems: "center", width: "100%",
+				padding: "11px 16px", borderRadius: 999,
+				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text3,
+			},
+			searchIcon: { fontSize: 13, lineHeight: 1, flexShrink: 0 },
+			searchInput: {
+				flex: 1, minWidth: 0, border: 0, outline: 0, background: "transparent",
+				fontSize: 14, color: T.text,
+			},
+			filters: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 18 },
+			// The chip row is the one horizontally scrollable thing on the page:
+			// a 5k-entry catalogue carries a long taxonomy, and twenty wrapped
+			// chips push the grid below the fold.
+			chips: { display: "flex", gap: 8, flex: 1, minWidth: 200, overflowX: "auto", paddingBottom: 2 },
+			filterBtn: {
+				flexShrink: 0, padding: "6px 12px", borderRadius: 8, fontSize: 12.5, cursor: "pointer",
+				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text2,
+			},
+			filterSelect: {
+				flexShrink: 0, padding: "6px 10px", borderRadius: 8, fontSize: 12.5,
+				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text2,
+			},
+			// v4's meta line: bold numbers with their units in muted text, and
+			// the freshness note pushed to the far right.
+			metaLine: {
+				display: "flex", gap: 14, flexWrap: "wrap", alignItems: "baseline",
+				fontSize: 12, color: T.text3, margin: "-6px 0 14px",
+			},
+			metaB: { fontWeight: 600, color: T.text2 },
+			metaTail: { marginLeft: "auto" },
 			select: {
 				padding: "6px 10px", borderRadius: 8, fontSize: 13,
 				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text,
@@ -182,23 +254,19 @@ window.__ModuleLoader__.load({
 				flex: 1, minWidth: 180, padding: "7px 12px", borderRadius: 8, fontSize: 13,
 				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text,
 			},
-			// The market search is the primary control of its view, so it is
-			// shaped like one: a pill that spans the row.
-			searchPill: {
-				flex: 1, minWidth: 220, padding: "8px 16px", borderRadius: 999, fontSize: 13,
-				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text,
-			},
 			group: { border: `1px solid ${T.line}`, borderRadius: 12, overflow: "hidden" },
 			groupHead: { display: "flex", gap: 10, alignItems: "center", padding: "10px 12px", background: T.soft },
 			groupTitle: { fontWeight: 600 },
-			badge: { fontSize: 12, padding: "1px 8px", borderRadius: 999, background: T.soft2, color: T.text2 },
-			pager: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", paddingTop: 4 },
-			groupChips: { display: "flex", gap: 6, flexWrap: "wrap" },
+			badge: { fontSize: 11, padding: "1px 7px", borderRadius: 999, background: T.soft2, color: T.text2, fontWeight: 500 },
+			pager: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 },
+			// v4's chip: outlined at rest, and the active one steps to grey
+			// rather than to the accent — a filter is a state, not an action.
 			chip: {
-				padding: "4px 12px", borderRadius: 999, fontSize: 12, cursor: "pointer",
+				flex: "none", padding: "5px 12px", borderRadius: 999, fontSize: 12, cursor: "pointer",
+				fontWeight: 500, whiteSpace: "nowrap",
 				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text2,
 			},
-			chipActive: { background: T.brand, color: "#fff", fontWeight: 600, borderColor: T.brand },
+			chipActive: { background: T.soft, color: T.text, fontWeight: 600, borderColor: T.line },
 			updateBadge: {
 				fontSize: 12, padding: "1px 8px", borderRadius: 999,
 				background: "rgba(0,180,42,0.12)", color: T.green, fontWeight: 600,
@@ -218,30 +286,47 @@ window.__ModuleLoader__.load({
 			// A masonry column flow lets a card with a long description stay tall
 			// without forcing its whole row to match it — the ragged bottom edge
 			// is what makes a 5k-entry catalogue scannable.
-			cardColumns: { columns: "3 268px", columnGap: 14 },
+			// Two columns by default, three from 1100px up, one below 720px —
+			// v4's breakpoints exactly, declared in ensureStyles because inline
+			// styles cannot carry a query. This inline value is the fallback for
+			// the moment before that sheet lands.
+			// The masonry wall. Column count is decided by the injected sheet's
+			// container queries; the inline value is the fallback for a browser
+			// that ignores them (and for the moment before the sheet lands).
+			cardColumns: { columns: 2, columnGap: 14 },
+			// The measurable box those queries read: its own inline size, not the
+			// window's. Also the reason the grid sits inside a wrapper at all.
+			gridHost: { containerType: "inline-size" },
 			card: {
 				breakInside: "avoid", WebkitColumnBreakInside: "avoid",
-				marginBottom: 14, display: "grid", gap: 9,
-				padding: "14px 16px 12px", borderRadius: 12,
+				marginBottom: 14, display: "grid", gap: 10,
+				padding: 16, borderRadius: 12,
 				border: `1px solid ${T.line}`, background: T.cardBg,
 				color: T.text, textAlign: "left", cursor: "pointer",
+				boxShadow: "0 1px 2px rgba(0,0,0,.04)",
 			},
 			// `minWidth: 0` is load-bearing: this is a *grid* item inside
 			// cardLeft's auto track, so its default `min-width:auto` resolves
 			// to min-content — and a `white-space:nowrap` title's min-content
 			// is its full text. Without it a long name widens the track past
 			// the card and shoves the install/detail buttons over the edge.
-			cardHead: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", minWidth: 0 },
+			cardHead: {
+				display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap",
+				minWidth: 0, marginBottom: 8,
+			},
 			// Header split: identity column (grows) + action column (fixed).
 			cardHd: { display: "flex", gap: 12, alignItems: "flex-start" },
-			cardLeft: { display: "grid", gap: 4, flex: 1, minWidth: 0 },
-			cardCta: { display: "flex", flexDirection: "column", gap: 6, alignItems: "stretch", flexShrink: 0 },
-			cardBody: { display: "grid", gap: 9, flex: 1, minWidth: 0, outline: "none" },
+			cardLeft: { display: "grid", gap: 0, flex: 1, minWidth: 0 },
+			cardCta: { display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end", flexShrink: 0 },
+			cardBody: { display: "grid", gap: 10, flex: 1, minWidth: 0, outline: "none" },
 			cardName: {
 				fontWeight: 700, fontSize: 15, color: T.text, textDecoration: "none",
 				overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%",
 			},
-			cardAuthor: { display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: T.text3, minWidth: 0 },
+			cardAuthor: {
+				display: "flex", gap: 6, alignItems: "center", fontSize: 12,
+				color: T.text2, minWidth: 0, marginBottom: 4,
+			},
 			// The author row's own tail: the separator and the version the
 			// source published, both muted so the author name stays the anchor.
 			cardDot: { color: T.text4 },
@@ -253,19 +338,21 @@ window.__ModuleLoader__.load({
 				display: "inline-flex", alignItems: "center", flexShrink: 0,
 				color: T.text3, textDecoration: "none",
 			},
-			statRow: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 12, color: T.text3 },
+			statRow: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", fontSize: 12, color: T.text3 },
 			stat: { display: "inline-flex", gap: 3, alignItems: "center", textDecoration: "none", color: "inherit" },
 			statB: { fontWeight: 600, color: T.text2 },
 			statSep: { color: T.text4 },
 			desc: {
-				fontSize: 12.5, lineHeight: 1.55, color: T.text2,
+				fontSize: 13, lineHeight: 1.6, color: T.text2,
 				display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden",
 			},
-			tags: { display: "flex", gap: 5, flexWrap: "wrap" },
-			tag: { fontSize: 11, padding: "2px 8px", borderRadius: 999, background: T.soft, color: T.text2 },
-			sourceTag: {
-				fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 600,
-				background: "rgba(77,107,254,0.10)", color: T.brand,
+			tags: { display: "flex", gap: 6, flexWrap: "wrap" },
+			// v4's tag is an outline pill, not a filled one: the card already
+			// carries one filled element (its install button) and nothing else
+			// should read as a control.
+			tag: {
+				fontSize: 11.5, padding: "3px 9px", borderRadius: 999,
+				border: `1px solid ${T.line}`, background: "transparent", color: T.text2,
 			},
 			verified: {
 				fontSize: 11, padding: "1px 7px", borderRadius: 999, fontWeight: 600,
@@ -284,6 +371,7 @@ window.__ModuleLoader__.load({
 			// hand at each image's own aspect ratio. The nav buttons float over
 			// the strip's edges, so inline styles cannot express them.
 			mediaRow: { position: "relative", minWidth: 0 },
+			mediaBlock: { display: "grid", gap: 0, minWidth: 0 },
 			mediaStrip: {
 				display: "flex", gap: 8, alignItems: "stretch", overflowX: "auto",
 				scrollSnapType: "x mandatory", paddingBottom: 2, minWidth: 0,
@@ -294,54 +382,70 @@ window.__ModuleLoader__.load({
 				border: `1px solid ${T.line2}`, background: T.soft, display: "block",
 			},
 			mediaImg: { width: "100%", height: "100%", objectFit: "cover", display: "block" },
+			// v4's scroll indicator: a 3px track with a thumb that tracks the
+			// strip, so "there are more pictures to the right" is visible
+			// without spending a row of the card on a scrollbar.
+			mediaBar: { height: 3, borderRadius: 99, background: T.soft2, marginTop: 8, overflow: "hidden" },
+			mediaBarThumb: {
+				display: "block", height: "100%", borderRadius: 99, background: T.text4,
+				transition: "transform .12s ease",
+			},
 			mediaNav: {
-				position: "absolute", top: "50%", transform: "translateY(-50%)", zIndex: 2,
-				width: 26, height: 26, padding: 0, borderRadius: "50%", cursor: "pointer",
+				position: "absolute", top: "50%", transform: "translateY(-60%)", zIndex: 2,
+				width: 24, height: 24, padding: 0, borderRadius: "50%", cursor: "pointer",
 				display: "grid", placeItems: "center", fontSize: 15, lineHeight: 1,
 				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text2,
 				boxShadow: "0 1px 4px rgba(0,0,0,0.14)",
 			},
-			code: {
-				display: "flex", gap: 6, alignItems: "center", minWidth: 0,
-				padding: "7px 10px", borderRadius: 8, background: T.soft,
-				fontSize: 11.5, color: T.text2,
+			// v4 shows the transport as one small chip and keeps the exact
+			// command for the detail panel: a card is a summary, and a wall of
+			// monospace on every card is not a summary. `title` still answers
+			// "what would this run" without leaving the card.
+			compat: { marginTop: 2, minWidth: 0 },
+			compatCode: {
+				display: "inline-block", padding: "3px 8px", borderRadius: 6,
+				border: `1px solid ${T.line}`, background: T.soft, color: T.text3,
+				fontSize: 11.5, lineHeight: 1.4,
 				fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
 			},
-			codeText: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-			caret: { color: T.brand, fontWeight: 700, flexShrink: 0 },
+			// v4 draws no rule between a card's content and its footer: the tags
+			// and the two icon buttons simply share the last line.
 			cardFt: {
 				display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between",
-				borderTop: `1px solid ${T.line2}`, paddingTop: 10,
+				marginTop: 2,
 			},
 			iconBtn: {
-				width: 28, height: 28, padding: 0, borderRadius: 8, display: "grid", placeItems: "center",
-				cursor: "pointer", fontSize: 13, lineHeight: 1,
-				border: "1px solid transparent", background: "transparent", color: T.text3,
+				padding: "4px 6px", borderRadius: 6, display: "grid", placeItems: "center",
+				cursor: "pointer", fontSize: 12, lineHeight: 1,
+				border: "none", background: "transparent", color: T.text3,
 			},
-			// ---- detail panel (v4: a wide sheet, header facts, sticky footer) ----
+			// ---- detail panel (v4: one white sheet, facts as plain rows) ----
 			overlay: {
 				position: "fixed", inset: 0, zIndex: 50, display: "grid", placeItems: "center",
-				background: "rgba(0,0,0,0.45)", padding: 24, overflow: "auto",
+				background: "rgba(0,0,0,0.40)", padding: 28, overflow: "auto",
 			},
 			detailPanel: {
-				width: "min(760px, 100%)", maxHeight: "100%", overflow: "auto",
-				display: "grid", gap: 14, padding: 0,
-				borderRadius: 14, border: `1px solid ${T.line}`,
+				width: "min(680px, 100%)", maxHeight: "100%", overflow: "auto",
+				display: "grid", gap: 14, padding: 22,
+				borderRadius: 16, border: `1px solid ${T.line}`,
 				background: T.cardBg, color: T.text,
+				boxShadow: "0 24px 64px rgba(0,0,0,0.14)",
 			},
-			detailHead: {
-				display: "grid", gap: 10, padding: "18px 20px 16px",
-				borderBottom: `1px solid ${T.line2}`, background: T.soft,
-			},
-			detailIdentity: { display: "flex", gap: 12, alignItems: "center", minWidth: 0 },
-			detailTitle: { fontWeight: 700, fontSize: 19, lineHeight: 1.3, minWidth: 0 },
+			// v4's panel head is not a separate band: it shares the sheet's
+			// background and padding, so the whole panel reads as one surface.
+			detailHead: { display: "grid", gap: 10 },
+			detailIdentity: { display: "flex", gap: 12, alignItems: "flex-start", minWidth: 0 },
+			detailTitle: { fontWeight: 700, fontSize: 17, lineHeight: 1.3, minWidth: 0 },
 			detailSub: { fontSize: 12, color: T.text3, marginTop: 2 },
-			detailBadges: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginLeft: "auto" },
-			detailDesc: { fontSize: 13, lineHeight: 1.65, margin: 0, whiteSpace: "pre-wrap", color: T.text2 },
-			detailBody: { display: "grid", gap: 14, padding: "0 20px" },
-			detailFacts: { display: "grid", gap: 5, padding: "12px 14px", borderRadius: 10, background: T.soft, fontSize: 12 },
-			detailRow: { display: "flex", gap: 10 },
-			detailKey: { color: T.text3, minWidth: 64, flexShrink: 0 },
+			detailTitleRow: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", minWidth: 0 },
+			detailDesc: { fontSize: 13.5, lineHeight: 1.65, margin: 0, whiteSpace: "pre-wrap", color: T.text2 },
+			detailBody: { display: "grid", gap: 14 },
+			// Facts sit directly on the sheet as label/value rows — no tinted
+			// box, because the GitHub box below is the one block that earns a
+			// background.
+			detailFacts: { display: "grid", gap: 6, fontSize: 12.5 },
+			detailRow: { display: "flex", gap: 12 },
+			detailKey: { color: T.text3, minWidth: 76, flexShrink: 0 },
 			detailVal: { minWidth: 0, wordBreak: "break-word", color: T.text2 },
 			detailLinks: { display: "flex", gap: 8, flexWrap: "wrap" },
 			linkChip: {
@@ -350,24 +454,37 @@ window.__ModuleLoader__.load({
 			},
 			detailActions: {
 				display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap",
-				padding: "14px 20px", borderTop: `1px solid ${T.line2}`, background: T.soft,
+				paddingTop: 14, borderTop: `1px solid ${T.line2}`,
 			},
-			cmdBox: { display: "grid", gap: 4, padding: "12px 14px", borderRadius: 10, background: T.soft },
+			cmdBox: {
+				display: "grid", gap: 4, padding: "10px 12px", borderRadius: 8,
+				border: `1px solid ${T.line}`, background: T.soft,
+			},
 			cmd: {
 				fontSize: 12, color: T.text2, userSelect: "all",
 				fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
 				wordBreak: "break-all",
 			},
-			ghBox: { display: "grid", gap: 9, padding: "14px 16px", borderRadius: 10, border: `1px solid ${T.line}`, background: T.cardBg },
-			ghHead: { fontWeight: 600, fontSize: 11, color: T.text3, letterSpacing: 0.5 },
+			ghBox: {
+				display: "grid", gap: 10, padding: 14, borderRadius: 12,
+				border: `1px solid ${T.line}`, background: T.soft,
+			},
+			ghHead: { fontWeight: 600, fontSize: 11, color: T.text3, letterSpacing: 0.6 },
 			ghRepo: { fontWeight: 600, fontSize: 14, color: T.brand, textDecoration: "none" },
-			ghStats: { display: "flex", gap: 18, flexWrap: "wrap" },
-			ghStat: { display: "inline-flex", gap: 5, alignItems: "baseline", fontSize: 13 },
+			ghStats: { display: "flex", gap: 20, flexWrap: "wrap" },
+			// v4 stacks each GitHub number over its label.
+			ghStat: { display: "flex", flexDirection: "column", gap: 2, fontSize: 13 },
 			ghStatNum: { fontWeight: 700, fontSize: 15, color: T.text },
-			ghStatLab: { color: T.text3, fontSize: 12 },
+			ghStatLab: { color: T.text3, fontSize: 11 },
 			message: { fontSize: 13, color: T.text2 },
 			error: { fontSize: 13, color: "#f53f3f" },
 			hint: { fontSize: 12, color: T.text3 },
+			// v4's `.note`: the page's closing footnote, ruled off from the
+			// content above it.
+			note: {
+				marginTop: 28, paddingTop: 14, borderTop: `1px solid ${T.line}`,
+				fontSize: 12, color: T.text3, lineHeight: 1.7,
+			},
 		};
 
 		/** Small toggle switch mirroring the Skills Manager group switches. */
@@ -474,15 +591,41 @@ window.__ModuleLoader__.load({
 				// reads as "this is the thing under your cursor" and not as a
 				// shadow the layout did not ask for.
 				".omkt-card{transition:border-color .15s ease,box-shadow .15s ease}",
-				".omkt-card:hover{border-color:rgba(77,107,254,.55);box-shadow:0 6px 18px rgba(0,0,0,.10)}",
+				// v4's card hover: a hair darker border and a soft lift, not an
+				// accent-coloured outline. One accent per screen is the rule.
+				".omkt-card:hover{border-color:#d4d4d4;box-shadow:0 4px 14px rgba(0,0,0,.06)}",
 				".omkt-card:focus-visible{outline:2px solid #4d6bfe;outline-offset:2px}",
 				".omkt-title{color:inherit;text-decoration:none}",
 				".omkt-title:hover{color:#4d6bfe}",
 				".omkt-btn,.omkt-chip,.omkt-link{transition:border-color .12s ease,background .12s ease,color .12s ease}",
 				".omkt-btn:hover{border-color:rgba(128,128,128,.75)}",
-				".omkt-btn-primary{background:#4d6bfe;border-color:#4d6bfe;color:#fff;font-weight:600}",
-				".omkt-btn-primary:hover{background:#3b5be0;border-color:#3b5be0}",
+				// The primary button's *colours* live inline (ink background,
+				// surface foreground — they flip with the theme). Nothing here
+				// may set background or color or it would either lose to the
+				// inline style or, worse, win in one theme only.
+				".omkt-btn-primary:hover{opacity:.85}",
+				".omkt-btn-text{transition:opacity .12s ease}",
+				".omkt-btn-text:hover{opacity:.7}",
+				".omkt-btn-outline:hover{background:rgba(128,128,128,.10)}",
 				".omkt-btn:disabled{opacity:.55;cursor:default}",
+				// v4's breakpoints for the card grid. Inline `columns:2` is the
+				// fallback; these rules only ever *raise* or *lower* the count,
+				// hence !important — nothing else can beat an inline style, and
+				// without this the wall would stay two columns on a wide pane.
+				//
+				// The container queries are the ones that matter: the pane is a
+				// slice of a wide window, so the question is how much room the
+				// grid got, never how wide the window is. The @media pair stays
+				// as a fallback for a renderer without container support.
+				".omkt-grid{column-count:2;column-gap:14px}",
+				"@media (min-width:1100px){.omkt-grid{column-count:3!important}}",
+				"@media (max-width:720px){.omkt-grid{column-count:1!important}}",
+				// The container trio covers all three bands, so a narrow box can
+				// never be left holding the wide-window answer: it is the last
+				// word for a renderer that understands it.
+				"@container (max-width:719px){.omkt-grid{column-count:1!important}}",
+				"@container (min-width:720px) and (max-width:1099px){.omkt-grid{column-count:2!important}}",
+				"@container (min-width:1100px){.omkt-grid{column-count:3!important}}",
 				".omkt-icon:hover{background:rgba(128,128,128,.14)}",
 				// The GitHub mark beside a card title: inked on hover only, so a
 				// list of cards stays quiet but the repo is always one click away.
@@ -504,10 +647,15 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(el);
 		}
 
-		/** One big number + small label, for the GitHub stat row. */
-		function ghStat(label, value) {
+		/**
+		 * One big number + small label, for the GitHub stat row.
+		 *
+		 * `raw` renders the value verbatim — the licence is a word, and
+		 * "MIT → 1" out of `compact()` would be a lie about a legal term.
+		 */
+		function ghStat(label, value, raw) {
 			return createElement("span", { style: styles.ghStat }, [
-				createElement("b", { key: "n", style: styles.ghStatNum }, compact(value)),
+				createElement("b", { key: "n", style: styles.ghStatNum }, raw ? String(value) : compact(value)),
 				createElement("span", { key: "l", style: styles.ghStatLab }, label),
 			]);
 		}
@@ -526,8 +674,9 @@ window.__ModuleLoader__.load({
 			 * A repo with neither renders nothing at all. No placeholder, no
 			 * invented graphic — an empty slot is honest and a fake one is not.
 			 */
-			function MediaStrip({ media, height = 116 }) {
+			function MediaStrip({ media, height = 166 }) {
 				const strip = useRef(null);
+				const [progress, setProgress] = useState(0);
 				const slides = media?.images?.length
 					? media.images
 					: media?.og
@@ -538,26 +687,48 @@ window.__ModuleLoader__.load({
 					const node = strip.current;
 					if (node) node.scrollBy({ left: dir * node.clientWidth * 0.8, behavior: "smooth" });
 				};
-				return createElement("div", { key: "media", style: styles.mediaRow }, [
+				// v4 draws a 3px progress bar under every carousel. It is the only
+				// thing that tells you the strip scrolls at all once the
+				// scrollbar is hidden, so it tracks the real scroll offset.
+				const onScroll = (event) => {
+					const node = event.currentTarget;
+					const max = node.scrollWidth - node.clientWidth;
+					setProgress(max > 0 ? Math.min(1, Math.max(0, node.scrollLeft / max)) : 0);
+				};
+				const thumb = Math.max(Math.round(100 / slides.length), 18);
+				return createElement("div", { key: "media", style: styles.mediaBlock }, [
+					createElement("div", { key: "row", style: styles.mediaRow }, [
+						slides.length > 1
+							? createElement("button", {
+								key: "prev", type: "button", className: "omkt-media-nav", style: { ...styles.mediaNav, left: 4 },
+								title: "上一张", "aria-label": "上一张",
+								onClick: (e) => { e.stopPropagation(); scrollBy(-1); },
+							}, "‹")
+							: null,
+						createElement("div", {
+							key: "strip", ref: strip, className: "omkt-media", style: { ...styles.mediaStrip, height },
+							onClick: (e) => e.stopPropagation(),
+							onScroll,
+						}, slides.map((slide, i) => createElement(MediaSlide, {
+							key: slide.url, slide, height, index: i,
+						}))),
+						slides.length > 1
+							? createElement("button", {
+								key: "next", type: "button", className: "omkt-media-nav", style: { ...styles.mediaNav, right: 4 },
+								title: "下一张", "aria-label": "下一张",
+								onClick: (e) => { e.stopPropagation(); scrollBy(1); },
+							}, "›")
+							: null,
+					].filter(Boolean)),
 					slides.length > 1
-						? createElement("button", {
-							key: "prev", type: "button", className: "omkt-media-nav", style: { ...styles.mediaNav, left: 4 },
-							title: "上一张", "aria-label": "上一张",
-							onClick: (e) => { e.stopPropagation(); scrollBy(-1); },
-						}, "‹")
-						: null,
-					createElement("div", {
-						key: "strip", ref: strip, className: "omkt-media", style: { ...styles.mediaStrip, height },
-						onClick: (e) => e.stopPropagation(),
-					}, slides.map((slide, i) => createElement(MediaSlide, {
-						key: slide.url, slide, height, index: i,
-					}))),
-					slides.length > 1
-						? createElement("button", {
-							key: "next", type: "button", className: "omkt-media-nav", style: { ...styles.mediaNav, right: 4 },
-							title: "下一张", "aria-label": "下一张",
-							onClick: (e) => { e.stopPropagation(); scrollBy(1); },
-						}, "›")
+						? createElement("div", { key: "bar", style: styles.mediaBar },
+							createElement("i", {
+								style: {
+									...styles.mediaBarThumb,
+									width: `${thumb}%`,
+									transform: `translateX(${Math.round(progress * (100 - thumb) / thumb * 100)}%)`,
+								},
+							}))
 						: null,
 				].filter(Boolean));
 			}
@@ -640,6 +811,11 @@ window.__ModuleLoader__.load({
 				? item.transport === "stdio" ? "本地进程（stdio）" : "远程端点（streamable-http）"
 				: null;
 			const updatedAt = enriched?.pushedAt ?? item.updatedAt ?? null;
+			// v4's compatibility chip: the transport in three words, in the slot
+			// where the card used to print an entire shell command.
+			const transportChip = item.transport && item.transport !== "unknown"
+				? item.transport === "stdio" ? "MCP · stdio" : "MCP · remote"
+				: "MCP";
 
 			const installCmd = item.install
 				? item.install.transport === "stdio"
@@ -690,8 +866,6 @@ window.__ModuleLoader__.load({
 							onClick: (e) => e.stopPropagation(),
 						}, githubMark(14))
 						: null,
-					createElement("span", { key: "src", style: styles.sourceTag },
-						SOURCE_LABELS[`catalog:${item.source}`] ?? item.source),
 					item.verified ? createElement("span", { key: "v", style: styles.verified, title: "上游已认证" }, "✓ 认证") : null,
 					item.official ? createElement("span", { key: "o", style: styles.badge }, "官方") : null,
 					item.installed ? createElement("span", { key: "inst", style: styles.installed }, "已安装") : null,
@@ -707,9 +881,11 @@ window.__ModuleLoader__.load({
 				//    version. It rides here rather than in the stat row because
 				//    "whose is this and which build" is one thought.
 				createElement("div", { key: "author", style: styles.cardAuthor }, [
-					createElement(Avatar, { key: "av", item, author, size: 20, src: item.icon ?? enriched?.avatar }),
+					createElement(Avatar, { key: "av", item, author, size: 18, src: item.icon ?? enriched?.avatar }),
+					// v4 writes the author bare: the avatar already says
+					// "account", and an @ on every card is one glyph of noise.
 					createElement("span", { key: "n", title: author ? `@${author}` : undefined },
-						author ? `@${author}` : "作者未标注"),
+						author || "作者未标注"),
 					item.version
 						? [
 							createElement("span", { key: "d", style: styles.cardDot }, "·"),
@@ -722,9 +898,20 @@ window.__ModuleLoader__.load({
 				// 3. stat row — every number is a link when it has one, so a
 				//    figure is never a dead end. Separators are part of the list
 				//    rather than CSS margins, so the row can wrap without the
-				//    dots ending up stranded at a line start.
+				//    dots ending up stranded at a line start. The catalogue's own
+				//    name ends the row: it answers "where did this come from",
+				//    which is a footnote, not a badge.
 				(() => {
 					const cells = [
+						typeof item.installs === "number"
+							? createElement("span", { key: "in", style: styles.stat, title: item.installsLabel || "使用量" }, [
+								createElement("span", { key: "g" }, "↓"),
+								createElement("b", { key: "n", style: styles.statB }, compact(item.installs)),
+								item.installsLabel
+									? createElement("span", { key: "l", style: styles.statSep }, ` ${item.installsLabel}`)
+									: null,
+							])
+							: null,
 						typeof stars === "number"
 							? createElement("a", {
 								key: "st", className: "omkt-link", style: styles.stat, href: item.repository || "#",
@@ -733,12 +920,6 @@ window.__ModuleLoader__.load({
 							}, [
 								createElement("span", { key: "g" }, "★"),
 								createElement("b", { key: "n", style: styles.statB }, compact(stars)),
-							])
-							: null,
-						typeof item.installs === "number"
-							? createElement("span", { key: "in", style: styles.stat, title: item.installsLabel || "使用量" }, [
-								createElement("span", { key: "g" }, "↓"),
-								createElement("b", { key: "n", style: styles.statB }, compact(item.installs)),
 							])
 							: null,
 						typeof enriched?.forks === "number"
@@ -754,9 +935,8 @@ window.__ModuleLoader__.load({
 							? createElement("span", { key: "up", style: styles.stat, title: "最近更新" },
 								`更新于 ${String(updatedAt).slice(0, 10)}`)
 							: null,
-						transport
-							? createElement("span", { key: "tr", style: styles.stat, title: "安装方式" }, transport)
-							: null,
+						createElement("span", { key: "src", style: styles.stat },
+							SOURCE_LABELS[`catalog:${item.source}`] ?? item.source),
 					].filter(Boolean);
 					if (!cells.length) return null;
 					return createElement("div", { key: "stats", style: styles.statRow },
@@ -774,21 +954,21 @@ window.__ModuleLoader__.load({
 							: item.installable
 								? createElement("button", {
 									key: "install", type: "button", className: "omkt-btn omkt-btn-primary",
-									style: { ...styles.button, ...styles.primary, padding: "5px 14px", fontSize: 12 },
+									style: { ...styles.button, ...styles.primary, padding: "6px 14px", fontSize: 13, fontWeight: 600 },
 									disabled: busy,
 									onClick: (e) => { e.stopPropagation(); onInstall(item); },
 								}, busy ? "处理中…" : item.deprecated ? "仍要安装" : "安装")
 								: createElement("span", { key: "m", style: styles.hint }, "需手动配置"),
 						createElement("button", {
-							key: "detail", type: "button", className: "omkt-btn",
-							style: { ...styles.button, padding: "5px 12px", fontSize: 12 },
+							key: "detail", type: "button", className: "omkt-btn omkt-btn-text",
+							style: { ...styles.textBtn, fontSize: 12 },
 							onClick: (e) => { e.stopPropagation(); onOpen(item); },
 						}, "详情"),
 					]),
 				]), // header
 
-				// 4. description, clamped to two lines so every card in a column
-				//    keeps the same silhouette.
+				// 4. description, clamped to three lines so every card in a
+				//    column keeps the same silhouette.
 				createElement("div", { key: "desc", style: styles.desc }, description.slice(0, 160)),
 
 				// The upstream's own words, when it deprecated this entry.
@@ -801,15 +981,14 @@ window.__ModuleLoader__.load({
 				//    social card when there are none.
 				createElement(MediaStrip, { key: "media", media: repoMedia }),
 
-				// 6. the exact command the plugin would run — shown on the card
-				//    because "what will this do to my machine" is the first
-				//    question an install button raises.
-				installCmd
-					? createElement("div", { key: "code", style: styles.code, title: installCmd }, [
-						createElement("span", { key: "c", style: styles.caret }, "›_"),
-						createElement("span", { key: "t", style: styles.codeText }, installCmd),
-					])
-					: null,
+				// 6. the compatibility chip: what kind of thing this is, in the
+				//    shape v4 gives it. The command it would run is one hover
+				//    away and spelled out in the detail panel.
+				createElement("div", { key: "compat", style: styles.compat },
+					createElement("code", {
+						key: "c", style: styles.compatCode,
+						title: [transport, installCmd].filter(Boolean).join(" · ") || "该来源未公布安装方式",
+					}, transportChip)),
 				]), // body (clickable surface)
 
 				// 7. footer: tags on the left, the actions a card can decide by
@@ -817,7 +996,7 @@ window.__ModuleLoader__.load({
 				//    so starring or ⋯ never also opens the detail panel.
 				createElement("div", { key: "ft", style: styles.cardFt }, [
 					tags.length
-						? createElement("div", { key: "tags", style: { ...styles.tags, minWidth: 0 } },
+						? createElement("div", { key: "tags", style: { ...styles.tags, flex: 1, minWidth: 0 } },
 							tags.map((t) => createElement("span", { key: t, style: styles.tag }, t)))
 						: createElement("span", { key: "notags", style: styles.hint },
 							item.installable ? "可一键安装" : "需手动配置"),
@@ -1091,31 +1270,40 @@ window.__ModuleLoader__.load({
 				onClick: (e) => { if (e.target === e.currentTarget) onClose(); },
 			}, [
 				createElement("div", { key: "panel", className: "omkt-panel", style: styles.detailPanel }, [
-					// ---- header: identity + provenance ----
+					// ---- header: identity + provenance, and the way out ----
 					createElement("div", { key: "head", style: styles.detailHead }, [
 						createElement("div", { key: "id", style: styles.detailIdentity }, [
-							createElement(Avatar, { key: "av", item, author, size: 56, src: item.icon ?? enriched?.avatar }),
-							createElement("div", { key: "t", style: { minWidth: 0 } }, [
-								titleHref
-									? createElement("a", {
-										key: "n", className: "omkt-title", href: titleHref,
-										target: "_blank", rel: "noreferrer", title: titleHref,
-										style: styles.detailTitle,
-									}, item.title)
-									: createElement("div", { key: "n", style: styles.detailTitle }, item.title),
+							createElement(Avatar, { key: "av", item, author, size: 44, src: item.icon ?? enriched?.avatar }),
+							createElement("div", { key: "t", style: { minWidth: 0, flex: 1 } }, [
+								// v4 puts the badges beside the name, not pushed to
+								// the far edge: they qualify the title, and the
+								// corner belongs to the close button.
+								createElement("div", { key: "row", style: styles.detailTitleRow }, [
+									titleHref
+										? createElement("a", {
+											key: "n", className: "omkt-title", href: titleHref,
+											target: "_blank", rel: "noreferrer", title: titleHref,
+											style: styles.detailTitle,
+										}, item.title)
+										: createElement("div", { key: "n", style: styles.detailTitle }, item.title),
+									item.verified ? createElement("span", { key: "v", style: styles.verified }, "✓ 认证") : null,
+									item.official ? createElement("span", { key: "o", style: styles.badge }, "官方") : null,
+									item.installed ? createElement("span", { key: "i", style: styles.installed }, "已安装") : null,
+									item.deprecated ? createElement("span", { key: "d", style: styles.deprecated }, "已废弃") : null,
+								].filter(Boolean)),
 								createElement("div", { key: "m", style: styles.detailSub }, [
 									SOURCE_LABELS[`catalog:${item.source}`] ?? item.source,
 									author ? `@${author}` : null,
 									item.version ? `v${item.version}` : null,
+									item.transport && item.transport !== "unknown" ? item.transport : null,
 									typeof stars === "number" ? `★ ${compact(stars)}` : null,
 								].filter(Boolean).join(" · ")),
 							]),
-							createElement("div", { key: "b", style: styles.detailBadges }, [
-								item.verified ? createElement("span", { key: "v", style: styles.verified }, "✓ 认证") : null,
-								item.official ? createElement("span", { key: "o", style: styles.badge }, "官方") : null,
-								item.installed ? createElement("span", { key: "i", style: styles.installed }, "已安装") : null,
-								item.deprecated ? createElement("span", { key: "d", style: styles.deprecated }, "已废弃") : null,
-							].filter(Boolean)),
+							createElement("button", {
+								key: "x", type: "button", className: "omkt-btn omkt-btn-outline",
+								style: { ...styles.outlineBtn, marginLeft: "auto" },
+								onClick: onClose, title: "关闭",
+							}, "关闭"),
 						]),
 						createElement("p", { key: "desc", style: styles.detailDesc }, description),
 						tags.length
@@ -1133,32 +1321,12 @@ window.__ModuleLoader__.load({
 					// Shown first because it is the only part of this panel a
 					// screenshot can answer, and absent when the repo has none.
 					createElement(MediaStrip, { key: "media", media: repoMedia, height: 200 }),
-					// facts, each labelled so nothing is ambiguous
-					createElement("div", { key: "facts", style: styles.detailFacts }, [
-						DetailRow("来源", SOURCE_LABELS[`catalog:${item.source}`] ?? item.source),
-						DetailRow("作者", author ? `@${author}` : "—"),
-						DetailRow("版本", item.version ?? "—"),
-						DetailRow("传输", item.transport && item.transport !== "unknown" ? item.transport : "—"),
-						DetailRow("Star", typeof enriched?.stars === "number" ? String(enriched.stars)
-							: typeof item.stars === "number" ? String(item.stars) : "目录未提供"),
-						DetailRow("使用量",
-							typeof item.installs === "number"
-								? `${item.installs} ${item.installsLabel ?? "次使用"}${item.installsWindow ? `（${item.installsWindow}）` : ""}`
-								: "该来源不发布"),
-						DetailRow("更新时间", (enriched?.pushedAt ?? item.updatedAt)?.slice(0, 10) || "该来源不提供"),
-						DetailRow("安装方式",
-							item.installable
-								? item.install.transport === "stdio" ? "本地进程（stdio）" : "远程端点（streamable-http）"
-								: "需手动配置"),
-						item.install?.transport === "streamable-http"
-							? DetailRow("端点", item.install.url)
-							: null,
-					].filter(Boolean)),
-
 					// The GitHub block: what the API enrichment knows about the
 					// repository, as plain labelled facts. Absent numbers stay absent —
 					// no catalog publishes GitHub data, and a missing number must not
-					// read as zero any more than it may sort as one.
+					// read as zero any more than it may sort as one. v4 puts this
+					// block above the catalogue facts, because the repository is the
+					// thing the reader came for.
 					repo ? createElement("div", { key: "gh", style: styles.ghBox }, [
 						createElement("div", { key: "h", style: styles.ghHead }, "GITHUB 仓库"),
 						createElement("a", {
@@ -1172,14 +1340,14 @@ window.__ModuleLoader__.load({
 									typeof enriched.forks === "number" ? ghStat("Fork", enriched.forks) : null,
 									typeof enriched.openIssues === "number" ? ghStat("Issue", enriched.openIssues) : null,
 									typeof enriched.watchers === "number" ? ghStat("Watch", enriched.watchers) : null,
+									enriched.license ? ghStat("许可证", enriched.license, true) : null,
 								].filter(Boolean)),
 								...(enriched.archived
 									? [createElement("div", { key: "arc", style: styles.warnLine }, "该仓库已被作者归档（Archived）")]
 									: []),
-								...(enriched.language || enriched.license || enriched.pushedAt || enriched.createdAt
+								...(enriched.language || enriched.pushedAt || enriched.createdAt
 									? [
 										enriched.language ? DetailRow("语言", enriched.language) : null,
-										enriched.license ? DetailRow("许可证", enriched.license) : null,
 										enriched.pushedAt ? DetailRow("最近推送", enriched.pushedAt.slice(0, 10)) : null,
 										enriched.createdAt ? DetailRow("创建于", enriched.createdAt.slice(0, 10)) : null,
 									].filter(Boolean)
@@ -1188,6 +1356,32 @@ window.__ModuleLoader__.load({
 							: createElement("div", { key: "n", style: styles.hint },
 								"GitHub 信息暂不可用（可能受限流或网络影响；其余信息不受影响）"),
 						]) : null,
+
+					// facts, each labelled so nothing is ambiguous. Anything the
+					// GitHub block above already states (stars, last push) is not
+					// repeated: v4's rule is that a panel states each fact once.
+					createElement("div", { key: "facts", style: styles.detailFacts }, [
+						DetailRow("来源", SOURCE_LABELS[`catalog:${item.source}`] ?? item.source),
+						DetailRow("作者", author ? `@${author}` : "—"),
+						DetailRow("版本", item.version ?? "—"),
+						DetailRow("传输", item.transport && item.transport !== "unknown" ? item.transport : "—"),
+						repo && enriched ? null
+							: DetailRow("Star", typeof enriched?.stars === "number" ? String(enriched.stars)
+								: typeof item.stars === "number" ? String(item.stars) : "目录未提供"),
+						enriched?.pushedAt ? null
+							: DetailRow("更新时间", (enriched?.pushedAt ?? item.updatedAt)?.slice(0, 10) || "该来源不提供"),
+						DetailRow("使用量",
+							typeof item.installs === "number"
+								? `${item.installs} ${item.installsLabel ?? "次使用"}${item.installsWindow ? `（${item.installsWindow}）` : ""}`
+								: "该来源不发布"),
+						DetailRow("安装方式",
+							item.installable
+								? item.install.transport === "stdio" ? "本地进程（stdio）" : "远程端点（streamable-http）"
+								: "需手动配置"),
+						item.install?.transport === "streamable-http"
+							? DetailRow("端点", item.install.url)
+							: null,
+					].filter(Boolean)),
 
 					// the exact command the plugin would run, so nothing is hidden
 					installCmd
@@ -1237,13 +1431,14 @@ window.__ModuleLoader__.load({
 						onToggleFavorite
 							? createElement("button", {
 								key: "fav", type: "button",
-								className: `omkt-btn${item.favorite ? " omkt-icon-on" : ""}`,
-								style: styles.button,
+								className: `omkt-btn omkt-btn-outline${item.favorite ? " omkt-icon-on" : ""}`,
+								style: { ...styles.outlineBtn, fontSize: 13 },
 								onClick: () => onToggleFavorite(item),
 							}, item.favorite ? "♥ 已收藏" : "♡ 收藏")
 							: null,
-						createElement("span", { key: "spacer", style: styles.spacer }),
-						createElement("button", { key: "cancel", type: "button", className: "omkt-btn", style: styles.button, onClick: onClose }, "关闭"),
+						// No "关闭" here: v4 keeps the way out in the panel's
+						// top-right corner, where a modal's close button is
+						// looked for, and the footer holds only the actions.
 					]),
 				]),
 			]);
@@ -1648,13 +1843,54 @@ window.__ModuleLoader__.load({
 				// The primary action follows the tab, because each tab has one
 				// action that matters and two primary buttons is none.
 				createElement("div", { key: "head", style: styles.pageHead }, [
-					createElement("div", { key: "hd-left", style: styles.headLeft }, [
+					// Row A — identity on the left, controls on the right. One
+					// filled button per view: everything beside it is quiet text.
+					createElement("div", { key: "hd-row1", style: styles.headRow }, [
 						createElement("div", { key: "hd-title", style: styles.titleRow }, [
 							brandMark(22),
 							createElement("strong", { key: "n", style: styles.pageTitle }, "总体 MCP"),
 							createElement("span", { key: "hd-ver", style: styles.versionChip, title: "插件版本" },
 								`v${CLIENT_VERSION}`),
 						]),
+						createElement("div", { key: "hd-acts", style: styles.headActs }, [
+							tab === "market"
+								? createElement("button", {
+									key: "hd-primary", type: "button", className: "omkt-btn omkt-btn-primary",
+									style: { ...styles.button, ...styles.primary }, disabled: marketBusy,
+									onClick: () => loadMarket({ refresh: true }),
+								}, marketBusy ? "更新中…" : "更新插件市场")
+								: createElement("button", {
+									key: "hd-primary", type: "button", className: "omkt-btn omkt-btn-primary",
+									style: { ...styles.button, ...styles.primary }, disabled: busy, onClick: doScan,
+								}, "重新扫描宿主机"),
+							// Both tabs keep the other tab's primary action one click
+							// away, as a text button: switching tabs to rescan is
+							// a detour nobody wants to discover.
+							tab === "market"
+								? createElement("button", {
+									key: "hd-secondary", type: "button", className: "omkt-btn omkt-btn-text",
+									style: styles.textBtn, disabled: busy, onClick: doScan,
+								}, "重新扫描宿主机")
+								: createElement("button", {
+									key: "hd-secondary", type: "button", className: "omkt-btn omkt-btn-text",
+									style: styles.textBtn, disabled: marketBusy,
+									onClick: () => { setTab("market"); if (market === null) loadMarket({}); },
+								}, "打开 MCP 市场"),
+							createElement("button", {
+								key: "hd-updates", type: "button", className: "omkt-btn omkt-btn-text", style: styles.textBtn,
+								disabled: busy, onClick: doCheckUpdates,
+							}, "检查更新"),
+							close
+								? createElement("button", {
+									key: "hd-close", type: "button", className: "omkt-btn omkt-btn-text", style: styles.textBtn,
+									onClick: close,
+								}, "关闭")
+								: null,
+						]),
+					]),
+					// Row B — the sub-line, with the one outlined control that
+					// belongs beside it rather than in the action cluster.
+					createElement("div", { key: "hd-row2", style: styles.headSubRow }, [
 						createElement("div", { key: "hd-sub", style: styles.pageSub }, [
 							"宿主机扫描 · 市场发现 · 一键接入 · ",
 							createElement("a", {
@@ -1664,40 +1900,10 @@ window.__ModuleLoader__.load({
 								title: "收录标准与提交方式（awesome-mcp-servers 贡献指南）",
 							}, "申请收录插件 ↗"),
 						]),
-					]),
-					createElement("div", { key: "hd-acts", style: styles.headActs }, [
-						tab === "market"
-							? createElement("button", {
-								key: "hd-primary", type: "button", className: "omkt-btn omkt-btn-primary",
-								style: { ...styles.button, ...styles.primary }, disabled: marketBusy,
-								onClick: () => loadMarket({ refresh: true }),
-							}, marketBusy ? "更新中…" : "更新插件市场")
-							: createElement("button", {
-								key: "hd-primary", type: "button", className: "omkt-btn omkt-btn-primary",
-								style: { ...styles.button, ...styles.primary }, disabled: busy, onClick: doScan,
-							}, "重新扫描宿主机"),
-						// Both tabs keep the other tab's primary action one click
-						// away, as a secondary button: switching tabs to rescan is
-						// a detour nobody wants to discover.
-						tab === "market"
-							? createElement("button", {
-								key: "hd-secondary", type: "button", className: "omkt-btn", style: styles.button,
-								disabled: busy, onClick: doScan,
-							}, "重新扫描宿主机")
-							: createElement("button", {
-								key: "hd-secondary", type: "button", className: "omkt-btn", style: styles.button,
-								disabled: marketBusy,
-								onClick: () => { setTab("market"); if (market === null) loadMarket({}); },
-							}, "打开 MCP 市场"),
 						createElement("button", {
-							key: "hd-updates", type: "button", className: "omkt-btn", style: styles.button,
-							disabled: busy, onClick: doCheckUpdates,
-						}, "检查更新"),
-						createElement("button", {
-							key: "hd-log", type: "button", className: "omkt-btn", style: styles.button,
-							onClick: doExportLog,
+							key: "hd-log", type: "button", className: "omkt-btn omkt-btn-outline",
+							style: styles.outlineBtn, onClick: doExportLog,
 						}, "⤓ 导出日志"),
-						close ? createElement("button", { key: "hd-close", type: "button", style: styles.button, onClick: close }, "关闭") : null,
 					]),
 				]),
 
@@ -1771,37 +1977,60 @@ window.__ModuleLoader__.load({
 
 				// ---------------- market tab ----------------
 				tab === "market" ? createElement("div", { key: "mkt", style: styles.page }, [
-					createElement("div", { key: "stats", style: styles.stats }, [
-						createElement("span", { key: "t" },
-						market ? `${compactCount(market.total ?? marketItems.length)} 个可用 MCP` : "正在发现…"),
-						market && market.counts
-							? createElement("span", { key: "c" }, Object.entries(market.counts)
-								.map(([s, n]) => `${SOURCE_SHORT[s] ?? s} ${n}`).join(" · "))
-							: null,
-						market ? createElement("span", { key: "i" }, `其中 ${installedCount} 个已安装`) : null,
-						marketGroup && sortedItems
-							? createElement("span", { key: "filt" },
-								`「${marketGroup === "__none__" ? "未分类" : marketGroup}」筛选后 ${sortedItems.length} 条`)
-							: null,
-						sortedItems
-							? createElement("span", { key: "p" }, `第 ${safePage + 1} / ${pageCount} 页 · 每页 ${pageSize} 条`)
-							: null,
-						marketAt ? createElement("span", { key: "at" }, `更新于 ${marketAt}${market && market.cached ? "（缓存）" : ""}`) : null,
-					]),
-					createElement("div", { key: "filters", style: styles.filters }, [
+					// Row 1 — the search pill, on a line of its own. v4 makes it
+					// the widest control on the page because it is the one thing
+					// that turns five thousand entries into the one you meant.
+					createElement("div", { key: "search", style: styles.searchWrap }, [
+						createElement("span", { key: "ico", style: styles.searchIcon }, "🔍"),
 						createElement("input", {
-							key: "q", style: styles.searchPill, value: marketQuery, disabled: marketBusy,
-							placeholder: "搜索市场（如 github、database、browser…）",
+							key: "q", style: styles.searchInput, value: marketQuery, disabled: marketBusy,
+							placeholder: "搜索名称、描述或安装命令…",
 							onChange: (e) => setMarketQuery(e.target.value),
 							onKeyDown: (e) => { if (e.key === "Enter") loadMarket({}); },
 						}),
+						// An explicit trigger stays: a settings pane gives a
+						// first-time reader no reason to guess "press Enter".
 						createElement("button", {
 							key: "go", type: "button", className: "omkt-btn omkt-btn-primary",
-							style: { ...styles.button, ...styles.primary }, disabled: marketBusy,
-							onClick: () => loadMarket({}),
+							style: { ...styles.button, ...styles.primary, padding: "6px 14px", fontSize: 12.5 },
+							disabled: marketBusy, onClick: () => loadMarket({}),
 						}, marketBusy ? "搜索中…" : "搜索"),
+					]),
+					// Row 2 — the taxonomy on the left, the compact controls that
+					// narrow it on the right: v4 pairs `.chips` with `.filter-btn`
+					// and keeps both off the search line.
+					createElement("div", { key: "filters", style: styles.filters }, [
+						// Functional-group chips, laid out in a scrolling row like
+						// the plugin market's category bar: 全部 first, then every
+						// group the listing holds, 未分类 last. Clicking the active
+						// chip returns to 全部. Client-side only — the whole
+						// listing is loaded, so switching is free.
+						//
+						// A listing where NOTHING carries a group means the host is
+						// older than this page (group is computed host-side at DSH
+						// startup). Saying that is far more useful than a chip row of
+						// just 全部/未分类, which reads as "the taxonomy is broken".
+						groupOptions.length > 1 || (groupOptions.length === 1 && groupOptions[0][0] !== "__none__")
+							? createElement("div", { key: "groups", style: styles.chips }, [
+								createElement("button", {
+									key: "", type: "button", className: "omkt-chip",
+									style: { ...styles.chip, ...(!marketGroup ? styles.chipActive : {}) },
+									onClick: () => { setMarketGroup(""); setMarketPage(0); },
+								}, `全部 (${marketItems.length})`),
+								...groupOptions.map(([name]) => {
+									const active = marketGroup === name;
+									return createElement("button", {
+										key: name, type: "button", className: "omkt-chip",
+										style: { ...styles.chip, ...(active ? styles.chipActive : {}) },
+										onClick: () => { setMarketGroup(active ? "" : name); setMarketPage(0); },
+									// No per-group counts (user request): the total lives on 全部 alone;
+								// group order still follows size, so the shape of the taxonomy shows.
+								}, name === "__none__" ? "未分类" : name);
+								}),
+							])
+							: null,
 						createElement("select", {
-							key: "src", style: styles.select, value: marketSource,
+							key: "src", style: styles.filterSelect, value: marketSource,
 							onChange: (e) => {
 								setMarketSource(e.target.value);
 								// A new listing may not hold the selected group;
@@ -1811,42 +2040,49 @@ window.__ModuleLoader__.load({
 							},
 						}, MARKET_SOURCES.map(([value, label]) => createElement("option", { key: value, value }, label))),
 						createElement("select", {
-							key: "sort", style: styles.select, value: marketSort,
+							key: "sort", style: styles.filterSelect, value: marketSort,
 							onChange: (e) => { setMarketSort(e.target.value); setMarketPage(0); },
 						}, SORT_OPTIONS.map(([value, label]) => createElement("option", { key: value, value }, label))),
 						createElement("button", {
-							key: "refresh", type: "button", className: "omkt-btn", style: styles.button, disabled: marketBusy,
+							key: "refresh", type: "button", className: "omkt-btn omkt-btn-outline",
+							style: styles.filterBtn, disabled: marketBusy,
 							onClick: () => loadMarket({ refresh: true }),
 						}, marketBusy ? "拉取中…" : "刷新"),
-					]),
-					// Functional-group chips, laid out in a wrapped row like the
-					// plugin market's category bar: 全部 first, then every group
-					// the listing holds with its count, 未分类 last. Clicking the
-					// active chip returns to 全部. Client-side only — the whole
-					// listing is loaded, so switching is free.
-					//
-					// A listing where NOTHING carries a group means the host is
-					// older than this page (group is computed host-side at DSH
-					// startup). Saying that is far more useful than a chip row of
-					// just 全部/未分类, which reads as "the taxonomy is broken".
-					groupOptions.length > 1 || (groupOptions.length === 1 && groupOptions[0][0] !== "__none__")
-						? createElement("div", { key: "groups", style: styles.groupChips }, [
-							createElement("button", {
-								key: "", type: "button", className: "omkt-chip",
-								style: { ...styles.chip, ...(!marketGroup ? styles.chipActive : {}) },
-								onClick: () => { setMarketGroup(""); setMarketPage(0); },
-							}, `全部 (${marketItems.length})`),
-							...groupOptions.map(([name]) => {
-								const active = marketGroup === name;
-								return createElement("button", {
-									key: name, type: "button", className: "omkt-chip",
-									style: { ...styles.chip, ...(active ? styles.chipActive : {}) },
-									onClick: () => { setMarketGroup(active ? "" : name); setMarketPage(0); },
-								// No per-group counts (user request): the total lives on 全部 alone;
-							// group order still follows size, so the shape of the taxonomy shows.
-							}, name === "__none__" ? "未分类" : name);
-							}),
-						])
+					].filter(Boolean)),
+					// Row 3 — v4's meta line: the three numbers a reader checks
+					// before paging, with the freshness note pushed to the end.
+					sortedItems
+						? createElement("div", { key: "meta", style: styles.metaLine }, [
+							createElement("span", { key: "t" }, [
+								createElement("b", { key: "b", style: styles.metaB },
+									compactCount(market?.total ?? marketItems.length)),
+								" 个可用 MCP",
+							]),
+							createElement("span", { key: "p" }, [
+								"第 ",
+								createElement("b", { key: "b", style: styles.metaB }, String(safePage + 1)),
+								` / ${pageCount} 页`,
+							]),
+							createElement("span", { key: "n" }, `每页 ${pageSize} 条`),
+							marketAt
+								? createElement("span", { key: "at", style: styles.metaTail },
+									`更新于 ${marketAt}${market && market.cached ? "（缓存）" : ""}`)
+								: null,
+						].filter(Boolean))
+						: createElement("div", { key: "meta", style: styles.metaLine }, "正在发现…"),
+					// Provenance counts are facts about the catalogue, not
+					// controls, so they get a quiet line of their own instead of
+					// competing with the chip row.
+					market && market.counts
+						? createElement("div", { key: "srcline", style: { ...styles.hint, marginBottom: 14 } },
+							[
+								Object.entries(market.counts)
+									.map(([s, n]) => `${SOURCE_SHORT[s] ?? s} ${n}`).join(" · "),
+								`其中 ${installedCount} 个已安装`,
+								marketGroup && sortedItems
+									? `「${marketGroup === "__none__" ? "未分类" : marketGroup}」筛选后 ${sortedItems.length} 条`
+									: null,
+							].filter(Boolean).join(" · "))
 						: null,
 					// Old host, new page: every item lacks `group`, so the chip row
 					// would degrade to 全部/未分类 and look broken. Name the cause.
@@ -1866,13 +2102,19 @@ window.__ModuleLoader__.load({
 						? createElement("div", { key: "none", style: styles.message }, "没有匹配的 MCP。")
 						: null,
 					pageItems && pageItems.length
-						? createElement("div", { key: "grid", style: styles.cardColumns },
-							pageItems.map((item) => createElement(MarketCard, {
-								key: `${item.source}:${item.id ?? item.title}`,
-								item, stats: repoStats, media: repoMedia, busy,
-								onInstall: doInstall, onOpen: setDetail,
-								onToggleFavorite: doToggleFavorite,
-							})))
+						// The column count belongs to THIS box, not to the window:
+						// the settings pane is a slice of a browser window, so a
+						// viewport media query would ask for three columns in a
+						// 700px pane on a 1600px screen. The wrapper is the
+						// container the sheet's @container rules measure.
+						? createElement("div", { key: "gridwrap", style: styles.gridHost },
+							createElement("div", { key: "grid", className: "omkt-grid", style: styles.cardColumns },
+								pageItems.map((item) => createElement(MarketCard, {
+									key: `${item.source}:${item.id ?? item.title}`,
+									item, stats: repoStats, media: repoMedia, busy,
+									onInstall: doInstall, onOpen: setDetail,
+									onToggleFavorite: doToggleFavorite,
+								}))))
 						: null,
 
 					sortedItems && pageCount > 1
@@ -1903,7 +2145,9 @@ window.__ModuleLoader__.load({
 						: null,
 				]) : null,
 
-				createElement("div", { key: "hint", style: styles.hint },
+				// v4 closes the page with a ruled note, not another paragraph of
+				// body copy: everything above it is content, this is a footnote.
+				createElement("div", { key: "hint", style: styles.note },
 					"已启用服务器的工具以 mcp__<服务器名>__<工具名> 形式在对话中直接可用；数据保存在 $DSH_HOME/overall-mcp/。"),
 
 				// The detail overlay is a sibling of the page content, not a child

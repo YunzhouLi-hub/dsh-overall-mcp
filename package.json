@@ -19,7 +19,7 @@
   "scripts": {
     "lint": "node --check index.js && node --check lib/scanner.js && node --check lib/catalog.js && node --check lib/media.js && node --check client/client.js",
     "test": "node --test test/scanner.test.mjs test/catalog.test.mjs test/schema-guard.test.mjs test/updates.test.mjs test/media.test.mjs",
-    "test:layout": "node tools/layout-probe.mjs"
+    "test:layout": "node tools/layout-probe.mjs && node tools/shot.mjs"
   },
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
