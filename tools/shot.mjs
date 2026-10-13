@@ -326,11 +326,25 @@ console.log(shots.join('\n'));
 <div class="wrap" id="host-wide">${toHtml(tree)}</div>
 <div id="box-narrow"><div class="wrap">${toHtml(tree)}</div></div>
 <script>
-  const read = (host) => Array.from(host.querySelectorAll('.omkt-grid')).map((g) => ({
-    columns: getComputedStyle(g).columnCount,
-    cardWidth: Math.round(g.querySelector('article').getBoundingClientRect().width),
-    boxWidth: Math.round(g.getBoundingClientRect().width),
-  }));
+  // chain() records the width of every box between the grid and body, plus any
+  // horizontal padding on it: when a column count surprises us, the gutter that
+  // ate the missing pixels is visible in the failure message instead of having
+  // to be bisected by hand. (No backticks here: this whole block is itself a
+  // template literal.)
+  const read = (host) => Array.from(host.querySelectorAll('.omkt-grid')).map((g) => {
+    const chain = [];
+    for (let el = g; el && el !== document.body; el = el.parentElement) {
+      const pad = getComputedStyle(el).paddingLeft;
+      chain.push((el.className || el.id) + ':' + Math.round(el.getBoundingClientRect().width)
+        + (pad === '0px' ? '' : '-pad' + parseFloat(pad)));
+    }
+    return {
+      columns: getComputedStyle(g).columnCount,
+      cardWidth: Math.round(g.querySelector('article').getBoundingClientRect().width),
+      boxWidth: Math.round(g.getBoundingClientRect().width),
+      chain: chain,
+    };
+  });
   const verdict = {
     wide: read(document.getElementById('host-wide'))[0],
     narrow: read(document.getElementById('box-narrow'))[0],
@@ -366,6 +380,8 @@ ${gridVerdict}`;
   if (!wideOk || !narrowOk) {
     console.error('FAIL: the column count did not follow its box'
       + ` (wide=${v.wide?.columns}, narrow=${v.narrow?.columns})`);
+    console.error(`  wide  chain: ${v.wide?.chain?.join(' > ')}`);
+    console.error(`  narrow chain: ${v.narrow?.chain?.join(' > ')}`);
     process.exitCode = 1;
   } else {
     console.log('ok  column count follows the container, not the window');

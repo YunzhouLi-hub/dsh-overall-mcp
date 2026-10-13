@@ -53,11 +53,11 @@ if (typeof exportsObj.apply !== 'function') throw new Error('module exports no a
 if (!Array.isArray(exportsObj.inject)) throw new Error('module exports no inject array');
 
 const registrations = [];
-let injectedSlot = null;
+const injectedSlots = [];
 const fakeCtx = {
   slots: {
     inject(slotName, callback) {
-      injectedSlot = slotName;
+      injectedSlots.push(slotName);
       return callback();
     },
     register(options, component) {
@@ -69,25 +69,82 @@ const fakeCtx = {
 
 exportsObj.apply(fakeCtx);
 
-if (injectedSlot !== 'settings.section') throw new Error(`inject() called with ${injectedSlot}`);
-if (registrations.length !== 1) throw new Error(`expected 1 registration, got ${registrations.length}`);
+// One arrival, two halves: the rail row and the panel it opens. Registering
+// only one of them is the failure this test exists for — a row with no panel
+// throws on click, and a panel with no row is unreachable.
+if (!injectedSlots.includes('sidebar.panellist')) {
+  throw new Error(`inject() never asked for sidebar.panellist (got: ${injectedSlots.join(', ')})`);
+}
+if (!injectedSlots.includes('main')) {
+  throw new Error(`inject() never asked for main (got: ${injectedSlots.join(', ')})`);
+}
+if (registrations.length !== 2) throw new Error(`expected 2 registrations, got ${registrations.length}`);
 
-const { options, component } = registrations[0];
-if (options.name !== 'settings.section') throw new Error(`wrong slot name: ${options.name}`);
-if (typeof options.id !== 'string' || options.id === '') throw new Error('registration is missing a flat id');
-if (typeof options.order !== 'number') throw new Error('registration is missing a numeric order');
-if (options.label === undefined) throw new Error('registration is missing label');
-if (options.options !== undefined) throw new Error('registration must be FLAT, not nested under options');
-if (typeof component !== 'function') throw new Error('registration has no component');
+const row = registrations.find((r) => r.options.name === 'sidebar.panellist');
+const panel = registrations.find((r) => r.options.name === 'main');
+if (!row) throw new Error('no sidebar.panellist registration');
+if (!panel) throw new Error('no main registration');
 
-// The bundle shows its own version in the page head but cannot read
-// package.json at runtime, so the two are kept equal here instead: a version
-// chip that lies is worse than no chip.
+for (const { options, component } of registrations) {
+  if (options.options !== undefined) throw new Error(`${options.name}: registration must be FLAT`);
+  if (typeof component !== 'function') throw new Error(`${options.name}: registration has no component`);
+}
+
+// The row carries identity and order; the panel is keyed by the row's id, and
+// the layout throws when a row is selected whose key is missing — so the two
+// strings have to be the same or the rail is a dead link.
+if (typeof row.options.id !== 'string' || row.options.id === '') {
+  throw new Error('sidebar row is missing its id');
+}
+if (panel.options.key !== row.options.id) {
+  throw new Error(`main key ${panel.options.key} != sidebar row id ${row.options.id}`);
+}
+if (typeof row.options.label !== 'string' || row.options.label === '') {
+  throw new Error('sidebar row is missing its label');
+}
+if (typeof row.options.order !== 'number') {
+  throw new Error('sidebar row is missing a numeric order');
+}
+// The plugin page sits at 0 and the task manager at 10; this entry belongs
+// between them, i.e. directly below 插件.
+if (!(row.options.order > 0 && row.options.order < 10)) {
+  throw new Error(`sidebar order ${row.options.order} does not sit between the plugins page (0) and the task manager (10)`);
+}
+
+// The bundle cannot read package.json at runtime, so the values the host keys
+// off are pinned here instead. A drift produces a plugin nobody can find rather
+// than one that fails loudly, and a version chip that lies is worse than none.
 const pkg = JSON.parse(await readFile(path.join(here, '..', 'package.json'), 'utf8'));
 const clientVersion = exportsObj.__test?.version;
 if (!clientVersion) throw new Error('client exports no __test.version');
 if (clientVersion !== pkg.version) {
   throw new Error(`client version ${clientVersion} != package.json ${pkg.version}`);
+}
+const bundleName = exportsObj.__test?.bundleName;
+if (!bundleName) throw new Error('client exports no __test.bundleName');
+if (bundleName !== pkg.name) {
+  throw new Error(`client bundleName ${bundleName} != package.json name ${pkg.name}`);
+}
+const panelId = exportsObj.__test?.panelId;
+if (!panelId) throw new Error('client exports no __test.panelId');
+if (panelId !== row.options.id) {
+  throw new Error(`__test.panelId ${panelId} != registered row id ${row.options.id}`);
+}
+
+// Both slots live in packages this bundle must declare, or `slots.inject` waits
+// forever and nothing appears at all.
+const inject = exportsObj.inject ?? [];
+if (!inject.includes('slots')) throw new Error('module does not inject the slots service');
+const declared = pkg.dsh?.client?.inject ?? [];
+for (const surface of ['@deepseek-ai/dsh-client-ui-sidebar', '@deepseek-ai/dsh-client-ui-layout']) {
+  if (!declared.includes(surface)) {
+    throw new Error(`package.json dsh.client.inject is missing ${surface}`);
+  }
+}
+for (const stale of ['@deepseek-ai/dsh-client-ui-settings', '@deepseek-ai/dsh-client-ui-plugin-manager']) {
+  if (declared.includes(stale)) {
+    throw new Error(`package.json dsh.client.inject still pulls in ${stale}`);
+  }
 }
 
 console.log(JSON.stringify({
@@ -95,7 +152,8 @@ console.log(JSON.stringify({
   moduleId: captured.id,
   version: clientVersion,
   inject: exportsObj.inject,
-  slot: injectedSlot,
-  registration: { id: options.id, order: options.order, label: options.label },
+  slots: injectedSlots,
+  rail: { id: row.options.id, order: row.options.order, label: row.options.label },
+  panel: { key: panel.options.key },
 }, null, 2));
 

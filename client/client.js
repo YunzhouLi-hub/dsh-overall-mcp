@@ -1,11 +1,17 @@
 // client/client.js — dsh-overall-mcp client plugin (web / desktop).
 //
-// Client plugin format verified against @deepseek-ai/dsh-client-ui-settings:
-// registered via window.__ModuleLoader__.load({id, factory}), factory(require)
-// returns exports with `inject` and `apply(ctx)`. The settings entry is
-// registered into the `settings.section` list slot with FLAT options wrapped in
-// `slots.inject` (the shape used by working desktop plugins dshmarket and
-// dsh-mcp-panel).
+// Client plugin format verified against @deepseek-ai/dsh-client-ui-sidebar and
+// @deepseek-ai/dsh-client-ui-layout: registered via
+// window.__ModuleLoader__.load({id, factory}), factory(require) returns exports
+// with `inject` and `apply(ctx)`. The page is one entry in the left rail: an
+// icon row in the sidebar's `sidebar.panellist` LIST slot plus the panel
+// component in the layout's KEYED `main` slot, both under one id and both
+// wrapped in `slots.inject` like every other registration.
+//
+// Why the rail and not Settings: Settings keeps only the read-only plugin
+// inventory, and a host surface that owns its own dismissal has no room for a
+// page with its own tabs, search box and list. The rail is where the built-in
+// 插件 and 任务 pages live, so this is the surface a page like this belongs to.
 //
 // Two tabs:
 //   「已注册」 — servers grouped by import source (collapsible, per-group switch)
@@ -39,6 +45,18 @@ window.__ModuleLoader__.load({
 		// package.json at runtime, so `tools/client-smoke.mjs` asserts the two
 		// stay equal — a version chip that lies is worse than no chip.
 		const CLIENT_VERSION = "0.1.0";
+		// The bundle's npm package name — what the profile lists in its
+		// `dsh.profile.bundles` and what its bundle page is keyed by. The
+		// bundle cannot read package.json at runtime, so `tools/client-smoke.mjs`
+		// asserts the two stay equal; a name that drifts is a plugin nobody can
+		// find rather than one that fails loudly.
+		const BUNDLE_NAME = "dsh-overall-mcp";
+		// The rail entry and the page it opens are two halves of one key: the
+		// id below is also the `key` of our `main` registration, and `main` is
+		// the root-scope keyed slot the centre column renders. Selecting a
+		// panel whose `main` key does not exist throws, so the two cannot be
+		// allowed to drift apart.
+		const PANEL_ID = "overall-mcp";
 
 		async function api(path, options) {
 			const res = await fetch(API + path, {
@@ -131,7 +149,24 @@ window.__ModuleLoader__.load({
 		};
 
 		const styles = {
-			page: { display: "grid", gap: 12, fontSize: 13.5, lineHeight: 1.55, color: T.text },
+			// A centre-column panel owns its scrolling: the frame's centre column
+			// is `overflow:hidden`, and every built-in page is a
+			// `height:100%; overflow:auto` scroller (the plugin manager's own
+			// `.page` is exactly that). The top padding repeats the frame's
+			// clearance variable so the first row clears the macOS traffic
+			// lights and the Windows title bar instead of hiding under them.
+			//
+			// The page adds no horizontal padding of its own: the market body
+			// inside it is already a 20px-padded plate, and a second gutter here
+			// would push the card grid's container below the 1100px three-column
+			// breakpoint (1140 available − 2×20 = 1100 exactly). The probe in
+			// tools/shot.mjs pins that contract on the grid's used column count.
+			page: {
+				display: "grid", gap: 12, fontSize: 13.5, lineHeight: 1.55, color: T.text,
+				height: "100%", boxSizing: "border-box", overflowY: "auto",
+				width: "100%", maxWidth: 1180, margin: "0 auto",
+				padding: "calc(28px + var(--dsh-frame-top-clearance, 0px)) 0 48px",
+			},
 			toolbar: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" },
 			// ---- page head, ported from the v4 prototype ----------------------
 			// Two rows: identity + actions, then the sub-line. The brand mark is
@@ -1157,11 +1192,17 @@ window.__ModuleLoader__.load({
 		 * near-black, which vanishes in the dark theme); only the hub keeps the
 		 * brand blue, so the accent stays a single point.
 		 */
-		function brandMark(size = 22) {
+		function brandMark(size = 22, decorative = false) {
 			const dot = (cx, cy, r) => createElement("circle", { key: `c${cx}-${cy}`, cx, cy, r, fill: "currentColor" });
 			return createElement("svg", {
 				width: size, height: size, viewBox: "0 0 32 32",
-				role: "img", "aria-label": "Overall MCP", focusable: "false",
+				// The rail wraps its glyph in an `aria-hidden` span and labels
+				// the button itself, so a second accessible name there is an
+				// announcement rather than a detail.
+				role: decorative ? "presentation" : "img",
+				"aria-label": decorative ? null : "Overall MCP",
+				"aria-hidden": decorative ? "true" : null,
+				focusable: "false",
 				style: { flexShrink: 0 },
 			}, [
 				createElement("g", {
@@ -1177,6 +1218,19 @@ window.__ModuleLoader__.load({
 				dot(25, 20, 2),
 				dot(16, 26, 2),
 			]);
+		}
+
+		/**
+		 * The left rail's glyph for this plugin.
+		 *
+		 * The sidebar renders each `sidebar.panellist` entry as a button and
+		 * calls that entry's component with `{ size, active }`, using 16px when
+		 * the rail is wide and 18px when it is collapsed; both are smaller than
+		 * the page's own mark, so the constellation is reused at the size the
+		 * rail asks for rather than at one we pick.
+		 */
+		function PanelGlyph({ size }) {
+			return brandMark(typeof size === "number" ? size : 18, true);
 		}
 
 		/**
@@ -1444,6 +1498,15 @@ window.__ModuleLoader__.load({
 			]);
 		}
 
+		/**
+		 * The page behind the rail's entry.
+		 *
+		 * This is the whole centre column, so it draws its own identity row and
+		 * version chip — the frame draws no page title of its own, and a page
+		 * that leaned on one would have no heading at all. `close` is only
+		 * passed by a host surface that owns its own dismissal; a panel reached
+		 * through the rail has nothing to dismiss, so it is normally absent.
+		 */
 		function Section({ close }) {
 			ensureStyles();
 			const [tab, setTab] = useState("registry");
@@ -1665,14 +1728,16 @@ window.__ModuleLoader__.load({
 				}
 			}
 
-			// Return-to-top: the settings panel scrolls its own body, not the
-			// window, so the listener goes on the first scrollable ancestor and
-			// falls back to the window when there is none.
+			// Return-to-top: this page is its own scroller (the centre column
+			// does not scroll), so the listener goes on the first scrollable
+			// element at or above it — starting with the page itself, which is
+			// the one that actually moves — and falls back to the window when
+			// there is none.
 			useEffect(() => {
 				if (typeof document === "undefined" || typeof getComputedStyle !== "function") return undefined;
 				const node = pageRef.current;
 				if (!node) return undefined;
-				let el = node.parentElement;
+				let el = node;
 				let target = null;
 				while (el && el !== document.body) {
 					const overflowY = getComputedStyle(el).overflowY;
@@ -1838,6 +1903,12 @@ window.__ModuleLoader__.load({
 				.filter((k) => k && !(repoStats[k]?.stars !== undefined && repoStats[k]))
 				.slice(0, 30);
 
+			// The one outlined control that belongs beside the sub-line rather
+			// than in the run of text buttons on the first row.
+			const logButton = createElement("button", {
+				key: "hd-log", type: "button", className: "omkt-btn omkt-btn-outline",
+				style: styles.outlineBtn, onClick: doExportLog,
+			}, "⤓ 导出日志");
 			return createElement("div", { style: styles.page, ref: pageRef }, [
 				// ---- page head (v4 prototype): identity, then actions ----
 				// The primary action follows the tab, because each tab has one
@@ -1900,10 +1971,7 @@ window.__ModuleLoader__.load({
 								title: "收录标准与提交方式（awesome-mcp-servers 贡献指南）",
 							}, "申请收录插件 ↗"),
 						]),
-						createElement("button", {
-							key: "hd-log", type: "button", className: "omkt-btn omkt-btn-outline",
-							style: styles.outlineBtn, onClick: doExportLog,
-						}, "⤓ 导出日志"),
+						logButton,
 					]),
 				]),
 
@@ -2171,16 +2239,36 @@ window.__ModuleLoader__.load({
 			]);
 		}
 
+		/**
+		 * Register this page as its own entry in the left rail.
+		 *
+		 * Two registrations make one arrival, and they share a single string:
+		 * `sidebar.panellist` is a root-scope LIST whose `id` the sidebar turns
+		 * into a labelled icon row, and the root-scope KEYED `main` slot is what
+		 * the centre column renders once that row is selected — keyed, in this
+		 * case, by the same id. Both slots are declared by packages this bundle
+		 * lists in `dsh.client.inject` (`dsh-client-ui-sidebar` and
+		 * `dsh-client-ui-layout`): a slot whose owner is not injected cannot be
+		 * addressed, and `slots.inject` would then simply never fire.
+		 */
 		function apply(ctx) {
-			// Registration contract verified against working desktop plugins
-			// (dshmarket, dsh-mcp-panel): the entry options are FLAT (id/order/label)
-			// and the registration is wrapped in `slots.inject(slotName, …)`, whose
-			// returned disposer releases the entry on fiber disposal.
-			ctx.slots.inject("settings.section", () => {
-				const off = ctx.slots.register(
-					{ name: "settings.section", id: "overall-mcp", order: 100, label: "Overall MCP" },
-					Section,
-				);
+			ctx.slots.inject("sidebar.panellist", () => {
+				const off = ctx.slots.register({
+					name: "sidebar.panellist",
+					id: PANEL_ID,
+					// The plugin page is 0 and the task manager is 10, so 5 puts
+					// this entry directly below 插件 — which is where a plugin's
+					// own page belongs — instead of at the end of the rail.
+					order: 5,
+					// A plain string on purpose: this bundle ships no locale
+					// namespace, and a label resolved through a namespace we do
+					// not own would render as its key.
+					label: "总体 MCP",
+				}, PanelGlyph);
+				return typeof off === "function" ? off : () => {};
+			});
+			ctx.slots.inject("main", () => {
+				const off = ctx.slots.register({ name: "main", key: PANEL_ID }, Section);
 				return typeof off === "function" ? off : () => {};
 			});
 		}
@@ -2191,7 +2279,10 @@ window.__ModuleLoader__.load({
 		// the detail panel once shipped with labels and no values, and the card
 		// once shipped its front-door link inside a <button> (click raced the
 		// navigation). No test that avoids real rendering could catch either.
-		exports.__test = { MarketDetail, MarketCard, DetailRow, LinkChip, version: CLIENT_VERSION };
+		exports.__test = {
+			MarketDetail, MarketCard, DetailRow, LinkChip, PanelGlyph,
+			version: CLIENT_VERSION, bundleName: BUNDLE_NAME, panelId: PANEL_ID,
+		};
 		// Section is exported for tools/render-market-tab.mjs: the market tab's
 		// chrome (stat line, filters, masonry wrapper, favourite wiring) exists
 		// nowhere else, and a wrong state name or prop only throws at render.

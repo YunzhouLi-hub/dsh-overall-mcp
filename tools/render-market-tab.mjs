@@ -346,7 +346,48 @@ assert.ok(registryNodes.some((n) => n.type === 'button' && textOf(n) === '重新
   console.log('page head renders: brand mark, title + version, sub-line, tab-aware primary ✓');
 }
 
-// --- 7. the stylesheet was injected once -----------------------------------
+// --- 7. the rail row: page owns its head, glyph stays decorative -----------
+// This page is the centre column itself, so its identity row and sub-line must
+// be there (the frame draws no page title). The rail, on the other hand, labels
+// the button and wraps the glyph in an `aria-hidden` span — so the glyph must
+// not carry a second accessible name. Neither fact is visible to a smoke test
+// of the registration shape, and both regress silently.
+{
+  const standalone = walk(await render());
+  assert.equal(findByKey(standalone, 'hd-title').length, 1, 'page lost its own identity row');
+  assert.equal(findByKey(standalone, 'hd-row2').length, 1, 'page lost its own sub-line row');
+  assert.equal(containsNode(findByKey(standalone, 'hd-title')[0], findByKey(standalone, 'hd-log')[0]), false,
+    'export button must not live in the identity row');
+  assert.equal(containsNode(findByKey(standalone, 'hd-row2')[0], findByKey(standalone, 'hd-log')[0]), true,
+    'export button belongs beside the sub-line');
+
+  assert.equal(typeof mod.__test?.PanelGlyph, 'function', 'client exports __test.PanelGlyph');
+  const glyph = mod.__test.PanelGlyph({ size: 16 });
+  assert.equal(glyph.type, 'svg', 'rail glyph is not an svg');
+  assert.equal(glyph.props.width, 16, 'rail glyph ignores the size the sidebar asks for');
+  assert.equal(glyph.props.height, 16, 'rail glyph is not square');
+  assert.equal(glyph.props.role, 'presentation', 'rail glyph announces itself as an image');
+  assert.equal(glyph.props['aria-label'], null, 'rail glyph carries a second accessible name');
+  assert.equal(glyph.props['aria-hidden'], 'true', 'rail glyph is not hidden from assistive tech');
+  assert.equal(walk(glyph).filter((n) => n.type === 'circle').length, 6,
+    'rail glyph lost the constellation (hub + five satellites)');
+
+  // Collapsed rail: the sidebar asks for 18 instead of 16.
+  const collapsed = mod.__test.PanelGlyph({ size: 18 });
+  assert.equal(collapsed.props.width, 18, 'collapsed rail glyph ignores its size');
+  // No size at all (a host that renders the entry outside the rail) still has
+  // to produce a drawable icon rather than width=undefined.
+  assert.equal(mod.__test.PanelGlyph({}).props.width, 18, 'rail glyph has no fallback size');
+
+  // The page's head mark keeps its accessible name: it is the only heading
+  // this page has.
+  const headMark = walk(findByKey(standalone, 'hd-title')[0]).find((n) => n.type === 'svg');
+  assert.equal(headMark.props.role, 'img', 'the page head mark lost its accessible name');
+  assert.equal(headMark.props['aria-label'], 'Overall MCP', 'the page head mark is unlabelled');
+  console.log('rail row renders: page head kept, decorative glyph at both rail sizes ✓');
+}
+
+// --- 8. the stylesheet was injected once -----------------------------------
 assert.ok(styleElements.length >= 1, 'ensureStyles injects the hover/animation sheet');
 
 console.log('market tab renders: tabs, stat line, search, 3 cards, CTA + footer split ✓');

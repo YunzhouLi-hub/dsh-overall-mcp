@@ -12,7 +12,7 @@
 | 🌐 | MCP 市场 | 自动发现市面上已有的 MCP：官方 Registry、Smithery、Docker MCP Catalog、Awesome 远程、Awesome 本地共 **5 源并行聚合，实测 5364 条**，无需输入关键词即可浏览，带来源筛选与搜索 |
 | ⚡ | 一键接入 | 市场条目直接安装：npm 包→`npx -y <pkg>`，Python 包→`uvx`，托管端点→streamable-http，Docker 镜像→`docker run -i --rm mcp/<name>`；社区清单条目提供仓库链接 |
 | 🛠️ | 原生工具桥接 | 启用的服务器以每服务器一个 `dsh-mcp-client` 实例挂载，工具以 `mcp__<name>__<tool>` 注册为 DSH 原生工具 |
-| 🖥️ | 设置页 UI | 设置 → Overall MCP：**已注册**（按来源分组、可折叠、分组开关、统计筛选）与 **MCP 市场**（浏览/搜索/安装）两个标签页 |
+| 🖥️ | 侧栏页面 | 左侧导航「插件」正下方的 **总体 MCP** 入口：**已注册**（按来源分组、可折叠、分组开关、统计筛选）与 **MCP 市场**（浏览/搜索/安装）两个标签页 |
 | 🎛️ | 分组批量启停 | 每个来源分组一个总开关，一次启用/停用该来源的全部服务器（模型工具 `overall_mcp_set_source_enabled` 同能力） |
 | ⬆️ | 版本检查与更新 | 对经 `npx`/`uvx`（含 Windows `cmd.exe /c` 包装）启动的服务器检查 npm / PyPI 最新版本，界面上一键更新并自动重连 |
 
@@ -22,7 +22,9 @@
 dsh plugin --profile web add ./dsh-overall-mcp
 ```
 
-重启 Profile 后：首次加载自动扫描宿主机 MCP 配置；打开 **设置 → Overall MCP**。
+重启 Profile 后：首次加载自动扫描宿主机 MCP 配置；点左侧导航里 **插件** 下面那个 **总体 MCP**。
+
+页面是侧栏里的一个**全局面板**（不是设置项，也不是插件页里的配置区）：侧栏图标行由 `sidebar.panellist` 列表插槽注册（`order: 5`，官方「插件」页是 0、「任务」是 10，所以本入口正好在「插件」正下方），面板本体注册在布局的 `main` 键控插槽里，两者共用同一个 id `overall-mcp`；`main` 用不存在的 key 选中会抛错，所以这两个字符串必须一致，`tools/client-smoke.mjs` 会把它们钉在一起。页面自己就是滚动容器（居中、最宽 1180px），顶部内边距叠了 `--dsh-frame-top-clearance`，避免在 macOS 红绿灯／Windows 标题栏下面被盖住。
 
 ### 「已注册」标签页（对齐 Skills Manager 来源分组）
 
@@ -50,7 +52,7 @@ dsh plugin --profile web add ./dsh-overall-mcp
 - 统计：`N 个可用 MCP · 官方 x · Smithery y · Docker z · 远程 a · Awesome b · 其中 M 个已安装 · 更新于 时间`
 - 来源筛选：全部市场 / 官方 Registry / Smithery / Docker MCP Catalog / Awesome 远程 / Awesome 清单；支持关键词搜索（关键词同样匹配安装命令，搜 `docker` 或端点域名也能命中）
 - **卡片形式**呈现（与 dsh-market 插件一致）：图标（Smithery 图标 / GitHub 头像，缺失时用首字母色块）、**标题即入口**（有仓库链仓库、否则链上游官网、Smithery 条目链其目录页——与 dshmarket 卡片名一致的真锚点；卡片正文是 div 而不是 button，链接不会和点击详情打架）、标题旁**GitHub 标记**（只在 `repository` 真的是 GitHub 仓库时出现，悬停才上色）、作者行末尾的**版本**、✓认证/官方/已安装/已废弃徽标、三行描述、标签（分类 / 语言 / 部署范围 / 操作系统 / 仓库 topics）。悬停反馈通过注入的样式表实现（内联样式表达不了 :hover / keyframes / 宽度断点）：卡片描边高亮、主按钮不透明度、详情弹窗入场动画
-- **卡片布局**：按 `frontend-card-style-v4.html` 原型——卡片左右分栏（左内容 / 右「安装 + 详情」，右列**右对齐**贴在卡片右上角），下方是标签 + 收藏/⋯ 图标按钮的页脚（**无分隔线**，标签是描边胶囊而非灰底）；**收藏与 ⋯ 在正文外**，点星星不会顺带打开详情。卡片流用 CSS `column-count` 砌墙（宽容器三列约 371px、中等两列、≤720px 单列），因为卡片高度随描述与标签数变化，等高网格会留下参差的空白。断点用**容器查询**（`@container`）而不是媒体查询：设置面板是应用窗口里的一块，窗口 1600px 而面板 820px 时必须仍是两列——`tools/shot.mjs` 在一个 1600px 窗口里同时摆 1140px 与 820px 两个盒子来钉住这一点（内联 `columns:2` 只是没有容器支持时的兜底，`@media` 同理）
+- **卡片布局**：按 `frontend-card-style-v4.html` 原型——卡片左右分栏（左内容 / 右「安装 + 详情」，右列**右对齐**贴在卡片右上角），下方是标签 + 收藏/⋯ 图标按钮的页脚（**无分隔线**，标签是描边胶囊而非灰底）；**收藏与 ⋯ 在正文外**，点星星不会顺带打开详情。卡片流用 CSS `column-count` 砌墙（宽容器三列约 371px、中等两列、≤720px 单列），因为卡片高度随描述与标签数变化，等高网格会留下参差的空白。断点用**容器查询**（`@container`）而不是媒体查询：面板只是应用窗口里的一块，窗口 1600px 而面板 820px 时必须仍是两列——`tools/shot.mjs` 在一个 1600px 窗口里同时摆 1140px 与 820px 两个盒子来钉住这一点（内联 `columns:2` 只是没有容器支持时的兜底，`@media` 同理）。页面自己**不加水平内边距**：卡片区外面那层「板」已经是 20px 内衬，再叠一层就会把 1140px 的容器压到 1060px，正好掉出三列区间（1100px 是临界值）
 - **卡上的传输方式是一枚小 chip 而不是命令行**：v4 原型卡片只有 `MCP · stdio` / `MCP · remote` 这样的兼容性小标（`title` 仍是可执行命令，悬停可见），完整命令留给详情面板——每张卡再压一段等宽字体，正是原型刻意去掉的东西
 - **预览位放仓库自己的图**：v4 原型卡片中部是 3 张彩色预览图。没有任何 MCP 目录发布产品截图，编造占位图等于用装饰冒充信息，因此同一位置改放**该仓库自己的图**：优先 README 里引用的截图（按文档出现顺序，最多 8 张，`images.weserv.nl` 代理缩放并统一高度），一张都没有时退回 GitHub 的社交卡片（`opengraph.githubassets.com`，它就是这张卡在社交平台上的样子）；两者皆无就不渲染这一格（不硬凑装饰）。滚动条隐藏、`scroll-snap` 对齐，左右圆钮手动翻页、**永不自动播放**——阅读时图片自己走位是干扰。图片按仓库缓存到 `$DSH_HOME/overall-mcp/media.json`（TTL 7 天，最多 300 个仓库）
 - **事实静态印在卡片上**（用户要求）：Star · 使用量 · 更新时间这些数字直接在卡片正面，不藏在轮播里——要等的数字就是没法比较的数字。来源名（官方 Registry / Awesome 清单 / Smithery）**排在数字行末尾的灰字**里，不占名行——名行只放标题、GitHub 标记和最多两枚徽标
@@ -58,7 +60,7 @@ dsh plugin --profile web add ./dsh-overall-mcp
 - **页面头**（按 v4 原型，两行）：第一行 = 星座图标（一个品牌蓝中枢 + 五个 `currentColor` 卫星，深色主题自动反色）+「总体 MCP」+ 版本号（与 `package.json` 一致，`tools/client-smoke.mjs` 断言两者相等——会撒谎的版本号比不显示更糟）｜右侧主操作；第二行 = 副标题「宿主机扫描 · 市场发现 · 一键接入 · 申请收录插件 ↗」（链 awesome-mcp-servers 的贡献指南）｜右侧「⤓ 导出日志」。主按钮是**墨色**（`T.text` 铺底 + `T.cardBg` 作字色，深浅色主题自动翻转）而不是品牌蓝：品牌蓝留给链接、页签下划线、徽标和 gh 仓库名
 - **每个标签页一个主操作**：注册表页主按钮是「重新扫描宿主机」，市场页主按钮是「更新插件市场」（强制重拉，绕过 10 分钟缓存）；另一页的主操作以无边框文字按钮留在同一行（「打开 MCP 市场」/「重新扫描宿主机」），两个主按钮等于没有主按钮
 - **⤓ 导出日志**：把这一页知道的东西写成 JSON 文件（插件版本、注册表全量、市场各源条数/缓存时间/返回条数、当前筛选与页码、两处错误）——排查问题时缺的正是这些。客户端本地拼装并下载，不新增宿主路由：宿主自己的日志不归这个插件导出
-- **回到顶部**：设置面板滚的是自己的容器而不是 window，因此监听挂在第一个可滚动祖先上（退化为 window）。只在滚动超过 400px 后才出现，短页面不留一个死按钮
+- **回到顶部**：页面自己就是滚动容器（框架中栏是 `overflow:hidden`），监听挂在「本页或它之上的第一个可滚动元素」上（退化为 window），只在滚动超过 400px 后才出现，短页面不留一个死按钮
 - 操作：可安装的显示「安装」，已注册的显示「已安装」，只有仓库链接的显示「需手动配置」+「仓库」/「主页」
 - **详情页**：点卡片主体或「详情」按钮弹出完整面板（按 v4 原型：680px、圆角 16、**一整张白纸**——页头不再是灰底带、底部只有一条分隔线），含：页头（头像 + 标题 + 贴着标题的徽标，关闭按钮在右上角）、完整描述（卡片只显示 3 行）、全部标签、**GitHub 仓库区块**（浅灰底卡片、owner/repo 锚点用品牌蓝、★ Star · Fork · Issue · Watch 竖排大数字带小标签、语言/许可证/最近推送/创建于事实行、归档警示；缺失数字保持缺失——没有任何目录发布 GitHub 数据，缺数字不等于 0，也不等于排最后）、逐项标注的**无底色事实表**（来源/作者/版本/传输/Star/使用量口径/更新时间（优先 GitHub pushed_at）/安装方式）、**将执行的确切命令**（stdio 为完整命令行，http 为端点 URL）、按 URL 去重的链接组（官网 / GitHub 仓库 / **GitHub 镜像** / MCP 端点 / Smithery 页面）、底部「安装 + ♡ 收藏」。Smithery 的 `repository` 指向它自己的列表页而非上游项目，因此额外提供其目录页链接（实测 `smithery.ai/server/<name>` 308 到 `/servers/<name>`，直接用后者）
 - **GitHub 镜像链接**：GitHub 在本网络环境下时通时断（实测连续数小时 TCP 超时后恢复 200）。实测（2026-10-12）`gh-proxy.com` 现已代理 github.com 仓库页面（200/640ms）——与 dshmarket 2026-09 实测的 403 相反，其注释明确要求"重新测量而非推断"。因此有仓库的条目同时提供直连与镜像两个链接，由用户择一
@@ -224,7 +226,7 @@ node tools/verify-css.mjs                                 # 校验所有 classNa
 node tools/layout-probe.mjs                               # 真实 Chrome 量卡片几何：长名称必须省略号、CTA 必须在卡内（npm run test:layout）
 node tools/shot.mjs                                       # 把真页面渲染成 HTML 交给 headless Chrome：出四张对照截图（tools/out/*.png），并断言栅格列数跟着**容器**走而不是窗口走（`npm run test:layout`）
 node tools/preview-paged.mjs "<base-url-with-?token=…>" 20 1 installs
-                                                          # 按设置页的方式渲染某一页（可带 pageSize/page/sort/group，group 如"金融支付"/"__none__"）
+                                                          # 按面板页的方式渲染某一页（可带 pageSize/page/sort/group，group 如"金融支付"/"__none__"）
 node tools/verify-sort-paging.mjs                         # 校验 5 种排序、3 种页宽、越界夹取、紧凑计数
 node tools/verify-detail-links.mjs                        # 校验详情页链接：逐源覆盖、零死链、零重复 URL
 node tools/probe-real-cards.mjs                           # 拉真实市场条目逐条渲染卡片+详情（活实例）
@@ -244,7 +246,7 @@ node tools/fixture-bad-schema-mcp.mjs                     # 故意带 `^[^\0]*$`
 | `lib/scanner.js` | 宿主机 MCP 配置扫描与规范化（纯函数） |
 | `lib/catalog.js` | 5 个远程开放目录的拉取、归一化、跨目录合并、排序与 GitHub 补充（纯 fetch） |
 | `index.js` | cordis 宿主插件（`inject:['tools']`）：注册表、每服务器 `ctx.plugin(mcpClient)` 桥接、`defineTool` 管理工具、HTTP 路由 |
-| `client/client.js` | `__ModuleLoader__` 客户端插件：`settings.section` 插槽展示区块 |
+| `client/client.js` | `__ModuleLoader__` 客户端插件：注册侧栏入口（`sidebar.panellist`，id `overall-mcp`，order 5）与面板本体（布局的 `main` 键控插槽，同一 id） |
 | `cordis.patch.yml` | 宿主 composition 补丁 |
 
 ## 市场来源配额（每次浏览的实际上限）
@@ -279,10 +281,10 @@ node tools/fixture-bad-schema-mcp.mjs                     # 故意带 `^[^\0]*$`
 
 **「MCP 市场」显示 `HTTP 404` / 一直停在「正在发现…」**
 
-宿主插件的代码在 DSH **启动时**载入一次。若在 DSH 已经打开的情况下更新了插件（本插件用 `link:` 安装在工作区时尤其常见），设置页里的前端是新版、而宿主仍是旧版，`/api/overall-mcp/catalog` 这个路由就还不存在，于是返回 404。
+宿主插件的代码在 DSH **启动时**载入一次。若在 DSH 已经打开的情况下更新了插件（本插件用 `link:` 安装在工作区时尤其常见），侧栏页面里的前端是新版、而宿主仍是旧版，`/api/overall-mcp/catalog` 这个路由就还不存在，于是返回 404。
 
 - 完全退出 DSH（桌面版注意托盘图标，关窗口不等于退出）后重新打开；
-- 新版设置页会直接把这种情况提示为「宿主插件还是旧版本（缺少 /api/overall-mcp/catalog）」，而不是只显示一个 404。
+- 新版页面会直接把这种情况提示为「宿主插件还是旧版本（缺少 /api/overall-mcp/catalog）」，而不是只显示一个 404。
 
 **市场里某条显示「需手动配置」**
 
