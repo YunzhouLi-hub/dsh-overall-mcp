@@ -431,10 +431,28 @@ window.__ModuleLoader__.load({
 			// v4's breakpoints exactly, declared in ensureStyles because inline
 			// styles cannot carry a query. This inline value is the fallback for
 			// the moment before that sheet lands.
-			// The masonry wall. Column count is decided by the injected sheet's
+			// The card wall. Column count comes from the injected sheet's
 			// container queries; the inline value is the fallback for a browser
 			// that ignores them (and for the moment before the sheet lands).
-			cardColumns: { columns: 2, columnGap: 14, minWidth: 0 },
+			//
+			// It is a **row-major grid**, not a multi-column masonry. Multi-column
+			// fills the first column to the bottom before starting the second, so
+			// a *ranked* list read top-to-bottom inside one column and the last
+			// entries landed in the right-hand column — the user's words: 「这个
+			// 使用量最多应该是从左到右排序而不是从上到下的排序，这样第三列都是
+			// 最后的，给用户显示的观感不好」. `minmax(0, 1fr)` is what keeps a
+			// hostile card from widening the wall (a bare `1fr` floors at the
+			// item's min-content). Rows are NOT `align-items: start`: a row whose
+			// cards differ in height would then leave a hole under the short ones
+			// (the tall first card in the fixtures opened a 300px hole), so the
+			// default `stretch` squares the row up and the card's own
+			// `grid-template-rows: 1fr auto` parks the slack between the body and
+			// the footer — the footer stays on the card's bottom edge instead of
+			// floating mid-card.
+			cardColumns: {
+				display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+				gap: 14, minWidth: 0,
+			},
 			// The measurable box those queries read: its own inline size, not the
 			// window's. Also the reason the grid sits inside a wrapper at all.
 			// `minWidth: 0` is the fix for the wall overflowing its page: as a
@@ -443,8 +461,11 @@ window.__ModuleLoader__.load({
 			// above then grew to fit.
 			gridHost: { containerType: "inline-size", minWidth: 0, width: "100%" },
 			card: {
-				breakInside: "avoid", WebkitColumnBreakInside: "avoid",
-				marginBottom: 14, display: "grid", gap: 10,
+				// The wall's `gap` spaces the rows now; the old `marginBottom` was
+				// the multi-column era's way of opening a vertical gutter and
+				// would double every gap under the grid. `1fr auto` gives the body
+				// the row's slack so the footer sits on the card's bottom edge.
+				display: "grid", gridTemplateRows: "1fr auto", gap: 10,
 				padding: 16, borderRadius: 12,
 				border: `1px solid ${T.line}`, background: T.cardBg,
 				color: T.text, textAlign: "left", cursor: "pointer",
@@ -463,7 +484,13 @@ window.__ModuleLoader__.load({
 			cardHd: { display: "flex", gap: 12, alignItems: "flex-start" },
 			cardLeft: { display: "grid", gap: 0, flex: 1, minWidth: 0 },
 			cardCta: { display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end", flexShrink: 0 },
-			cardBody: { display: "grid", gap: 10, flex: 1, minWidth: 0, outline: "none" },
+			cardBody: {
+				display: "grid", gap: 10, flex: 1, minWidth: 0, outline: "none",
+				// The body absorbs a stretched row's slack (see `card`), and its
+				// own rows must keep their content height instead of spreading
+				// that slack between themselves.
+				alignContent: "start",
+			},
 			cardName: {
 				fontWeight: 700, fontSize: 15, color: T.text, textDecoration: "none",
 				overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%",
@@ -814,10 +841,11 @@ window.__ModuleLoader__.load({
 				// height back (the tab body and the card scroller) say so inline
 				// with `flex: 1 1 auto`, which outranks this rule.
 				".omkt-page > *,.omkt-tabbody > *{flex-shrink:0;min-width:0}",
-				// v4's breakpoints for the card grid. Inline `columns:2` is the
-				// fallback; these rules only ever *raise* or *lower* the count,
-				// hence !important — nothing else can beat an inline style, and
-				// without this the wall would stay two columns on a wide pane.
+				// v4's breakpoints for the card wall. Inline `repeat(2, …)` is
+				// the fallback; these rules only ever *raise* or *lower* the
+				// count, hence !important — nothing else can beat an inline
+				// style, and without this the wall would stay two columns on a
+				// wide pane.
 				//
 				// Container queries only, deliberately: this page is a slice of
 				// the window, so the question is how much room the grid got,
@@ -829,10 +857,14 @@ window.__ModuleLoader__.load({
 				// the wall into a horizontal scrollbar. A renderer without
 				// container support now keeps the inline two columns, which is
 				// the answer that cannot overflow.
-				".omkt-grid{column-count:2;column-gap:14px}",
-				"@container (max-width:719px){.omkt-grid{column-count:1!important}}",
-				"@container (min-width:720px) and (max-width:1099px){.omkt-grid{column-count:2!important}}",
-				"@container (min-width:1100px){.omkt-grid{column-count:3!important}}",
+				//
+				// `minmax(0, 1fr)` and not `1fr`: a bare `1fr` floors each track
+				// at its item's min-content, which is how a single long URL used
+				// to widen the whole wall.
+				".omkt-grid{grid-template-columns:repeat(2,minmax(0,1fr))}",
+				"@container (max-width:719px){.omkt-grid{grid-template-columns:repeat(1,minmax(0,1fr))!important}}",
+				"@container (min-width:720px) and (max-width:1099px){.omkt-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}}",
+				"@container (min-width:1100px){.omkt-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important}}",
 				".omkt-icon:hover{background:rgba(128,128,128,.14)}",
 				// The GitHub mark beside a card title: inked on hover only, so a
 				// list of cards stays quiet but the repo is always one click away.
@@ -2477,14 +2509,13 @@ window.__ModuleLoader__.load({
 								` / ${pageCount} 页`,
 							]),
 							createElement("span", { key: "n" }, `每页 ${pageSize} 条`),
-							// The order in force, in words. `column-count` lays
-							// the wall out column by column, so a ranked list
-							// reads *down* each column: saying "按使用量最多"
-							// here is what makes that legible, next to the rank
-							// chips on the cards themselves.
+							// The order in force, in words, next to the rank chips
+							// on the cards themselves (the wall is a row-major
+							// grid, so #1 is the top-left card and the numbers
+							// run left to right).
 							marketSort !== "default"
 								? createElement("span", { key: "sort", style: styles.metaSort,
-									title: "名次顺着每列自上而下；没有该项数据的条目排在后面" },
+									title: "名次从左到右、再下一行；没有该项数据的条目排在后面" },
 									`按${(SORT_OPTIONS.find(([v]) => v === marketSort) ?? [, marketSort])[1]}排序`)
 								: null,
 							marketAt

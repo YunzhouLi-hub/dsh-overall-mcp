@@ -347,7 +347,7 @@ console.log(shots.join('\n'));
         + (pad === '0px' ? '' : '-pad' + parseFloat(pad)));
     }
     return {
-      columns: getComputedStyle(g).columnCount,
+      columns: String(getComputedStyle(g).gridTemplateColumns.split(' ').filter(Boolean).length),
       cardWidth: Math.round(g.querySelector('article').getBoundingClientRect().width),
       boxWidth: Math.round(g.getBoundingClientRect().width),
       chain: chain,
@@ -637,7 +637,7 @@ const frameOf = (inner) => `
     descClamp: descStyle ? descStyle.webkitLineClamp : 'n/a',
     descH: desc ? Math.round(desc.getBoundingClientRect().height) : 0,
     descScroll: desc ? Math.round(desc.scrollHeight) : 0,
-    columns: getComputedStyle(grid).columnCount,
+    columns: String(getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length),
     cardWidth: Math.round(card.getBoundingClientRect().width),
     container: container.tagName.toLowerCase() + '.' + (container.className || '-') + ':'
       + getComputedStyle(container).containerType,
