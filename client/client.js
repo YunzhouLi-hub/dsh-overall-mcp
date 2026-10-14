@@ -1218,6 +1218,23 @@ window.__ModuleLoader__.load({
 									: null,
 							])
 							: null,
+						// Installs made from this panel. A *second* series on
+						// purpose: the figure above is the source's own count
+						// (Smithery's 次启动 / Docker's 次拉取, and the three
+						// other sources publish none at all), while this one is
+						// this machine's. Only the 使用量 ordering adds them up.
+						item.localInstalls > 0
+							? createElement("span", {
+								key: "li", style: styles.stat,
+								title: item.localInstallLastAt
+									? `从本市场安装过 ${item.localInstalls} 次（最近 ${item.localInstallLastAt.slice(0, 10)}）`
+									: `从本市场安装过 ${item.localInstalls} 次`,
+							}, [
+								createElement("span", { key: "g" }, "⤓"),
+								createElement("b", { key: "n", style: styles.statB }, String(item.localInstalls)),
+								createElement("span", { key: "l", style: styles.statSep }, " 本市场"),
+							])
+							: null,
 						typeof stars === "number"
 							? createElement("a", {
 								key: "st", className: "omkt-link", style: styles.stat, href: item.repository || "#",
@@ -1314,9 +1331,14 @@ window.__ModuleLoader__.load({
 							: null,
 						createElement("span", {
 							key: "group", style: { ...styles.tag, ...styles.tagKind },
-							title: groupTitle
-								? `分类：${groupTitle}`
-								: "分类：该来源未发布功能分类，同上方的「未分类」筛选",
+							// A group read out of the entry's own words is labelled as
+							// such: the two registries publish no category, and a
+							// guess must never be presented as the source's fact.
+							title: item.groupSource === "inferred"
+								? `分类（按名称与描述推断）：${groupChip}`
+								: groupTitle
+									? `分类：${groupTitle}`
+									: "分类：该来源未发布功能分类，同上方的「未分类」筛选",
 						}, groupChip),
 						createElement("span", {
 							key: "install", style: { ...styles.tag, ...styles.tagKind },
@@ -1394,6 +1416,25 @@ window.__ModuleLoader__.load({
 		 * that does not, so a missing value sorts last rather than tying with
 		 * every real value and being resolved by quality alone.
 		 */
+		/**
+		 * The figure 「使用量最多」 orders by: the source's own count **plus** this
+		 * machine's installs from the panel.
+		 *
+		 * The card shows the two series separately (they mean different things),
+		 * but ordering has to answer one question — "how used is this" — and for
+		 * the 233 entries whose source publishes no figure at all, our own
+		 * installs are the only evidence there is. `hasData` keeps the old rule
+		 * intact: an entry with neither figure still has no number, and numbers
+		 * sort ahead of non-numbers.
+		 */
+		function usageOf(item) {
+			const upstream = typeof item?.installs === "number" ? item.installs : null;
+			const local = typeof item?.localInstalls === "number" && item.localInstalls > 0
+				? item.localInstalls : 0;
+			if (upstream === null && local === 0) return { value: undefined, hasData: false };
+			return { value: (upstream ?? 0) + local, hasData: true };
+		}
+
 		function compareMarket(a, b, sort, stats) {
 			const qa = qualityOf(a, stats);
 			const qb = qualityOf(b, stats);
@@ -1407,7 +1448,7 @@ window.__ModuleLoader__.load({
 			};
 			switch (sort) {
 				case "installs":
-					return desc(a.installs, b.installs) || qb - qa;
+					return desc(usageOf(a).value, usageOf(b).value) || qb - qa;
 				case "stars":
 					return desc(starCountOf(a, stats), starCountOf(b, stats)) || qb - qa;
 				case "updated": {
@@ -1719,6 +1760,12 @@ window.__ModuleLoader__.load({
 							typeof item.installs === "number"
 								? `${item.installs} ${item.installsLabel ?? "次使用"}${item.installsWindow ? `（${item.installsWindow}）` : ""}`
 								: "该来源不发布"),
+						// Our own counter, stated next to the source's figure rather
+						// than folded into it: they are different measurements.
+						DetailRow("本市场安装",
+							item.localInstalls > 0
+								? `${item.localInstalls} 次${item.localInstallLastAt ? `（最近 ${item.localInstallLastAt.slice(0, 10)}）` : ""}`
+								: "尚未从本市场安装"),
 						DetailRow("安装方式",
 							item.installable
 								? item.install.transport === "stdio" ? "本地进程（stdio）" : "远程端点（streamable-http）"
@@ -2484,7 +2531,8 @@ window.__ModuleLoader__.load({
 								// doing anything is how "我选了使用量最多但没生效" reads.
 								title: marketSort === "default"
 									? "排序：综合推荐"
-									: `排序：${(SORT_OPTIONS.find(([v]) => v === marketSort) ?? [, marketSort])[1]}`,
+									: `排序：${(SORT_OPTIONS.find(([v]) => v === marketSort) ?? [, marketSort])[1]}`
+										+ (marketSort === "installs" ? "（上游使用量 + 本市场安装次数）" : ""),
 								onChange: (e) => { setMarketSort(e.target.value); setMarketPage(0); },
 							}, SORT_OPTIONS.map(([value, label]) => createElement("option", { key: value, value }, label))),
 							createElement("button", {

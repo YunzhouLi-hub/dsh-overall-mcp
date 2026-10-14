@@ -115,9 +115,25 @@ const samples = [
     titleHref: 'https://mcp.example', installable: true,
     chips: ['未分类', '远程 · 免安装'],
   },
+  {
+    name: 'inferred group: the chip says it is our reading, not the source\'s',
+    item: {
+      id: 'smithery:brave', title: 'Brave Search', source: 'smithery', author: 'brave',
+      description: 'Search the web with Brave.', transport: 'stdio',
+      group: '搜索与知识', groupSource: 'inferred',
+      install: { transport: 'stdio', command: 'npx', args: ['-y', '@smithery/cli', 'run', 'brave'] },
+      qualifiedName: 'brave', installable: true, installed: false,
+      installs: 87579, installsLabel: '次启动', localInstalls: 3,
+      localInstallLastAt: '2026-10-14T08:00:00.000Z',
+    },
+    titleHref: 'https://smithery.ai/servers/brave', installable: true,
+    chips: ['搜索与知识', 'stdio · npx'],
+    groupTitlePrefix: '分类（按名称与描述推断）：',
+    localInstalls: true,
+  },
 ];
 
-for (const { name, item, titleHref, installable, chips } of samples) {
+for (const { name, item, titleHref, installable, chips, groupTitlePrefix, localInstalls } of samples) {
   const tree = __test.MarketCard({
     item, stats: {}, media: {}, busy: false, onInstall: () => {}, onOpen: () => {},
     onToggleFavorite: () => {},
@@ -154,12 +170,31 @@ for (const { name, item, titleHref, installable, chips } of samples) {
   const footerSpans = walk(footer).filter((n) => n.type === 'span'
     && typeof n.props?.title === 'string');
   const semantic = footerSpans
-    .filter((n) => /^(分类|安装方式)：/.test(n.props.title))
+    // 分类's title is 「分类：…」 for an upstream heading and
+    // 「分类（按名称与描述推断）：…」 when we inferred it from the entry's words.
+    .filter((n) => /^(分类：|分类（按名称与描述推断）：|安装方式：)/.test(n.props.title))
     .map((n) => ({ text: textOf(n), title: n.props.title }));
   assert.deepEqual(semantic.map((c) => c.text), chips,
     `${name}: footer chips are ${JSON.stringify(semantic.map((c) => c.text))}`);
-  assert.match(semantic[0]?.title ?? '', /^分类：/, `${name}: first chip is not the taxonomy`);
+  assert.match(semantic[0]?.title ?? '', /^分类/, `${name}: first chip is not the taxonomy`);
   assert.match(semantic[1]?.title ?? '', /^安装方式：/, `${name}: second chip is not the install method`);
+  if (groupTitlePrefix) {
+    assert.ok(String(semantic[0]?.title ?? '').startsWith(groupTitlePrefix),
+      `${name}: an inferred group must be labelled as inference (${semantic[0]?.title})`);
+  }
+  if (localInstalls) {
+    const localCell = deep.find((n) => typeof n.props?.title === 'string'
+      && n.props.title.includes('从本市场安装过'));
+    assert.ok(localCell, `${name}: the local install count is not stated`);
+    const text = textOf(localCell);
+    assert.ok(text.includes('本市场'), `${name}: the local count must not read like the source's figure`);
+    assert.ok(text.includes(String(item.localInstalls)),
+      `${name}: the local count is wrong (got ${text})`);
+    // The source's own figure must still be there, next to ours.
+    const upstream = deep.find((n) => typeof n.props?.title === 'string' && n.props.title === '次启动');
+    assert.ok(upstream && textOf(upstream).includes('87.5k'),
+      `${name}: the upstream figure disappeared (got ${upstream ? textOf(upstream) : 'nothing'})`);
+  }
   const shown = [...semantic.map((c) => c.text),
     ...footerSpans.filter((n) => n.props.title.startsWith('上游标签：')).map(textOf)];
   for (const banned of ['托管', '本地', 'npm', 'pypi']) {

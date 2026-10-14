@@ -16,6 +16,10 @@ import * as mcpClient from '@deepseek-ai/dsh-mcp-client';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { scanHost, mergeIntoRegistry } from './lib/scanner.js';
 import { searchOpenCatalogs, browseCatalog, catalogItemToEntry, fetchRepoStats } from './lib/catalog.js';
+import {
+  readInstalls, writeInstalls, recordInstallIn, installKeyOf,
+  localInstallsOf, localLastInstallOf,
+} from './lib/installs.js';
 import { collectRepoMedia } from './lib/media.js';
 import { sanitizeToolDefinition } from './lib/schema-guard.js';
 import { checkAllUpdates, checkEntryUpdate, parsePackageInvocation, pinArgs } from './lib/updates.js';
@@ -131,6 +135,11 @@ export async function apply(ctx) {
   const dir = dataDir();
   const registryFile = path.join(dir, 'registry.json');
   const reportFile = path.join(dir, 'scan-report.json');
+  // Installs made from this panel, counted locally (lib/installs.js). The
+  // sources publish their own usage figures; neither counts our installs, and
+  // the user asked for them (「下载量以后从我们市场下载的也要统计一下」).
+  const installsFile = path.join(dir, 'installs.json');
+  let installs = await readInstalls(installsFile);
 
   let registry = await readJson(registryFile, null);
   const firstRun = registry === null;
@@ -313,8 +322,19 @@ export async function apply(ctx) {
     if (i >= 0) { await disconnect(entry.name); registry.servers[i] = entry; }
     else registry.servers.push(entry);
     await save();
+    // Count the install *after* it is in the registry: an entry that failed
+    // validation above never reaches this line, so the counter only ever grows
+    // for installs that actually happened.
+    const installKey = installKeyOf(item, entry.name);
+    const record = recordInstallIn(installs, { key: installKey, name: entry.name });
+    if (record) await writeInstalls(installsFile, installs);
     const conn = entry.enabled !== false ? await connect(entry) : { ok: true, deferred: true };
-    return { installed: entry.name, servers: publicList(), connect: conn };
+    return {
+      installed: entry.name,
+      localInstalls: record?.count ?? 0,
+      servers: publicList(),
+      connect: conn,
+    };
   }
 
   async function doSetEnabled(name, enabled) {
@@ -439,6 +459,10 @@ export async function apply(ctx) {
       installable: entry !== null,
       installed,
       favorite: favorites.has(favoriteKeyOf(item)),
+      // Installs made from this panel, so the card can show them next to the
+      // upstream's own figure instead of silently mixing the two.
+      localInstalls: localInstallsOf(installs, item, name),
+      localInstallLastAt: localLastInstallOf(installs, item, name),
     };
   }
 

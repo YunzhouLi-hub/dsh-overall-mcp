@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   searchOpenCatalogs, browseCatalog, catalogItemToEntry, fetchAwesomeList,
   fetchAwesomeRemote, fetchDockerCatalog, githubReposOf, fetchRepoStats,
+  functionalGroupOf, inferGroupOf, groupSourceOf,
 } from '../lib/catalog.js';
 
 // The companion list of *hosted* endpoints: `- [Title](home) \`url\`` with an
@@ -519,11 +520,19 @@ test('synonym headings consolidate into one functional group', async () => {
     'the raw heading survives on each item for display');
 });
 
-test('every item with a heading lands in exactly one group, registries in none', async () => {
+test('every item with a heading lands in exactly one group; registry entries are inferred or bare', async () => {
   const { items } = await browseCatalog({ fetchImpl: okFetch });
   for (const item of items) {
-    if (item.category) assert.ok(typeof item.group === 'string' && item.group.length > 0, `${item.title}: heading ${item.category} produced no group`);
-    else assert.equal(item.group, undefined, `${item.title}: a registry entry must not gain a group`);
+    if (item.category) {
+      assert.ok(typeof item.group === 'string' && item.group.length > 0, `${item.title}: heading ${item.category} produced no group`);
+      assert.equal(item.groupSource, 'upstream', `${item.title}: a heading is not an inference`);
+    } else {
+      // The registries publish no category: the group is either read out of the
+      // entry's own words (and marked as our reading) or absent entirely —
+      // never a silent guess presented as the source's own heading.
+      if (item.group === undefined) assert.equal(item.groupSource, undefined, `${item.title}: a bare entry cannot have a group source`);
+      else assert.equal(item.groupSource, 'inferred', `${item.title}: registry groups must be labelled inferred`);
+    }
   }
 });
 
@@ -637,4 +646,57 @@ test('fetchRepoStats does not confuse an ordinary 404 with a rate limit', async 
   const fetchImpl = async () => ({ ok: false, status: 404, json: async () => ({}) });
   const stats = await fetchRepoStats([{ key: 'a/one', owner: 'a', repo: 'one' }], { fetchImpl });
   assert.notEqual(stats.rateLimited, true);
+});
+
+// ---------------------------------------------------------------------------
+// Functional group: the two community lists carry a heading, the two registries
+// carry nothing at all. Those entries get a group inferred from their own words,
+// marked `inferred` so the card can say it is our reading (see the第八轮/第十轮
+// notes in INTEGRATION-TODO.md). These cases are real entries from the live
+// registries, because the failure mode this replaces was a *plausible* wrong
+// answer: 「server」 in every description put an MCP hiring service in 云与运维.
+// ---------------------------------------------------------------------------
+
+test('an upstream heading always wins over inference', () => {
+  // Even when the description would infer something else.
+  const item = { category: 'Databases', title: 'Brave Search', description: 'Search the web with Brave.' };
+  assert.equal(functionalGroupOf(item), '数据与存储');
+  assert.equal(groupSourceOf(item), 'upstream');
+  // An unmapped upstream heading is 其他, not a guess: the source did say something.
+  assert.equal(functionalGroupOf({ category: 'Some New Heading', title: 'x', description: 'search' }), '其他');
+});
+
+test('registry entries are inferred from title and description', () => {
+  const cases = [
+    [['Brave Search', "Search the web with Brave's independent index — web, news, images, and videos."], '搜索与知识'],
+    [['Gmail', 'Read, search, and send Gmail messages. Manage drafts, threads, and labels; reply, forward, archive, trash, report spam, and triage your inbox.'], '办公协作'],
+    [['Google Sheets', 'Search and inspect Google Sheets, create and edit spreadsheets, scan for data issues, review edit history.'], '办公协作'],
+    [['GitHub', 'Connect your AI agents to GitHub — manage repos, issues, PRs, workflows, and more.'], '开发工具'],
+    [['Neon', 'Serverless Postgres. Connect any MCP client directly to the same address.'], '数据与存储'],
+    [['Exa Search', 'Fast, intelligent web search and web crawling. Get fresh information about libraries, APIs, and SDKs.'], '搜索与知识'],
+    [['DevMatch', 'DevMatch is a MCP server for hiring engineers based on what they have actually built. Connect from Cursor, Claude Desktop, or any MCP-compatible AI assistant.'], '商业与法律'],
+    [['1ClickWebsite', 'Build and edit WordPress websites for local service businesses and run Lead Gen demo-site batches.'], '开发工具'],
+  ];
+  for (const [[title, description], expected] of cases) {
+    assert.equal(inferGroupOf({ title, description }), expected, `${title} should infer ${expected}`);
+    assert.equal(groupSourceOf({ title, description }), 'inferred');
+  }
+});
+
+test('a description that matches nothing stays uncategorized instead of guessing', () => {
+  const item = { title: 'GENOSYS UAE', description: 'A thing that does stuff.' };
+  assert.equal(inferGroupOf(item), undefined);
+  assert.equal(functionalGroupOf(item), undefined);
+  assert.equal(groupSourceOf(item), undefined);
+});
+
+test('inference is deterministic and title-weighted', () => {
+  // Same input twice, same answer: no dependence on object key order.
+  const item = { title: 'Aard', description: 'crypto wallet and search' };
+  assert.equal(inferGroupOf(item), inferGroupOf({ ...item }));
+  // The title outranks the description, which is what keeps a "Search" product
+  // whose blurb mentions images out of 多媒体创作.
+  assert.equal(inferGroupOf({ title: 'Search Thing', description: 'images and videos' }), '搜索与知识');
+  // Weighted by phrase length: the two-word phrase beats the generic one.
+  assert.equal(inferGroupOf({ title: 'x', description: 'google sheets search' }), '办公协作');
 });

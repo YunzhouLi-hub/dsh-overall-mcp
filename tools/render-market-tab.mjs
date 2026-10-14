@@ -64,9 +64,11 @@ const MARKET = {
       install: { transport: 'stdio', command: 'npx', args: ['-y', '@snag/mcp'] },
       repository: 'https://github.com/snag/mcp', version: '1.0.0', group: '开发工具',
       installable: true, installed: true, favorite: true,
-      // No installs figure: the official registry publishes none, and the
-      // 「使用量最多」 order must still place it *after* the counted entries.
-      official: true,
+      // No upstream installs figure (the official registry publishes none) but
+      // installed from this panel five thousand times ⇒ it must outrank the
+      // entry whose *source* reports 1200.
+      official: true, group: '开发工具', groupSource: 'upstream',
+      localInstalls: 5000, localInstallLastAt: '2026-10-14T08:00:00.000Z',
     },
     {
       id: 'awesome:Gatyh/3dtexel-mcp', title: '3dtexel-mcp', source: 'awesome-list', author: 'Gatyh',
@@ -409,8 +411,14 @@ function containsNode(root, target) {
   const titleOrder = walk(grid).filter((n) => n.type === 'article')
     .map((n) => String(n.props.title ?? '').split(' · ')[0])
     .filter((t) => ['snag', '3dtexel-mcp', 'example-mcp'].includes(t));
-  assert.deepEqual(titleOrder, ['example-mcp', '3dtexel-mcp', 'snag'],
-    `使用量最多 must order by installs descending, missing counts last (got ${JSON.stringify(titleOrder)})`);
+  // 使用量最多 = upstream figure + installs made from this panel: example-mcp
+  // (90 000 upstream), snag (0 upstream + 5000 local) and 3dtexel (1200).
+  assert.deepEqual(titleOrder, ['example-mcp', 'snag', '3dtexel-mcp'],
+    `使用量最多 must add our own installs in (got ${JSON.stringify(titleOrder)})`);
+  const snagCard = walk(grid).filter((n) => n.type === 'article')
+    .find((n) => String(n.props.title ?? '').startsWith('snag'));
+  assert.ok(textOf(snagCard).includes('本市场'),
+    'the local install count is shown as its own series on the card');
 
   const ranks = findByKey(sorted, 'rank');
   assert.deepEqual(ranks.map((n) => textOf(n)), ['#1', '#2', '#3'],
