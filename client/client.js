@@ -152,9 +152,14 @@ window.__ModuleLoader__.load({
 			// A centre-column panel owns its scrolling: the frame's centre column
 			// is `overflow:hidden`, and every built-in page is a
 			// `height:100%; overflow:auto` scroller (the plugin manager's own
-			// `.page` is exactly that). The top padding repeats the frame's
-			// clearance variable so the first row clears the macOS traffic
-			// lights and the Windows title bar instead of hiding under them.
+			// `.page` is exactly that). This page is the shell instead: it is
+			// `height:100%` with **no** scrolling of its own, and the scrolling
+			// lives one level down — the tab body for 已注册 (a long list) and,
+			// in MCP 市场, the card region alone, so the search box and the
+			// 分类/筛选 rows stay put while the cards move. The top padding
+			// repeats the frame's clearance variable so the first row clears the
+			// macOS traffic lights and the Windows title bar instead of hiding
+			// under them.
 			//
 			// The page adds no horizontal padding of its own: the market body
 			// inside it is already a 20px-padded plate, and a second gutter here
@@ -183,8 +188,9 @@ window.__ModuleLoader__.load({
 				//    horizontal automatic minimum exists at all.
 				display: "flex", flexDirection: "column", gap: 12,
 				fontSize: 13.5, lineHeight: 1.55, color: T.text,
-				height: "100%", boxSizing: "border-box", overflowY: "auto",
+				height: "100%", boxSizing: "border-box", overflow: "hidden",
 				width: "100%", maxWidth: 1180, margin: "0 auto", minWidth: 0,
+				minHeight: 0,
 				// The page is a container too, so the grid is always measured
 				// against a box of our own — `gridHost` is nearer and wins, but
 				// a host or fixture that renders the page alone must still get
@@ -210,7 +216,31 @@ window.__ModuleLoader__.load({
 			// still sizes it as a grid/flex item. The card wall is a multicol,
 			// and a multicol's min-content is one column per `column-count` —
 			// 3 x 621px in the real app, against a 1140px box.
-			tabBody: { display: "flex", flexDirection: "column", gap: 12, minWidth: 0 },
+			//
+			// `flex: 1 1 auto` + `minHeight: 0` is what makes this the scroller:
+			// it takes the height the page's fixed rows (head, tab bar, footer)
+			// leave over, and scrolls instead of pushing the page taller.
+			// `flexShrink: 0` is deliberately *not* inherited from the sheet's
+			// `.omkt-page > *` rule — the inline longhand wins.
+			tabBody: {
+				display: "flex", flexDirection: "column", gap: 12, minWidth: 0,
+				flex: "1 1 auto", flexShrink: 1, minHeight: 0, overflowY: "auto",
+			},
+			// The MCP market body: same box, but it does *not* scroll — its
+			// chrome (search, 分类, 筛选, meta lines) is pinned and only the card
+			// region inside it moves. That is why it needs its own style rather
+			// than reusing `tabBody`.
+			market: {
+				display: "flex", flexDirection: "column", gap: 12, minWidth: 0,
+				flex: "1 1 auto", flexShrink: 1, minHeight: 0, overflow: "hidden",
+			},
+			// The one scrolling box in the market tab. `paddingBottom` keeps the
+			// last row of cards off the pager; `minWidth: 0` keeps the multicol
+			// from widening the column (see `page`).
+			marketScroll: {
+				flex: "1 1 auto", flexShrink: 1, minHeight: 0, overflowY: "auto",
+				minWidth: 0, paddingBottom: 4,
+			},
 			toolbar: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" },
 			// ---- page head, ported from the v4 prototype ----------------------
 			// Two rows: identity + actions, then the sub-line. The brand mark is
@@ -729,13 +759,15 @@ window.__ModuleLoader__.load({
 				".omkt-btn-text:hover{opacity:.7}",
 				".omkt-btn-outline:hover{background:rgba(128,128,128,.10)}",
 				".omkt-btn:disabled{opacity:.55;cursor:default}",
-				// The page and each tab body are column flex containers that only
-				// stack their children. Flex items shrink along the main axis by
-				// default, and the page is a definite-height scroll container, so
-				// with the tall market list the *tab bar* was the cheapest item to
-				// shrink: it collapsed to a 1px band and its labels vanished, which
-				// made「MCP 市场」a one-way door. Children never shrink here; the
-				// page scrolls instead.
+				// A flex item inside a *scroll container* (or any non-visible
+				// `overflow`) loses its content-based automatic minimum size, so
+				// its default `flex-shrink: 1` can squash it to nothing. The page
+				// learned that the hard way: with the tall market body the tab bar
+				// was the cheapest item to shrink, collapsed to its own 1px border
+				// and made「MCP 市场」a one-way door. Every chrome row is therefore
+				// pinned at its own height; the two boxes that are *meant* to give
+				// height back (the tab body and the card scroller) say so inline
+				// with `flex: 1 1 auto`, which outranks this rule.
 				".omkt-page > *,.omkt-tabbody > *{flex-shrink:0;min-width:0}",
 				// v4's breakpoints for the card grid. Inline `columns:2` is the
 				// fallback; these rules only ever *raise* or *lower* the count,
@@ -1658,6 +1690,10 @@ window.__ModuleLoader__.load({
 			const [marketPage, setMarketPage] = useState(0);
 			const [pageSize, setPageSize] = useState(20);
 			const [detail, setDetail] = useState(null);
+			// The plugin's own update state, filled by 检查更新 (see
+			// `doCheckUpdates`). `null` means "not asked yet", which is why the
+			// head shows no update button on a fresh page.
+			const [selfUpdate, setSelfUpdate] = useState(null);
 			const pageRef = useRef(null);
 			const scrollerRef = useRef(null);
 			const [showTop, setShowTop] = useState(false);
@@ -1796,11 +1832,43 @@ window.__ModuleLoader__.load({
 				() => api("/remove", { method: "POST", body: JSON.stringify({ name }) }),
 				(r) => `${r.removed} 已移除`,
 			);
+			// 「检查更新」 answers two questions at once: which mounted MCP
+			// servers have a newer package, and whether *this plugin* does. The
+			// second answer is what decides if the head shows an update button,
+			// so a refresh action (which the 分类 row already has as 刷新) never
+			// sits in the primary slot.
 			const doCheckUpdates = () => run(
-				() => api("/updates", { method: "POST" }),
-				(r) => r.updatable > 0
-					? `检查完成：${r.checked} 个可检测，其中 ${r.updatable} 个有可用更新`
-					: `检查完成：${r.checked} 个可检测，均已是最新版本`,
+				async () => {
+					const body = await api("/updates", { method: "POST" });
+					setSelfUpdate(body.self ?? null);
+					return body;
+				},
+				(r) => {
+					const parts = [r.updatable > 0
+						? `${r.checked} 个可检测，其中 ${r.updatable} 个有可用更新`
+						: `${r.checked} 个可检测，均已是最新版本`];
+					const self = r.self;
+					if (self) {
+						if (self.updateAvailable) parts.push(`插件 dsh-overall-mcp 有新版 v${self.latest}`);
+						else if (self.reason === "linked") parts.push("插件为 link 安装，跳过自身更新");
+						else if (self.reason === "up-to-date") parts.push(`插件 v${self.version} 已是最新`);
+						else if (self.hint) parts.push(self.hint);
+					}
+					return `检查完成：${parts.join("；")}`;
+				},
+			);
+
+			const doSelfUpdate = () => run(
+				async () => {
+					const body = await api("/self-update", { method: "POST" });
+					setSelfUpdate(null);
+					return body;
+				},
+				(r) => {
+					if (r.ok) return `已将 dsh-overall-mcp 更新到 v${r.to}（重启 DSH 后生效）`;
+					const tail = [r.hint, r.command].filter(Boolean).join("：");
+					return tail || "插件自更新未执行";
+				},
 			);
 
 			/**
@@ -1855,13 +1923,22 @@ window.__ModuleLoader__.load({
 			// element at or above it — starting with the page itself, which is
 			// the one that actually moves — and falls back to the window when
 			// there is none.
+			// The scroll container is no longer necessarily an *ancestor* of the
+			// page: the page is a fixed shell, and the scrolling box is the tab
+			// body (已注册) or the card region inside it (MCP 市场). Look for the
+			// page's own scroller first and only then walk up, so the button
+			// tracks what the user is actually dragging. Re-runs on a tab change
+			// because that replaces the scroller node.
 			useEffect(() => {
 				if (typeof document === "undefined" || typeof getComputedStyle !== "function") return undefined;
 				const node = pageRef.current;
 				if (!node) return undefined;
+				setShowTop(false);
+				let target = typeof node.querySelector === "function"
+					? node.querySelector('[data-omkt="scroller"]')
+					: null;
 				let el = node;
-				let target = null;
-				while (el && el !== document.body) {
+				while (!target && el && el !== document.body) {
 					const overflowY = getComputedStyle(el).overflowY;
 					if (overflowY === "auto" || overflowY === "scroll") { target = el; break; }
 					el = el.parentElement;
@@ -1875,7 +1952,7 @@ window.__ModuleLoader__.load({
 				host.addEventListener("scroll", onScroll, { passive: true });
 				onScroll();
 				return () => host.removeEventListener("scroll", onScroll);
-			}, []);
+			}, [tab]);
 
 			function backToTop() {
 				const target = scrollerRef.current;
@@ -2041,17 +2118,24 @@ window.__ModuleLoader__.load({
 					createElement("div", { key: "hd-row1", style: styles.headRow }, [
 						createElement("div", { key: "hd-title", style: styles.titleRow }, [
 							brandMark(22),
-							createElement("strong", { key: "n", style: styles.pageTitle }, "总体 MCP"),
+							createElement("strong", { key: "n", style: styles.pageTitle }, "全局 MCP"),
 							createElement("span", { key: "hd-ver", style: styles.versionChip, title: "插件版本" },
 								`v${CLIENT_VERSION}`),
 						]),
 						createElement("div", { key: "hd-acts", style: styles.headActs }, [
+							// The filled button is a tab's one important action. On
+							// MCP 市场 that is *not* a refresh — the 分类 row already
+							// carries 刷新 — so it appears only when 检查更新 found a
+							// newer release of this plugin, and then it installs it.
 							tab === "market"
-								? createElement("button", {
-									key: "hd-primary", type: "button", className: "omkt-btn omkt-btn-primary",
-									style: { ...styles.button, ...styles.primary }, disabled: marketBusy,
-									onClick: () => loadMarket({ refresh: true }),
-								}, marketBusy ? "更新中…" : "更新插件市场")
+								? selfUpdate && selfUpdate.updateAvailable
+									? createElement("button", {
+										key: "hd-primary", type: "button", className: "omkt-btn omkt-btn-primary",
+										style: { ...styles.button, ...styles.primary }, disabled: busy,
+										title: `更新到 v${selfUpdate.latest}（${selfUpdate.profileName ?? "本 profile"}）`,
+										onClick: doSelfUpdate,
+									}, busy ? "更新中…" : "更新 overall-mcp")
+									: null
 								: createElement("button", {
 									key: "hd-primary", type: "button", className: "omkt-btn omkt-btn-primary",
 									style: { ...styles.button, ...styles.primary }, disabled: busy, onClick: doScan,
@@ -2145,7 +2229,8 @@ window.__ModuleLoader__.load({
 						]),
 						createElement("input", {
 							key: "name", style: styles.searchBox, value: nameFilter,
-							placeholder: "搜索服务器名称…",
+							placeholder: "搜索 MCP",
+							title: "按服务器名称、来源或命令过滤",
 							onChange: (e) => setNameFilter(e.target.value),
 						}),
 					]) : null,
@@ -2168,7 +2253,9 @@ window.__ModuleLoader__.load({
 				]) : null,
 
 				// ---------------- market tab ----------------
-				tab === "market" ? createElement("div", { key: "mkt", className: "omkt-tabbody", style: styles.tabBody }, [
+				tab === "market" ? createElement("div", {
+					key: "mkt", className: "omkt-tabbody", "data-omkt": "market", style: styles.market,
+				}, [
 					// Row 1 — the search pill, on a line of its own. v4 makes it
 					// the widest control on the page because it is the one thing
 					// that turns five thousand entries into the one you meant.
@@ -2176,7 +2263,8 @@ window.__ModuleLoader__.load({
 						createElement("span", { key: "ico", style: styles.searchIcon }, "🔍"),
 						createElement("input", {
 							key: "q", style: styles.searchInput, value: marketQuery, disabled: marketBusy,
-							placeholder: "搜索名称、描述或安装命令…",
+							placeholder: "搜索 MCP",
+							title: "搜索名称、描述或安装命令（回车或点「搜索」）",
 							onChange: (e) => setMarketQuery(e.target.value),
 							onKeyDown: (e) => { if (e.key === "Enter") loadMarket({}); },
 						}),
@@ -2295,19 +2383,23 @@ window.__ModuleLoader__.load({
 						? createElement("div", { key: "none", style: styles.message }, "没有匹配的 MCP。")
 						: null,
 					pageItems && pageItems.length
-						// The column count belongs to THIS box, not to the window:
-						// the settings pane is a slice of a browser window, so a
-						// viewport media query would ask for three columns in a
-						// 700px pane on a 1600px screen. The wrapper is the
-						// container the sheet's @container rules measure.
-						? createElement("div", { key: "gridwrap", style: styles.gridHost },
-							createElement("div", { key: "grid", className: "omkt-grid", style: styles.cardColumns },
-								pageItems.map((item) => createElement(MarketCard, {
-									key: `${item.source}:${item.id ?? item.title}`,
-									item, stats: repoStats, media: repoMedia, busy,
-									onInstall: doInstall, onOpen: setDetail,
-									onToggleFavorite: doToggleFavorite,
-								}))))
+						// Everything above this box is pinned chrome; from here
+						// down the cards scroll on their own, so dragging the
+						// wall never moves the search box or the 分类 row.
+						? createElement("div", { key: "scroll", "data-omkt": "scroller", style: styles.marketScroll },
+							// The column count belongs to THIS box, not to the window:
+							// the settings pane is a slice of a browser window, so a
+							// viewport media query would ask for three columns in a
+							// 700px pane on a 1600px screen. The wrapper is the
+							// container the sheet's @container rules measure.
+							createElement("div", { key: "gridwrap", style: styles.gridHost },
+								createElement("div", { key: "grid", className: "omkt-grid", style: styles.cardColumns },
+									pageItems.map((item) => createElement(MarketCard, {
+										key: `${item.source}:${item.id ?? item.title}`,
+										item, stats: repoStats, media: repoMedia, busy,
+										onInstall: doInstall, onOpen: setDetail,
+										onToggleFavorite: doToggleFavorite,
+									})))))
 						: null,
 
 					sortedItems && pageCount > 1
@@ -2388,7 +2480,7 @@ window.__ModuleLoader__.load({
 					// A plain string on purpose: this bundle ships no locale
 					// namespace, and a label resolved through a namespace we do
 					// not own would render as its key.
-					label: "总体 MCP",
+					label: "全局 MCP",
 				}, PanelGlyph);
 				return typeof off === "function" ? off : () => {};
 			});

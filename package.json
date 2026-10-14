@@ -17,8 +17,8 @@
     "./cordis.patch.yml": "./cordis.patch.yml"
   },
   "scripts": {
-    "lint": "node --check index.js && node --check lib/scanner.js && node --check lib/catalog.js && node --check lib/media.js && node --check client/client.js",
-    "test": "node --test test/scanner.test.mjs test/catalog.test.mjs test/schema-guard.test.mjs test/updates.test.mjs test/media.test.mjs",
+    "lint": "node --check index.js && node --check lib/scanner.js && node --check lib/catalog.js && node --check lib/media.js && node --check lib/updates.js && node --check lib/self-update.js && node --check client/client.js",
+    "test": "node --test test/scanner.test.mjs test/catalog.test.mjs test/schema-guard.test.mjs test/updates.test.mjs test/media.test.mjs test/self-update.test.mjs",
     "test:layout": "node tools/layout-probe.mjs && node tools/shot.mjs"
   },
   "dsh": {

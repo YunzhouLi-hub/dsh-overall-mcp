@@ -510,6 +510,33 @@ const frameOf = (inner) => `
   // would do it, so the widest card overflow is asserted rather than eyeballed.
   const cards = Array.from(grid.querySelectorAll('article:not([data-omkt="wide"])'));
   const bleed = cards.reduce((m, c) => Math.max(m, Math.round(c.scrollWidth - c.clientWidth)), 0);
+  // Scrolling belongs to the card box alone: the search pill, the 分类 row and
+  // the meta lines are chrome and must not move when the wall is dragged. That
+  // is measured, not assumed — scroll the inner box and re-read the chrome.
+  const scroller = document.querySelector('#center [data-omkt="scroller"]');
+  const chromeTop = (sel) => {
+    const el = sel ? sel() : null;
+    return el ? el.getBoundingClientRect().top : null;
+  };
+  const tabBarNode = document.querySelector('#center .omkt-tabbar');
+  const searchNode = document.querySelector('#center [data-omkt="market"] input');
+  const beforeTab = chromeTop(() => tabBarNode);
+  const beforeSearch = chromeTop(() => searchNode);
+  let innerScrolled = 0;
+  if (scroller) {
+    const room = scroller.scrollHeight - scroller.clientHeight;
+    scroller.scrollTop = Math.max(0, Math.min(240, room));
+    innerScrolled = Math.round(scroller.scrollTop);
+  }
+  // Read the chrome while the wall is scrolled: this is the assertion.
+  const afterTab = chromeTop(() => tabBarNode);
+  const afterSearch = chromeTop(() => searchNode);
+  const chromeShift = (beforeTab === null || afterTab === null) ? null : Math.round(afterTab - beforeTab);
+  const searchShift = (beforeSearch === null || afterSearch === null) ? null
+    : Math.round(afterSearch - beforeSearch);
+  const pageScrolled = Math.round(page.scrollTop);
+  const scrollerRoom = scroller ? Math.round(scroller.scrollHeight - scroller.clientHeight) : null;
+  if (scroller) scroller.scrollTop = 0; // leave the page as the screenshots expect it
   // A column flex container shrinks its items along the main axis when their
   // content is taller than the box, and this page *is* a definite-height scroll
   // container: with the tall market body the tab bar was the cheapest item to
@@ -555,6 +582,11 @@ const frameOf = (inner) => `
     bleed: bleed,
     rowHeights: rowHeights,
     rowMin: rowMin,
+    scrollRoom: scrollerRoom,
+    innerScrolled: innerScrolled,
+    chromeShift: chromeShift,
+    searchShift: searchShift,
+    pageScrolled: pageScrolled,
     underlines: underlines,
     inkedTabs: inkedTabs,
     tabsSelected: tabsSelected,
@@ -615,13 +647,23 @@ ${frameVerdict}`.replace(/src="https:\/\/images\.weserv\.nl[^"]*"/g, `src="${IMG
       + ` (${f.descH}px shown of ${f.descScroll}px)`);
     console.log(`  page rows [${(f.rowHeights || []).join(', ')}]px;`
       + ` tab underlines [${(f.underlines || []).join(' | ')}] (aria-selected ${f.tabsSelected})`);
-    if (!fits || !band || !sizing || !clamped || f.rowMin < 16 || f.inkedTabs !== 1) {
+    // Only the card box scrolls: with it dragged 240px down, the tab bar and the
+    // search pill must not have moved a pixel, and the page shell must still be
+    // at scrollTop 0. (`scrollRoom` is the box's overflow; when the fixture has
+    // too few cards to overflow, the assertion is vacuous but reported.)
+    const pins = f.chromeShift === 0 && f.searchShift === 0 && f.pageScrolled === 0;
+    console.log(`  card scroller: ${f.scrollRoom}px of room, scrolled ${f.innerScrolled}px ->`
+      + ` tab bar moved ${f.chromeShift}px, search moved ${f.searchShift}px,`
+      + ` page scrollTop ${f.pageScrolled}`);
+    if (!fits || !band || !sizing || !clamped || f.rowMin < 16 || f.inkedTabs !== 1 || !pins) {
       bad += 1;
       console.error(`FAIL at ${f.viewport}px: expected ${expected(f.avail)} columns for a`
         + ` ${f.avail}px page, got ${f.columns} for a ${f.gridBox}px wall`
         + ` (min-content ${f.gridMin}px); overflow ${f.scroll - f.page}px,`
         + ` card bleed ${f.bleed}px, shortest page row ${f.rowMin}px,`
-        + ` inked tabs ${f.inkedTabs} [${(f.underlines || []).join(' | ')}]`);
+        + ` inked tabs ${f.inkedTabs} [${(f.underlines || []).join(' | ')}],`
+        + ` chrome shift ${f.chromeShift}px / search shift ${f.searchShift}px /`
+        + ` page scrollTop ${f.pageScrolled}`);
       console.error(`  chain: ${f.chain.join(' > ')}`);
     }
   }
@@ -654,14 +696,24 @@ ${frameVerdict}`.replace(/src="https:\/\/images\.weserv\.nl[^"]*"/g, `src="${IMG
 
   const paintScript = `
   const page = document.getElementById('center').firstElementChild;
-  const kids = Array.from(page.children).filter((el) => el.getBoundingClientRect().height > 0);
-  const boxes = kids.map((el) => el.getBoundingClientRect());
+  // A row that is *meant* to fill (the tab body, and the card scroller inside
+  // it) declares flex-grow: 1. Every other row must be exactly as tall as what
+  // it painted, so those are the ones this probe measures.
+  const grow = (el) => parseFloat(getComputedStyle(el).flexGrow) > 0;
+  const all = Array.from(page.children).filter((el) => el.getBoundingClientRect().height > 0);
+  const kids = all.filter((el) => !grow(el));
+  const filling = all.filter(grow).map((el) => el.getAttribute('data-omkt') || el.tagName);
+  // The gap chain runs over every row in document order — the filling row is a
+  // real row and its space is *supposed* to be there. Only the slack metric
+  // skips it, because "taller than its own content" is exactly what a filling
+  // row is allowed to be.
+  const boxes = all.map((el) => el.getBoundingClientRect());
   const gaps = [];
   for (let i = 1; i < boxes.length; i += 1) {
     gaps.push(Math.round(boxes[i].top - boxes[i - 1].bottom));
   }
   const maxGap = gaps.reduce((m, g) => Math.max(m, g), 0);
-  const painted = Math.round(boxes.reduce((sum, b) => sum + b.height, 0));
+  const painted = Math.round(all.reduce((sum, el) => sum + el.getBoundingClientRect().height, 0));
   // Stretching a grid row does not open a gap between the rows and does not
   // make the row scrollable: it makes the row taller than the content it
   // painted (a block's scrollHeight is just its own box). So the slack is
@@ -674,19 +726,28 @@ ${frameVerdict}`.replace(/src="https:\/\/images\.weserv\.nl[^"]*"/g, `src="${IMG
     const last = kids2[kids2.length - 1].getBoundingClientRect();
     return (last.bottom - first.top) + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
   };
-  const slack = Math.round(kids.reduce((sum, el) => {
+  const slackOf = (list) => Math.round(list.reduce((sum, el) => {
     const box = el.getBoundingClientRect();
     return sum + Math.max(0, box.height - inner(el) - parseFloat(getComputedStyle(el).marginTop)
       - parseFloat(getComputedStyle(el).marginBottom));
   }, 0));
+  const slack = slackOf(kids);
+  // Inside the filling box the chrome must still pack at the top: search row,
+  // 分类 row, meta line, then empty space — never rows spread over the panel.
+  const filler = all.find(grow);
+  const innerSlack = filler ? slackOf(Array.from(filler.children)
+    .filter((el) => !grow(el) && el.getBoundingClientRect().height > 0)) : 0;
   const verdict = {
     viewport: window.innerWidth,
     page: Math.round(page.getBoundingClientRect().height),
-    rows: kids.length,
+    rows: all.length,
+    measured: kids.length,
+    filling: filling,
     painted: painted,
     maxGap: maxGap,
     gaps: gaps,
     slack: slack,
+    innerSlack: innerSlack,
   };
   const tag = document.createElement('div');
   tag.textContent = 'PAINTVERDICT' + JSON.stringify(verdict) + 'ENDPAINTVERDICT';
@@ -711,14 +772,17 @@ ${frameOf(toHtml(firstPaint))}
   const found = /PAINTVERDICT(\{.*?\})ENDPAINTVERDICT/.exec(stdout);
   if (!found) throw new Error('first-paint probe produced no verdict');
   const p = JSON.parse(found[1]);
-  console.log(`\nfirst paint in a ${p.viewport}px window: ${p.rows} rows,`
+  console.log(`\nfirst paint in a ${p.viewport}px window: ${p.rows} rows`
+    + ` (${p.measured} sized, filling: ${(p.filling || []).join(', ') || 'none'}),`
     + ` ${p.painted}px painted of a ${p.page}px panel, gaps [${(p.gaps || []).join(', ')}]px,`
-    + ` ${p.slack}px of stretched row space`);
-  // With the page packed at the top, no row is taller than its content: the
+    + ` ${p.slack}px of stretched row space, ${p.innerSlack}px inside the filling box`);
+  // With the page packed at the top, no sized row is taller than its content and
+  // the rows inside the filling box (the tab body) still pack at its top: the
   // only slack is sub-pixel rounding. A grid page in the same panel reported
   // 400px+ here, one row stretched over the whole viewport.
-  if (p.slack > 32 || p.maxGap > 56) {
-    console.error(`FAIL: a row was stretched over the panel — ${p.slack}px of slack,`
+  if (p.slack > 32 || p.innerSlack > 32 || p.maxGap > 56) {
+    console.error(`FAIL: a row was stretched over the panel — ${p.slack}px of slack`
+      + ` (${p.innerSlack}px inside ${(p.filling || []).join('/')}),`
       + ` widest gap ${p.maxGap}px (page ${p.page}px, painted ${p.painted}px)`);
     process.exitCode = 1;
   } else {

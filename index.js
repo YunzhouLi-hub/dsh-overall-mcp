@@ -19,6 +19,7 @@ import { searchOpenCatalogs, browseCatalog, catalogItemToEntry, fetchRepoStats }
 import { collectRepoMedia } from './lib/media.js';
 import { sanitizeToolDefinition } from './lib/schema-guard.js';
 import { checkAllUpdates, checkEntryUpdate, parsePackageInvocation, pinArgs } from './lib/updates.js';
+import { checkSelfUpdate, updateSelf } from './lib/self-update.js';
 
 export const name = 'overall-mcp';
 export const inject = ['tools'];
@@ -352,6 +353,16 @@ export async function apply(ctx) {
   // Only entries launched through a package runner (npx / uvx, including the
   // Windows `cmd.exe /c` form imported from other clients) have a checkable
   // version; everything else reports `detectable: false` instead of guessing.
+
+  // The plugin's *own* update check is a different question from the MCP
+  // servers it mounts (see lib/self-update.js): a `link:` checkout has no
+  // published version to move to, so the panel must not offer one. The memo
+  // keeps 检查更新 from hitting the npm registry on every click.
+  const selfUpdateCache = {};
+
+  const doCheckSelfUpdate = (opts = {}) => checkSelfUpdate({ moduleUrl: import.meta.url, cache: selfUpdateCache, ...opts });
+
+  const doSelfUpdate = () => updateSelf({ moduleUrl: import.meta.url });
 
   async function doCheckUpdates() {
     const entries = registry.servers.filter((s) => s.enabled !== false);
@@ -758,7 +769,14 @@ export async function apply(ctx) {
         if (typeof source !== 'string' || typeof enabled !== 'boolean') return json({ error: 'source (string) and enabled (boolean) required' }, 400);
         return json(await doSetSourceEnabled(source, enabled));
       })],
-      ['/api/overall-mcp/updates', ['GET', 'POST'], guard(async () => json(await doCheckUpdates()))],
+      ['/api/overall-mcp/updates', ['GET', 'POST'], guard(async () => {
+        // Both kinds of "is something newer?" in one answer: the mounted MCP
+        // servers (`entries`) and this plugin itself (`self`).
+        const result = await doCheckUpdates();
+        return json({ ...result, self: await doCheckSelfUpdate() });
+      })],
+      ['/api/overall-mcp/self', ['GET'], guard(async () => json(await doCheckSelfUpdate()))],
+      ['/api/overall-mcp/self-update', ['POST'], guard(async () => json(await doSelfUpdate()))],
       ['/api/overall-mcp/update', ['POST'], guard(async (req) => {
         const { name } = await readBody(req);
         if (typeof name !== 'string') return json({ error: 'name required' }, 400);

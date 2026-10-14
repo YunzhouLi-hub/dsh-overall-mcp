@@ -83,6 +83,7 @@ const MARKET = {
 };
 
 let captured = null;
+const calls = [];
 const styleElements = [];
 globalThis.window = { __ModuleLoader__: { load(spec) { captured = spec; } } };
 globalThis.document = {
@@ -90,13 +91,39 @@ globalThis.document = {
   createElement: () => ({ setAttribute() {}, appendChild() {} }),
   getElementById: () => null,
 };
-globalThis.fetch = async (url) => {
+globalThis.fetch = async (url, init) => {
   const ok = (value) => ({ ok: true, status: 200, json: async () => value });
   const path = String(url).replace('/api/overall-mcp', '');
   if (path.startsWith('/catalog')) return ok(MARKET);
   if (path.startsWith('/servers')) return ok({ servers: [{ name: 'codegraph', source: 'claude-code', enabled: true }] });
   if (path.startsWith('/repo-stats')) return ok({ stats: {} });
   if (path.startsWith('/repo-media')) return ok({ media: {} });
+  // 「检查更新」 answers for both the mounted servers and this plugin: the head
+  // only grows an update button when `self.updateAvailable` is true.
+  if (path.startsWith('/updates')) {
+    calls.push('POST /updates');
+    assert.equal(init?.method, 'POST', 'the update check is a POST');
+    return ok({
+      checked: 1,
+      updatable: 0,
+      entries: [],
+      servers: [],
+      self: {
+        name: 'dsh-overall-mcp',
+        version: '0.1.0',
+        latest: '0.2.0',
+        install: 'registry',
+        profileName: 'desktop',
+        checked: true,
+        updateAvailable: true,
+        reason: 'newer-published',
+      },
+    });
+  }
+  if (path.startsWith('/self-update')) {
+    calls.push('POST /self-update');
+    return ok({ ok: true, updated: true, from: '0.1.0', to: '0.2.0', command: 'dsh plugin --profile desktop add dsh-overall-mcp@0.2.0', restartRequired: true });
+  }
   return ok({});
 };
 
@@ -275,6 +302,10 @@ assert.ok(sourceText.includes('其中 1 个已安装'), 'per-source line names t
 const search = loadedNodes.find((n) => n.type === 'input'
   && String(n.props?.placeholder ?? '').includes('搜索'));
 assert.ok(search, 'market search input present');
+// The placeholder names the thing being searched (MCP), not the catalogue's
+// provenance: 「搜索 MCP 来源」 reads as a filter over sources.
+assert.equal(search.props.placeholder, '搜索 MCP', 'market search placeholder must be 搜索 MCP');
+assert.ok(String(search.props.title ?? '').length > 0, 'the long hint survives as a title');
 
 // --- 4. the masonry wrapper holds one rendered card per entry --------------
 const grids = findByKey(loadedNodes, 'grid');
@@ -320,6 +351,30 @@ function containsNode(root, target) {
   return found;
 }
 
+// --- 4b. only the cards scroll, and the chrome above them stays put ---------
+// The page is a fixed shell now: scrolling belongs to the card box alone, so
+// the search pill, the 分类 dropdown, the filter row and the meta lines must
+// all live OUTSIDE it — otherwise dragging the wall carries the controls away.
+{
+  const scroller = findByKey(loadedNodes, 'scroll');
+  assert.equal(scroller.length, 1, 'the market tab has exactly one card scroller');
+  const scrollerStyle = scroller[0].props.style;
+  assert.equal(scrollerStyle.overflowY, 'auto', 'the card region is the scrolling box');
+  assert.match(String(scrollerStyle.flex), /^1 1 /, 'and it is the box that gives height back');
+  assert.equal(containsNode(scroller[0], searchRow[0]), false, 'search row is pinned above the scroller');
+  assert.equal(containsNode(scroller[0], filters[0]), false, 'filter row is pinned above the scroller');
+  assert.equal(containsNode(scroller[0], metaRow[0]), false, 'meta line is pinned above the scroller');
+  assert.equal(containsNode(scroller[0], grids[0]), true, 'the card grid is what scrolls');
+  assert.equal(marketPage.props.style.overflow, 'hidden', 'the market body itself must not scroll');
+  assert.match(String(marketPage.props.style.flex), /^1 1 /, 'the market body takes the leftover height');
+  // The page is the shell: it never scrolls itself, which is what keeps the
+  // head and the tab bar from sliding under the top edge.
+  const pageNode = loadedNodes.find((n) => n.props?.className === 'omkt-page');
+  assert.ok(pageNode, 'page shell present');
+  assert.equal(pageNode.props.style.overflow, 'hidden', 'the page shell must not scroll');
+  console.log('market scrolling: only the card box scrolls, the chrome is pinned ✓');
+}
+
 // --- 5. the registry tab still renders (no regression) ---------------------
 const backToRegistry = buttonByText(tabButtons, '已注册 (1)');
 assert.ok(backToRegistry, 'the registry tab is clickable');
@@ -337,7 +392,7 @@ assert.ok(registryNodes.some((n) => n.type === 'button' && textOf(n) === '重新
   const regHead = findByKey(registry, 'head')[0];
   assert.ok(regHead, 'page head missing');
   const regText = textOf(regHead);
-  assert.ok(regText.includes('总体 MCP'), `head names the page — got: ${regText}`);
+  assert.ok(regText.includes('全局 MCP'), `head names the page — got: ${regText}`);
   assert.match(regText, /v\d+\.\d+\.\d+/, 'version chip missing from the head');
   assert.ok(regText.includes('宿主机扫描 · 市场发现 · 一键接入'), 'sub-line missing');
   assert.ok(regText.includes('申请收录插件'), 'contribution link missing');
@@ -352,15 +407,44 @@ assert.ok(registryNodes.some((n) => n.type === 'button' && textOf(n) === '重新
   // No return-to-top before there is anything to scroll back from.
   assert.equal(findByKey(registry, 'top').length, 0, 'return-to-top shown on an unscrolled page');
 
-  // The market tab's own primary is the catalog refresh, not a rescan.
+  // The market tab has NO always-on primary button: refreshing the catalogue is
+  // what 刷新 in the 分类 row already does, and a filled button that duplicates
+  // a small one is noise. It appears only when 检查更新 reports that this plugin
+  // itself has a newer release, and then it installs that release.
   const regTabs = walk(findByKey(registry, 'tabs')[0]).filter((n) => n.type === 'button');
   regTabs.find((n) => textOf(n).startsWith('MCP 市场')).props.onClick();
   const market = walk(await render());
-  assert.equal(textOf(findByKey(market, 'hd-primary')[0]), '更新插件市场',
-    'market tab primary action is wrong');
+  assert.equal(findByKey(market, 'hd-primary').length, 0,
+    'the market tab shows no primary button before an update is known');
   assert.equal(textOf(findByKey(market, 'hd-secondary')[0]), '重新扫描宿主机',
     'market tab loses the rescan door');
-  console.log('page head renders: brand mark, title + version, sub-line, tab-aware primary ✓');
+  assert.equal(findByKey(market, 'hd-updates').length, 1, 'market tab keeps 检查更新');
+
+  const check = buttonByText(market, '检查更新');
+  assert.ok(check, '检查更新 is clickable');
+  check.props.onClick();
+  const afterCheck = walk(await render());
+  assert.ok(calls.includes('POST /updates'), '检查更新 asked the host');
+  const updateBtn = findByKey(afterCheck, 'hd-primary')[0];
+  assert.ok(updateBtn, 'an available plugin update surfaces a primary button');
+  assert.equal(textOf(updateBtn), '更新 overall-mcp', 'and it is named after the plugin, not the market');
+  assert.match(String(updateBtn.props.title ?? ''), /0\.2\.0/, 'the target version is in the title');
+  console.log('page head renders: brand mark, title + version, sub-line, update-only primary ✓');
+}
+
+// --- 6b. clicking that button installs the plugin and says a restart is due --
+{
+  const market = walk(await render());
+  const updateBtn = findByKey(market, 'hd-primary')[0];
+  assert.ok(updateBtn, 'the update button is still there to click');
+  updateBtn.props.onClick();
+  const afterUpdate = walk(await render());
+  assert.ok(calls.includes('POST /self-update'), 'the button ran the self-update route');
+  assert.equal(findByKey(afterUpdate, 'hd-primary').length, 0, 'the button clears once installed');
+  const message = findByKey(afterUpdate, 'message')[0];
+  assert.ok(message, 'an outcome message is shown');
+  assert.match(textOf(message), /重启 DSH/, 'and it says the change lands after a restart');
+  console.log('plugin update: button runs /self-update, reports the restart ✓');
 }
 
 // --- 7. the rail row: page owns its head, glyph stays decorative -----------
