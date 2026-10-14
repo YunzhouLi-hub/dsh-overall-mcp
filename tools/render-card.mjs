@@ -104,16 +104,16 @@ const samples = [
     chips: ['搜索与知识', 'stdio · npx'],
   },
   {
-    name: 'remote entry: a hosted endpoint installs nothing',
+    name: 'registry entry without a category: 未分类 is stated, not omitted',
     item: {
       id: 'official:ai.example/remote', title: 'Remote Thing', source: 'official-registry',
-      description: 'Hosted.', transport: 'http', group: '聚合网关', tags: ['pypi'],
+      description: 'Hosted.', transport: 'http', tags: ['pypi'],
       install: { transport: 'http', url: 'https://mcp.example/mcp' },
       homepage: 'https://mcp.example',
       official: true, installable: true, installed: false,
     },
     titleHref: 'https://mcp.example', installable: true,
-    chips: ['聚合网关', '远程 · 免安装'],
+    chips: ['未分类', '远程 · 免安装'],
   },
 ];
 

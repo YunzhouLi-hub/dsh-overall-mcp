@@ -1029,9 +1029,16 @@ window.__ModuleLoader__.load({
 			// with the two answers a reader actually wants — which functional
 			// group this is, and how it gets installed — and only then shows the
 			// upstream tags that say something the two chips do not.
+			// The 分类 chip is always present. Both Smithery and the official
+			// registry publish no category at all (checked against their live
+			// payloads: neither carries a category/keywords field), so those
+			// entries are honestly labelled 未分类 — the same bucket the 分类
+			// filter puts them in. Leaving the chip off instead made the footer
+			// read "only an install method", which is what the user reported as
+			// 「要有这个MCP的分类」.
 			const groupChip = (item.group && item.group !== "__none__")
 				? item.group
-				: (item.category || null);
+				: (item.category || "未分类");
 			const groupTitle = [item.group, item.category].filter(Boolean)
 				.filter((v, i, arr) => arr.indexOf(v) === i).join(" · ");
 			const runnerOf = (command) => {
@@ -1060,7 +1067,7 @@ window.__ModuleLoader__.load({
 				// tooltip: repeating either one as an upstream tag would print the
 				// same word twice in a two-inch row.
 				.filter((t) => !CHIP_ALREADY_SHOWN.has(t) && t !== item.category && t !== groupChip)
-				.slice(0, 2);
+				.slice(0, 3);
 			// Smithery's repository field is its own listing when the upstream
 			// project is unknown, so that listing is the honest front door too.
 			const registryPage = item.source === "smithery" && item.qualifiedName
@@ -1273,12 +1280,12 @@ window.__ModuleLoader__.load({
 								title: `当前排序下的名次：第 ${rank} 名`,
 							}, `#${rank}`)
 							: null,
-						groupChip
-							? createElement("span", {
-								key: "group", style: { ...styles.tag, ...styles.tagKind },
-								title: groupTitle ? `分类：${groupTitle}` : "分类",
-							}, groupChip)
-							: null,
+						createElement("span", {
+							key: "group", style: { ...styles.tag, ...styles.tagKind },
+							title: groupTitle
+								? `分类：${groupTitle}`
+								: "分类：该来源未发布功能分类，同上方的「未分类」筛选",
+						}, groupChip),
 						createElement("span", {
 							key: "install", style: { ...styles.tag, ...styles.tagKind },
 							title: `安装方式：${installTitle}`,

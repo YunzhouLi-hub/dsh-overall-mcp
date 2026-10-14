@@ -350,6 +350,21 @@ for (const card of cards) {
 assert.deepEqual(ctaButtonsAll.sort(), ['安装', '详情', '详情', '详情'], 'CTA set across cards: one install, a detail on each');
 assert.ok(ctaTexts.some((t) => t.includes('需手动配置')), 'manual-only entry says so in place of a button');
 assert.ok(ctaTexts.some((t) => t.includes('已安装')), 'installed entry is marked instead of installable');
+// Every card states a category — including the entries whose source publishes
+// none, which must read 未分类 rather than silently dropping the chip. (The
+// fixture used to give all three cards a `group`, so this gap shipped.)
+for (const card of cards) {
+  const kinds = walk(card).filter((n) => n.type === 'span'
+    && typeof n.props?.title === 'string' && /^分类：/.test(n.props.title));
+  assert.equal(kinds.length, 1, 'every card carries exactly one 分类 chip');
+}
+{
+  const remoteCard = cards.find((c) => String(c.props.title ?? '').startsWith('example-mcp'));
+  assert.ok(remoteCard, 'the uncategorized entry renders');
+  const chip = walk(remoteCard).find((n) => n.type === 'span'
+    && typeof n.props?.title === 'string' && /^分类：/.test(n.props.title));
+  assert.equal(textOf(chip), '未分类', 'an entry with no upstream category says 未分类');
+}
 function containsNode(root, target) {
   let found = false;
   const visit = (n) => {
