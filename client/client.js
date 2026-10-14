@@ -162,11 +162,55 @@ window.__ModuleLoader__.load({
 			// breakpoint (1140 available − 2×20 = 1100 exactly). The probe in
 			// tools/shot.mjs pins that contract on the grid's used column count.
 			page: {
-				display: "grid", gap: 12, fontSize: 13.5, lineHeight: 1.55, color: T.text,
+				// A *column* flex container, not a grid. Two real bugs came from
+				// `display: grid` here, and both are fixed by the axis change:
+				//
+				// 1. A grid with `height: 100%` stretches its implicit rows over
+				//    the whole panel (`align-content: normal` = stretch). In the
+				//    loading state there is almost nothing to paint, so every row
+				//    was spread across a screenful of empty space: header, then
+				//    300px of nothing, then the tabs, then the search box. In a
+				//    column flex container the main axis packs at the start and
+				//    the leftover height stays at the bottom.
+				// 2. An item of a grid whose tracks are `auto` contributes its
+				//    *minimum* (min-content) to the track's base size, and a
+				//    multicol's min-content is one column per `column-count`,
+				//    each as wide as the widest card. On the real desktop window
+				//    that inflated the chain to a ~1891px wall inside a 1180px
+				//    page (cards 621px wide, third column off screen, page
+				//    scrollbar). In a column flex container the cross axis is
+				//    horizontal: items stretch to the container's width and no
+				//    horizontal automatic minimum exists at all.
+				display: "flex", flexDirection: "column", gap: 12,
+				fontSize: 13.5, lineHeight: 1.55, color: T.text,
 				height: "100%", boxSizing: "border-box", overflowY: "auto",
-				width: "100%", maxWidth: 1180, margin: "0 auto",
-				padding: "calc(28px + var(--dsh-frame-top-clearance, 0px)) 0 48px",
+				width: "100%", maxWidth: 1180, margin: "0 auto", minWidth: 0,
+				// The page is a container too, so the grid is always measured
+				// against a box of our own — `gridHost` is nearer and wins, but
+				// a host or fixture that renders the page alone must still get
+				// the container query rather than the `@media`-free fallback.
+				containerType: "inline-size",
+				// 20px of side gutter, ours: the frame's centre column has no
+				// padding of its own (`.centerCol` in the layout bundle is a
+				// bare flex column), so a page that does not leave a margin
+				// sits flush against the rail and the right edge. v4's own
+				// shell is `1180 + 20px`, and border-box keeps the content box
+				// at 1140 — the width the grid's breakpoints were tuned for.
+				padding: "calc(28px + var(--dsh-frame-top-clearance, 0px)) 20px 48px",
 			},
+			// A tab's own body. It used to reuse `page`, which put a second
+			// 1180px box, a second scroller, a second container and a second
+			// 20px gutter *inside* the page — so the grid measured 40px
+			// narrower than the page it sat in and its breakpoints landed a
+			// band low (2 columns where 3 fit). The body only stacks its
+			// children; the page above it owns width, scrolling and padding.
+			//
+			// Column flex for the same two reasons as `page` above, and
+			// `minWidth: 0` on top of it: belt-and-braces for any ancestor that
+			// still sizes it as a grid/flex item. The card wall is a multicol,
+			// and a multicol's min-content is one column per `column-count` —
+			// 3 x 621px in the real app, against a 1140px box.
+			tabBody: { display: "flex", flexDirection: "column", gap: 12, minWidth: 0 },
 			toolbar: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" },
 			// ---- page head, ported from the v4 prototype ----------------------
 			// Two rows: identity + actions, then the sub-line. The brand mark is
@@ -328,10 +372,14 @@ window.__ModuleLoader__.load({
 			// The masonry wall. Column count is decided by the injected sheet's
 			// container queries; the inline value is the fallback for a browser
 			// that ignores them (and for the moment before the sheet lands).
-			cardColumns: { columns: 2, columnGap: 14 },
+			cardColumns: { columns: 2, columnGap: 14, minWidth: 0 },
 			// The measurable box those queries read: its own inline size, not the
 			// window's. Also the reason the grid sits inside a wrapper at all.
-			gridHost: { containerType: "inline-size" },
+			// `minWidth: 0` is the fix for the wall overflowing its page: as a
+			// grid item, its `min-width: auto` would otherwise be the multicol's
+			// min-content (one column-width per column), which the auto tracks
+			// above then grew to fit.
+			gridHost: { containerType: "inline-size", minWidth: 0, width: "100%" },
 			card: {
 				breakInside: "avoid", WebkitColumnBreakInside: "avoid",
 				marginBottom: 14, display: "grid", gap: 10,
@@ -380,6 +428,13 @@ window.__ModuleLoader__.load({
 			desc: {
 				fontSize: 13, lineHeight: 1.6, color: T.text2,
 				display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden",
+				// A URL is one unbreakable token: without this, a long one in a
+				// catalogue description is clipped by the 3-line clamp instead
+				// of wrapping. The probe in tools/shot.mjs injects one, and it
+				// measured this box's min-content at well under a column, so
+				// this is belt-and-braces for what a reader sees — the wall's
+				// own overflow is fixed by the `minWidth: 0` chain above.
+				overflowWrap: "anywhere",
 			},
 			tags: { display: "flex", gap: 6, flexWrap: "wrap" },
 			// v4's tag is an outline pill, not a filled one: the card already
@@ -473,7 +528,12 @@ window.__ModuleLoader__.load({
 			detailTitle: { fontWeight: 700, fontSize: 17, lineHeight: 1.3, minWidth: 0 },
 			detailSub: { fontSize: 12, color: T.text3, marginTop: 2 },
 			detailTitleRow: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", minWidth: 0 },
-			detailDesc: { fontSize: 13.5, lineHeight: 1.65, margin: 0, whiteSpace: "pre-wrap", color: T.text2 },
+			detailDesc: {
+				fontSize: 13.5, lineHeight: 1.65, margin: 0, whiteSpace: "pre-wrap", color: T.text2,
+				// Same reason as `desc`: the panel is narrower than the page,
+				// and one long URL must not widen it.
+				overflowWrap: "normal",
+			},
 			detailBody: { display: "grid", gap: 14 },
 			// Facts sit directly on the sheet as label/value rows — no tinted
 			// box, because the GitHub box below is the one block that earns a
@@ -648,16 +708,17 @@ window.__ModuleLoader__.load({
 				// hence !important — nothing else can beat an inline style, and
 				// without this the wall would stay two columns on a wide pane.
 				//
-				// The container queries are the ones that matter: the pane is a
-				// slice of a wide window, so the question is how much room the
-				// grid got, never how wide the window is. The @media pair stays
-				// as a fallback for a renderer without container support.
+				// Container queries only, deliberately: this page is a slice of
+				// the window, so the question is how much room the grid got,
+				// never how wide the window is. A `@media (min-width:1100px)`
+				// fallback used to sit here over the container pair, and it was
+				// the wrong answer as soon as the page left the settings dialog
+				// for a sidebar panel: it read the *window*, so a 1600px window
+				// laid three columns into a pane with room for two and pushed
+				// the wall into a horizontal scrollbar. A renderer without
+				// container support now keeps the inline two columns, which is
+				// the answer that cannot overflow.
 				".omkt-grid{column-count:2;column-gap:14px}",
-				"@media (min-width:1100px){.omkt-grid{column-count:3!important}}",
-				"@media (max-width:720px){.omkt-grid{column-count:1!important}}",
-				// The container trio covers all three bands, so a narrow box can
-				// never be left holding the wide-window answer: it is the last
-				// word for a renderer that understands it.
 				"@container (max-width:719px){.omkt-grid{column-count:1!important}}",
 				"@container (min-width:720px) and (max-width:1099px){.omkt-grid{column-count:2!important}}",
 				"@container (min-width:1100px){.omkt-grid{column-count:3!important}}",
@@ -693,6 +754,30 @@ window.__ModuleLoader__.load({
 				createElement("b", { key: "n", style: styles.ghStatNum }, raw ? String(value) : compact(value)),
 				createElement("span", { key: "l", style: styles.ghStatLab }, label),
 			]);
+		}
+
+		/**
+		 * Catalogue text as prose. The registries publish markdown, and these
+		 * two views are not markdown renderers: `[Brave Search API
+		 * dashboard](https://…)` used to reach a card verbatim, where the URL
+		 * says nothing a reader needs and the link syntax reads as noise. The
+		 * label is what the sentence was about, so the label is what stays.
+		 *
+		 * Line breaks are preserved — the detail panel shows the upstream's own
+		 * paragraphing (`whiteSpace: pre-wrap`), and the card flattens what it
+		 * clamps. A bare URL is left in place; it is the sentence's citation,
+		 * and both views break it (see `overflowWrap` below).
+		 */
+		function plainText(text) {
+			return String(text ?? "")
+				// [label](url) -> label, tolerating a URL that contains spaces.
+				.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+				// <https://…> autolinks -> the URL itself.
+				.replace(/<((?:https?|mailto):[^>]*)>/g, "$1")
+				// Bold and inline-code markers. Single `*`/`_` are left alone:
+				// they are emphasis in markdown but a literal in identifiers
+				// like `snake_case`, and guessing wrong mangles the name.
+				.replace(/\*\*|__|`/g, "");
 		}
 
 			/**
@@ -1003,8 +1088,11 @@ window.__ModuleLoader__.load({
 				]), // header
 
 				// 4. description, clamped to three lines so every card in a
-				//    column keeps the same silhouette.
-				createElement("div", { key: "desc", style: styles.desc }, description.slice(0, 160)),
+				//    column keeps the same silhouette. `data-omkt` is the hook
+				//    the frame probe in tools/shot.mjs uses to inject an
+				//    unbreakable URL and prove the column still fits.
+				createElement("div", { key: "desc", "data-omkt": "desc", style: styles.desc },
+					plainText(description).replace(/\s+/g, " ").trim().slice(0, 160)),
 
 				// The upstream's own words, when it deprecated this entry.
 				item.deprecated && item.statusMessage
@@ -1359,7 +1447,7 @@ window.__ModuleLoader__.load({
 								onClick: onClose, title: "关闭",
 							}, "关闭"),
 						]),
-						createElement("p", { key: "desc", style: styles.detailDesc }, description),
+						createElement("p", { key: "desc", style: styles.detailDesc }, plainText(description)),
 						tags.length
 							? createElement("div", { key: "tags", style: styles.tags },
 								tags.map((t) => createElement("span", { key: t, style: styles.tag }, t)))
@@ -1992,7 +2080,7 @@ window.__ModuleLoader__.load({
 				message ? createElement("div", { key: "message", style: styles.message }, message) : null,
 
 				// ---------------- registry tab ----------------
-				tab === "registry" ? createElement("div", { key: "reg", style: styles.page }, [
+				tab === "registry" ? createElement("div", { key: "reg", style: styles.tabBody }, [
 					createElement("div", { key: "stats", style: styles.stats }, [
 						createElement("span", { key: "t" }, `${stats.total} 台服务器`),
 						createElement("span", { key: "e" }, `${stats.enabled} 已启用`),
@@ -2044,7 +2132,7 @@ window.__ModuleLoader__.load({
 				]) : null,
 
 				// ---------------- market tab ----------------
-				tab === "market" ? createElement("div", { key: "mkt", style: styles.page }, [
+				tab === "market" ? createElement("div", { key: "mkt", style: styles.tabBody }, [
 					// Row 1 — the search pill, on a line of its own. v4 makes it
 					// the widest control on the page because it is the one thing
 					// that turns five thousand entries into the one you meant.

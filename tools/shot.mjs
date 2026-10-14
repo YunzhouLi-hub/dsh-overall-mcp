@@ -222,7 +222,12 @@ const UNITLESS = new Set([
   'lineHeight', 'fontWeight', 'flexGrow', 'flexShrink', 'opacity', 'zIndex',
   'WebkitLineClamp', 'order', 'zoom', 'columns', 'columnCount', 'flex',
 ]);
-const kebab = (k) => (k.startsWith('Webkit') ? `-webkit-${k[7].toLowerCase()}${k.slice(8)}`
+// `WebkitLineClamp` is the vendor-prefixed CSS property, so the prefix has to
+// come off the *name*, not out of the middle of it: `k[7]`/`slice(8)` ate the
+// `l` and produced `-webkit-ineClamp`, which the browser drops — every fixture
+// was silently missing its 3-line clamp and its multicol break rules.
+const kebab = (k) => (k.startsWith('Webkit')
+  ? `-webkit-${k[6].toLowerCase()}${k.slice(7).replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`
   : k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`));
 const cssText = (style) => Object.entries(style)
   .filter(([, v]) => v != null && v !== '')
@@ -266,6 +271,9 @@ const tabs = walk(tree).filter((n) => n.type === 'button' && textOf(n).startsWit
 if (!tabs.length) throw new Error('market tab button not found');
 tabs[0].props.onClick();
 tree = await render();
+// Section 6 measures this same market list inside a DSH-shaped frame. The
+// detail click below re-renders `tree`, so keep the list's own snapshot.
+const marketTree = tree;
 
 const marketHtml = `<!doctype html><meta charset="utf-8"><title>plugin-market</title>
 <style>${SHELL}</style><style>${sheetTexts.join('\n')}</style><div class="wrap">${toHtml(tree)}</div>`;
@@ -387,3 +395,298 @@ ${gridVerdict}`;
     console.log('ok  column count follows the container, not the window');
   }
 }
+
+// The DSH frame, copied from the layout bundle in app.asar
+// (@deepseek-ai/dsh-client-ui-layout): a grid whose centre track is
+// `minmax(0, 1fr)`, and a centre column that is a flex box with
+// `min-width:0; overflow:hidden`. Every panel-shaped probe below renders the
+// page into this, because a panel is one column of someone else's grid, not a
+// window of its own.
+const frameCss = `
+  html,body{height:100%}
+  .frame{grid-template-rows:100%;height:100%;display:grid;position:relative;overflow:hidden}
+  .sidebarCol{min-width:0;overflow:hidden;background:#fafafa}
+  .centerCol{flex-direction:column;min-width:0;display:flex;overflow:hidden;background:#fff}
+`;
+const frameOf = (inner) => `
+<div class="frame" style="grid-template-columns:240px minmax(0px, 1fr) minmax(0px, 0px)">
+  <div class="sidebarCol"></div>
+  <div class="centerCol" id="center">${inner}</div>
+  <div></div>
+</div>`;
+
+// --- 6. the page inside a DSH-shaped frame ---------------------------------
+// The settings dialog used to be this page's home; it now lives in a sidebar
+// panel, where it is one column of the app's own grid and that column can be
+// far narrower than the window. Two things are asserted at every window width:
+// the page never scrolls sideways, and the column count follows the grid's own
+// box rather than the window — a 1600px window with a 1000px pane is exactly
+// the case that used to lay out three columns behind a scrollbar.
+//
+// The hostile input is real: catalogues publish descriptions carrying markdown
+// links, a URL is one unbreakable token, README banners are wider than a
+// column, and catalogue names are arbitrary text in a nowrap title.
+{
+  const frameVerdict = `${frameOf(toHtml(marketTree))}
+<script>
+  const hostile = 'https://github.com/' + 'a-very-long-owner-name/'.repeat(6) + 'repository';
+  const desc = document.querySelector('[data-omkt="desc"]');
+  if (desc) desc.textContent = desc.textContent + ' ' + hostile;
+  const page = document.getElementById('center').firstElementChild;
+  const grid = document.querySelector('.omkt-grid');
+  const card = grid.querySelector('article');
+  // A README banner is as wide as it is: the strip gives every slide an
+  // explicit width (height x natural aspect), so a 4:1 picture is 660px of a
+  // 371px column. This is the input that used to inflate the wall, and it is
+  // applied here so the probe keeps failing if the sizing chain ever loses its
+  // min-width: 0 again.
+  const slides = Array.from(grid.querySelectorAll('.omkt-media-slide'));
+  for (const s of slides) s.style.width = '660px';
+  // A catalogue name is arbitrary text in a nowrap title, so it is the other
+  // unbreakable run in a card.
+  const nameEl = grid.querySelector('article a');
+  if (nameEl) nameEl.textContent = 'a-very-long-catalog-entry-name-that-keeps-going-'.repeat(2);
+  // The condition that actually broke the real panel: a card whose own content
+  // cannot fit any column. In the app it measured 608px (whatever child it was,
+  // it pulled the wall open to 3 x 621px inside a 1180px page). 6000px of
+  // unbreakable width inside the last card reproduces that with no ambiguity,
+  // and the card clips it so this fixture's own scroll width stays honest. The
+  // card is marked so the bleed check below can skip the deliberate offender.
+  const allCards = Array.from(grid.querySelectorAll('article'));
+  const wideCard = allCards[allCards.length - 1];
+  if (wideCard) {
+    wideCard.setAttribute('data-omkt', 'wide');
+    wideCard.style.overflow = 'hidden';
+    const wide = document.createElement('div');
+    wide.setAttribute('style', 'width:6000px;height:1px');
+    wideCard.appendChild(wide);
+  }
+  let container = grid.parentElement;
+  for (let el = grid; el; el = el.parentElement) {
+    if (getComputedStyle(el).containerType !== 'normal') { container = el; break; }
+  }
+  const chain = [];
+  for (let el = grid; el && el !== document.body; el = el.parentElement) {
+    chain.push((el.className || el.id || el.tagName) + ':' + Math.round(el.getBoundingClientRect().width));
+  }
+  // The wall's min-content is the size a min-width:auto ancestor grows to: one
+  // column per column-count, each as wide as its widest card. It is reported
+  // for the failure message but is not itself asserted - a card may hold a
+  // picture wider than its column (the strip scrolls). What must hold is that
+  // the wall was laid out in the space the page actually has: with the app's
+  // chain, 1891px of min-content inside a 1140px box is exactly the bug (3 x
+  // 621px columns, page scrollbar, third column off screen). The clone is
+  // measured and removed first so it cannot perturb the reads below.
+  // (No backticks in this block: it is a template literal.)
+  const clone = grid.cloneNode(true);
+  clone.style.width = 'min-content';
+  const holder = document.createElement('div');
+  holder.setAttribute('style',
+    'position:fixed;left:0;top:0;width:0;height:0;overflow:hidden;visibility:hidden');
+  holder.appendChild(clone);
+  document.body.appendChild(holder);
+  const gridMin = Math.round(clone.getBoundingClientRect().width);
+  holder.remove();
+  // One card, on its own, at min-content: which child is the widest is the
+  // answer to "what is holding the wall open", and it is printed when the
+  // sizing check fails.
+  const cardClone = card.cloneNode(true);
+  cardClone.style.width = 'min-content';
+  const holder2 = document.createElement('div');
+  holder2.setAttribute('style',
+    'position:fixed;left:0;top:0;width:0;height:0;overflow:hidden;visibility:hidden');
+  holder2.appendChild(cardClone);
+  document.body.appendChild(holder2);
+  const cardMin = Math.round(cardClone.getBoundingClientRect().width);
+  const kids = Array.from(cardClone.children)
+    .map((el) => (el.className || el.tagName) + ':' + Math.round(el.getBoundingClientRect().width));
+  holder2.remove();
+  const pageStyle = getComputedStyle(page);
+  const avail = Math.round(page.clientWidth
+    - parseFloat(pageStyle.paddingLeft) - parseFloat(pageStyle.paddingRight));
+  // With the wall pinned to its box, the remaining risk is a card whose own
+  // content is wider than the column it was given: that would bleed out of the
+  // card instead of widening the page. The 660px slides are the input that
+  // would do it, so the widest card overflow is asserted rather than eyeballed.
+  const cards = Array.from(grid.querySelectorAll('article:not([data-omkt="wide"])'));
+  const bleed = cards.reduce((m, c) => Math.max(m, Math.round(c.scrollWidth - c.clientWidth)), 0);
+  const descStyle = desc ? getComputedStyle(desc) : null;
+  const verdict = {
+    viewport: window.innerWidth,
+    injected: Boolean(desc),
+    slides: slides.length,
+    page: Math.round(page.clientWidth),
+    avail: avail,
+    scroll: Math.round(page.scrollWidth),
+    gridBox: Math.round(grid.getBoundingClientRect().width),
+    gridMin: gridMin,
+    cardMin: cardMin,
+    kids: kids,
+    named: Boolean(nameEl),
+    bleed: bleed,
+    descClamp: descStyle ? descStyle.webkitLineClamp : 'n/a',
+    descH: desc ? Math.round(desc.getBoundingClientRect().height) : 0,
+    descScroll: desc ? Math.round(desc.scrollHeight) : 0,
+    columns: getComputedStyle(grid).columnCount,
+    cardWidth: Math.round(card.getBoundingClientRect().width),
+    container: container.tagName.toLowerCase() + '.' + (container.className || '-') + ':'
+      + getComputedStyle(container).containerType,
+    body: Math.round(document.documentElement.scrollWidth - document.documentElement.clientWidth),
+    chain: chain,
+  };
+  const tag = document.createElement('div');
+  tag.textContent = 'FRAMEVERDICT' + JSON.stringify(verdict) + 'ENDFRAMEVERDICT';
+  document.body.appendChild(tag);
+</script>`;
+  const frameFile = path.join(outDir, '_frame-probe.html');
+  // OMKT_RED_FRAME restores the old chain (a grid page whose items keep the
+  // automatic `min-width: auto`) so the probe can be shown to fail on the
+  // design it was written against, rather than only ever passing.
+  const redFrame = process.env.OMKT_RED_FRAME
+    ? `<style>#center > div{display:grid !important;min-width:auto !important}
+       #center > div > *{display:grid !important;min-width:auto !important}
+       #center > div > * > *{min-width:auto !important}</style>`
+    : '';
+  await writeFile(frameFile, `<!doctype html><meta charset="utf-8"><title>frame-probe</title>
+<style>${SHELL}</style><style>${sheetTexts.join('\n')}</style><style>${frameCss}</style>
+${redFrame}
+${frameVerdict}`.replace(/src="https:\/\/images\.weserv\.nl[^"]*"/g, `src="${IMG_PLACEHOLDER}"`), 'utf8');
+
+  const expected = (box) => (box >= 1100 ? '3' : box >= 720 ? '2' : '1');
+  let bad = 0;
+  for (const [width, height] of [[880, 900], [1280, 900], [1600, 1200], [2200, 1200]]) {
+    const { stdout } = await execFileP(chrome, [
+      '--headless=new', '--disable-gpu', '--no-sandbox', '--hide-scrollbars',
+      '--force-device-scale-factor=1', `--window-size=${width},${height}`,
+      '--virtual-time-budget=2500', '--dump-dom',
+      `file:///${frameFile.replace(/\\/g, '/')}`,
+    ], { maxBuffer: 16 * 1024 * 1024, windowsHide: true });
+    const found = /FRAMEVERDICT(\{.*?\})ENDFRAMEVERDICT/.exec(stdout);
+    if (!found) throw new Error(`frame probe produced no verdict at ${width}px`);
+    const f = JSON.parse(found[1]);
+    const fits = f.scroll <= f.page && f.body === 0;
+    const band = f.columns === expected(f.gridBox);
+    const sizing = Math.abs(f.gridBox - f.avail) <= 1;
+    const clamped = f.bleed <= 1;
+    console.log(`\nin a ${f.viewport}px window with a 240px sidebar: centre ${f.page}px ->`
+      + ` ${f.avail}px available -> ${f.gridBox}px grid -> ${f.columns} columns of ${f.cardWidth}px`);
+    console.log(`  hostile input: long URL ${f.injected}, ${f.slides} slides forced to 660px,`
+      + ` long name ${f.named}; card min-content ${f.cardMin}px`
+      + ` (${(f.kids || []).join(', ')}); wall min-content ${f.gridMin}px`);
+    console.log(`  page scrollWidth ${f.scroll} vs clientWidth ${f.page} (body overflow ${f.body}px);`
+      + ` measured against ${f.container}`);
+    console.log(`  widest card overflow ${f.bleed}px; description clamped to ${f.descClamp}`
+      + ` (${f.descH}px shown of ${f.descScroll}px)`);
+    if (!fits || !band || !sizing || !clamped) {
+      bad += 1;
+      console.error(`FAIL at ${f.viewport}px: expected ${expected(f.avail)} columns for a`
+        + ` ${f.avail}px page, got ${f.columns} for a ${f.gridBox}px wall`
+        + ` (min-content ${f.gridMin}px); overflow ${f.scroll - f.page}px,`
+        + ` card bleed ${f.bleed}px`);
+      console.error(`  chain: ${f.chain.join(' > ')}`);
+    }
+  }
+  // The frame at the width where the panel lands on two columns, and at a wide
+  // desktop window (where the page's 1180px cap is what decides): the geometry
+  // is asserted above, these are the same page for an eye to check.
+  console.log(`\n${await shot('frame-2col', await readFile(frameFile, 'utf8'), 1280, 1000)}`);
+  console.log(await shot('frame-wide', await readFile(frameFile, 'utf8'), 2200, 1200));
+  if (!process.argv.includes('--keep')) await rm(frameFile, { force: true });
+  if (bad) process.exitCode = 1;
+  else console.log('\nok  the page fits its column at every width, with a hostile URL in a card');
+}
+
+// --- 7. the panel on first paint -------------------------------------------
+// Switching to the market tab showed a screenful of gaps: the page is
+// `height: 100%`, and a grid with a definite height spreads its rows over the
+// whole box (`align-content: normal` is stretch), so the header sat at the top,
+// the tabs floated mid-panel and the market body's rows were spaced a hundred
+// pixels apart. A column flex container packs its main axis at the start
+// instead. The probe hangs the catalogue request, mounts the plugin cold (empty
+// hook store, so this is the real first paint) inside the real frame, and
+// measures the gaps between the page's own children.
+{
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = () => new Promise(() => {});
+  frameStore.clear();
+  effects.length = 0;
+  const firstPaint = await render();
+  globalThis.fetch = realFetch;
+
+  const paintScript = `
+  const page = document.getElementById('center').firstElementChild;
+  const kids = Array.from(page.children).filter((el) => el.getBoundingClientRect().height > 0);
+  const boxes = kids.map((el) => el.getBoundingClientRect());
+  const gaps = [];
+  for (let i = 1; i < boxes.length; i += 1) {
+    gaps.push(Math.round(boxes[i].top - boxes[i - 1].bottom));
+  }
+  const maxGap = gaps.reduce((m, g) => Math.max(m, g), 0);
+  const painted = Math.round(boxes.reduce((sum, b) => sum + b.height, 0));
+  // Stretching a grid row does not open a gap between the rows and does not
+  // make the row scrollable: it makes the row taller than the content it
+  // painted (a block's scrollHeight is just its own box). So the slack is
+  // measured against the union of the row's children instead.
+  const inner = (el) => {
+    const cs = getComputedStyle(el);
+    const kids2 = Array.from(el.children);
+    if (!kids2.length) return 0;
+    const first = kids2[0].getBoundingClientRect();
+    const last = kids2[kids2.length - 1].getBoundingClientRect();
+    return (last.bottom - first.top) + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+  };
+  const slack = Math.round(kids.reduce((sum, el) => {
+    const box = el.getBoundingClientRect();
+    return sum + Math.max(0, box.height - inner(el) - parseFloat(getComputedStyle(el).marginTop)
+      - parseFloat(getComputedStyle(el).marginBottom));
+  }, 0));
+  const verdict = {
+    viewport: window.innerWidth,
+    page: Math.round(page.getBoundingClientRect().height),
+    rows: kids.length,
+    painted: painted,
+    maxGap: maxGap,
+    gaps: gaps,
+    slack: slack,
+  };
+  const tag = document.createElement('div');
+  tag.textContent = 'PAINTVERDICT' + JSON.stringify(verdict) + 'ENDPAINTVERDICT';
+  document.body.appendChild(tag);
+`;
+  const paintFile = path.join(outDir, '_paint-probe.html');
+  const paintHtml = `<!doctype html><meta charset="utf-8"><title>paint-probe</title>
+<style>${SHELL}</style><style>${sheetTexts.join('\n')}</style><style>${frameCss}</style>
+${process.env.OMKT_RED_PAINT ? '<style>#center > div{display:grid !important}</style>' : ''}
+${frameOf(toHtml(firstPaint))}
+<script>${paintScript}</script>`;
+  await writeFile(paintFile, paintHtml, 'utf8');
+
+  const { stdout } = await execFileP(chrome, [
+    '--headless=new', '--disable-gpu', '--no-sandbox', '--hide-scrollbars',
+    '--force-device-scale-factor=1', '--window-size=1280,900',
+    '--virtual-time-budget=2500', '--dump-dom',
+    `file:///${paintFile.replace(/\\/g, '/')}`,
+  ], { maxBuffer: 16 * 1024 * 1024, windowsHide: true });
+  if (!process.argv.includes('--keep')) await rm(paintFile, { force: true });
+
+  const found = /PAINTVERDICT(\{.*?\})ENDPAINTVERDICT/.exec(stdout);
+  if (!found) throw new Error('first-paint probe produced no verdict');
+  const p = JSON.parse(found[1]);
+  console.log(`\nfirst paint in a ${p.viewport}px window: ${p.rows} rows,`
+    + ` ${p.painted}px painted of a ${p.page}px panel, gaps [${(p.gaps || []).join(', ')}]px,`
+    + ` ${p.slack}px of stretched row space`);
+  // With the page packed at the top, no row is taller than its content: the
+  // only slack is sub-pixel rounding. A grid page in the same panel reported
+  // 400px+ here, one row stretched over the whole viewport.
+  if (p.slack > 32 || p.maxGap > 56) {
+    console.error(`FAIL: a row was stretched over the panel — ${p.slack}px of slack,`
+      + ` widest gap ${p.maxGap}px (page ${p.page}px, painted ${p.painted}px)`);
+    process.exitCode = 1;
+  } else {
+    console.log('ok  the loading state packs at the top instead of stretching its rows');
+  }
+  // The loading state as an eye sees it: the empty space should be *below* the
+  // last row, not spread between four of them.
+  console.log(await shot('frame-loading', paintHtml, 1280, 900));
+}
+

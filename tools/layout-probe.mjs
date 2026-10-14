@@ -50,7 +50,11 @@ const UNITLESS = new Set([
   'lineHeight', 'fontWeight', 'flexGrow', 'flexShrink', 'opacity', 'zIndex',
   'WebkitLineClamp', 'order', 'zoom',
 ]);
-const kebab = (k) => (k.startsWith('Webkit') ? `-webkit-${k[7].toLowerCase()}${k.slice(8)}`
+// The vendor prefix comes off the name: a `slice(8)` here ate the `l` and
+// emitted `-webkit-ineClamp`, which the browser drops — the probe then measured
+// a description that was never clamped and called it clamped.
+const kebab = (k) => (k.startsWith('Webkit')
+  ? `-webkit-${k[6].toLowerCase()}${k.slice(7).replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`
   : k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`));
 const cssText = (style) => Object.entries(style)
   .filter(([, v]) => v != null && v !== '')
