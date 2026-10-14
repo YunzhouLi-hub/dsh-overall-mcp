@@ -414,7 +414,18 @@ window.__ModuleLoader__.load({
 			},
 			groupBody: { display: "grid", gap: 1, padding: "6px 8px 10px" },
 			row: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "7px 10px", borderRadius: 8 },
-			name: { fontWeight: 600, minWidth: 130 },
+			// The row's left half: the name, then the sentence explaining what
+			// this server is for, then the transport/state facts underneath it.
+			// The purpose line is what a reader is looking for here; the
+			// technical details are demoted to the smaller second line instead
+			// of being the only thing that follows the name.
+			rowMain: { display: "flex", alignItems: "flex-start", gap: 10, flex: "1 1 340px", minWidth: 0 },
+			rowText: { display: "flex", flexDirection: "column", gap: 2, flex: "1 1 auto", minWidth: 0 },
+			name: { fontWeight: 600, minWidth: 130, flexShrink: 0, lineHeight: 1.55 },
+			about: {
+				fontSize: 12.5, color: T.text2, lineHeight: 1.5, overflow: "hidden",
+				display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", wordBreak: "break-word",
+			},
 			meta: { color: T.text3, fontSize: 12 },
 			dot: (state) => ({
 				width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
@@ -423,17 +434,9 @@ window.__ModuleLoader__.load({
 						: state === "external" ? T.blue
 							: "rgba(128,128,128,0.6)",
 			}),
-			// ---- market cards (v4: masonry columns, not a rigid grid) ----
-			// A masonry column flow lets a card with a long description stay tall
-			// without forcing its whole row to match it — the ragged bottom edge
-			// is what makes a 5k-entry catalogue scannable.
-			// Two columns by default, three from 1100px up, one below 720px —
-			// v4's breakpoints exactly, declared in ensureStyles because inline
-			// styles cannot carry a query. This inline value is the fallback for
-			// the moment before that sheet lands.
-			// The card wall. Column count comes from the injected sheet's
-			// container queries; the inline value is the fallback for a browser
-			// that ignores them (and for the moment before the sheet lands).
+			// ---- market cards: a row-major grid ----
+			// Column count comes from the injected sheet's container queries; the
+			// inline value is the fallback for the moment before that sheet lands.
 			//
 			// It is a **row-major grid**, not a multi-column masonry. Multi-column
 			// fills the first column to the bottom before starting the second, so
@@ -712,11 +715,30 @@ window.__ModuleLoader__.load({
 			const pkg = server.package ? `${server.package.name}@${server.package.version ?? "latest"}` : "";
 			const update = server.update;
 			const newVersion = update?.updateAvailable ? update.latest : null;
-			return createElement("div", { style: styles.row }, [
-				createElement("span", { key: "dot", style: styles.dot(state) }),
-				createElement("span", { key: "name", style: styles.name }, server.name),
-				createElement("span", { key: "meta", style: styles.meta },
-					[server.transport, status, prefix, pkg].filter(Boolean).join(" · ")),
+			// 「这个 MCP 是干什么的」: the host resolves this from the server's own
+			// MCP instructions, then its registered tools, then its launch
+			// command, and reports which one it used (`aboutLabel`).
+			const about = server.about?.text ? server.about : null;
+			const toolCount = about?.toolCount ? `${about.toolCount} 个工具` : "";
+			// `omkt-s*` classes (s = server row) are the hooks the browser probes
+			// select on: they are the only way to tell the purpose line from the
+			// facts line once the styles are inlined as attributes, and they are
+			// what proves in a real engine that the line clamp survived.
+			return createElement("div", { className: "omkt-srow", style: styles.row }, [
+				createElement("div", { key: "main", className: "omkt-srow-main", style: styles.rowMain }, [
+					createElement("span", { key: "dot", style: { ...styles.dot(state), marginTop: 7 } }),
+					createElement("span", { key: "name", className: "omkt-sname", style: styles.name }, server.name),
+					createElement("div", { key: "text", style: styles.rowText }, [
+						about
+							? createElement("div", {
+									key: "about", className: "omkt-sabout", style: styles.about,
+									title: server.aboutLabel || undefined,
+								}, about.text)
+							: null,
+						createElement("div", { key: "meta", className: "omkt-smeta", style: styles.meta },
+							[server.transport, status, toolCount, prefix, pkg].filter(Boolean).join(" · ")),
+					]),
+				]),
 				newVersion
 					? createElement("span", { key: "newv", style: styles.updateBadge }, `可更新 → ${newVersion}`)
 					: null,

@@ -137,6 +137,33 @@ const MEDIA = {
   },
 };
 
+// The registered tab's data. One server per evidence source for the purpose
+// line (the server's own instructions / its tools / nothing at all), with the
+// long one long enough to actually reach for a third line: the row's job is to
+// explain the server, and a fixture whose sentence fits on one line would not
+// test the clamp at all.
+const REGISTERED = [
+  {
+    name: 'codegraph', serverName: 'codegraph', transport: 'stdio', source: 'claude-code',
+    enabled: true, connected: true, status: 'connected',
+    about: {
+      text: 'Codegraph is a SQLite knowledge graph of every symbol, edge and file in the workspace, and it answers architecture questions from that index instead of re-reading the tree.',
+      source: 'server', toolCount: 0,
+    },
+    aboutLabel: '来自服务器自身的说明（MCP initialize）',
+  },
+  {
+    name: 'tayily-mcp', serverName: 'tayily-mcp', transport: 'stdio', source: 'claude-desktop',
+    enabled: true, connected: true, status: 'connected',
+    about: { text: '工具：search、fetch、describe 等 4 个', source: 'tools', toolCount: 4 },
+    aboutLabel: '根据该服务器已注册的工具推断',
+  },
+  {
+    name: 'cold-server', serverName: 'cold-server', transport: 'stdio', source: 'cursor',
+    enabled: false, connected: false, status: 'stopped', about: null, aboutLabel: '',
+  },
+];
+
 let captured = null;
 // The client injects its own stylesheet at runtime (`ensureStyles`). The real
 // pane gets it; a naive DOM stub would silently drop it, and the shots would
@@ -153,7 +180,7 @@ globalThis.fetch = async (url) => {
   const ok = (value) => ({ ok: true, status: 200, json: async () => value });
   const p = String(url).replace('/api/overall-mcp', '');
   if (p.startsWith('/catalog')) return ok(MARKET);
-  if (p.startsWith('/servers')) return ok({ servers: [] });
+  if (p.startsWith('/servers')) return ok({ servers: REGISTERED.map((s) => ({ ...s })) });
   if (p.startsWith('/repo-stats')) return ok({ stats: STATS });
   if (p.startsWith('/repo-media')) return ok({ media: MEDIA });
   return ok({});
@@ -267,6 +294,10 @@ await mkdir(outDir, { recursive: true });
 
 // --- 1. the plugin: market tab as it renders today -------------------------
 let tree = await render();
+// The default tab is 已注册, so this first render *is* the row layout the user
+// asked about. Section 8 measures it in the engine; the detail click below
+// re-renders `tree`, so keep its own snapshot first.
+const registryTree = tree;
 const tabs = walk(tree).filter((n) => n.type === 'button' && textOf(n).startsWith('MCP 市场'));
 if (!tabs.length) throw new Error('market tab button not found');
 tabs[0].props.onClick();
@@ -277,6 +308,11 @@ const marketTree = tree;
 
 const marketHtml = `<!doctype html><meta charset="utf-8"><title>plugin-market</title>
 <style>${SHELL}</style><style>${sheetTexts.join('\n')}</style><div class="wrap">${toHtml(tree)}</div>`;
+
+// The 已注册 tab as it renders on open — the page the user reported. Kept as an
+// image so the row's two lines are reviewable by eye, not only by probe.
+const registryHtml = `<!doctype html><meta charset="utf-8"><title>plugin-registry</title>
+<style>${SHELL}</style><style>${sheetTexts.join('\n')}</style><div class="wrap">${toHtml(registryTree)}</div>`;
 
 // --- 2. the plugin: detail panel open -------------------------------------
 const detailBtn = walk(tree).find((n) => n.type === 'button' && textOf(n) === '详情'
@@ -316,6 +352,7 @@ const shot = async (name, html, width, height) => {
 };
 
 const shots = [
+  await shot('plugin-registry', registryHtml, 1180, 620),
   await shot('plugin-market', marketHtml, 1180, 2000),
   await shot('plugin-detail', detailHtml, 1180, 1100),
   await shot('proto-cards', protoCards, 1180, 2000),
@@ -847,5 +884,99 @@ ${frameOf(toHtml(firstPaint))}
   // The loading state as an eye sees it: the empty space should be *below* the
   // last row, not spread between four of them.
   console.log(await shot('frame-loading', paintHtml, 1280, 900));
+}
+
+// --- 8. the 已注册 rows: does the purpose line survive a real engine? --------
+// The row's whole point is that the sentence explaining what the server does
+// comes first and stays two lines. The fake-React probe checks the tree the
+// client built; only an engine can say whether `-webkit-line-clamp` really
+// applied — the attribute rewriter builds that vendor property by hand, and a
+// mistake there (the old `-webkit-ineClamp`) drops the clamp silently and lets
+// a long sentence push the row apart.
+{
+  const rowScript = `
+  const rows = Array.from(document.querySelectorAll('.omkt-srow'));
+  const verdict = {
+    viewport: window.innerWidth,
+    aboutCount: document.querySelectorAll('.omkt-sabout').length,
+    rows: rows.map((row) => {
+      const about = row.querySelector('.omkt-sabout');
+      const meta = row.querySelector('.omkt-smeta');
+      const name = row.querySelector('.omkt-sname');
+      const line = about ? parseFloat(getComputedStyle(about).lineHeight) || 0 : 0;
+      const box = about ? about.getBoundingClientRect() : null;
+      return {
+        name: name ? name.textContent : null,
+        about: about ? about.textContent.slice(0, 20) : null,
+        clamp: about ? String(getComputedStyle(about).webkitLineClamp) : null,
+        line: Math.round(line * 10) / 10,
+        height: box ? Math.round(box.height) : 0,
+        lines: box && line ? Math.round(box.height / line) : 0,
+        aboutBeforeMeta: about && meta
+          ? !!(about.compareDocumentPosition(meta) & Node.DOCUMENT_POSITION_FOLLOWING)
+          : null,
+        title: about ? (about.getAttribute('title') || '') : null,
+        metaVisible: meta ? meta.getBoundingClientRect().height > 0 : false,
+        metaText: meta ? meta.textContent : '',
+        // The row wraps, so a positive value here is real overflow, not a
+        // squeezed flex item.
+        overflow: Math.round(row.scrollWidth - row.clientWidth),
+      };
+    }),
+  };
+  const tag = document.createElement('div');
+  tag.textContent = 'ROWVERDICT' + JSON.stringify(verdict) + 'ENDROWVERDICT';
+  document.body.appendChild(tag);
+  `;
+  const rowFile = path.join(outDir, '_row-probe.html');
+  // 820px is the settings pane this page actually lives in; the wrap point of a
+  // two-line clamp is a function of that width, not of the window.
+  const rowHtml = `<!doctype html><meta charset="utf-8"><title>row-probe</title>
+<style>${SHELL}</style><style>${sheetTexts.join('\n')}</style>
+<style>#pane{width:820px;margin:0 auto}#pane .wrap{max-width:none;padding:0}</style>
+<div id="pane"><div class="wrap">${toHtml(registryTree)}</div></div>
+<script>${rowScript}</script>`;
+  await writeFile(rowFile, rowHtml, 'utf8');
+  const { stdout } = await execFileP(chrome, [
+    '--headless=new', '--disable-gpu', '--no-sandbox', '--hide-scrollbars',
+    '--force-device-scale-factor=1', '--window-size=1280,900',
+    '--virtual-time-budget=2500', '--dump-dom',
+    `file:///${rowFile.replace(/\\/g, '/')}`,
+  ], { maxBuffer: 16 * 1024 * 1024, windowsHide: true });
+  if (!process.argv.includes('--keep')) await rm(rowFile, { force: true });
+
+  const found = /ROWVERDICT(\{.*?\})ENDROWVERDICT/.exec(stdout);
+  if (!found) throw new Error('registered-row probe produced no verdict');
+  const v = JSON.parse(found[1]);
+  console.log(`\n已注册 rows in a ${v.viewport}px window (820px pane): ${v.rows.length} servers,`
+    + ` ${v.aboutCount} purpose lines`);
+  for (const r of v.rows) {
+    console.log(`  ${r.name}: ${r.lines} line(s) of ${r.line}px`
+      + ` (clamp ${r.clamp}), above facts: ${r.aboutBeforeMeta}, row overflow ${r.overflow}px`
+      + `  ${r.about ? `« ${r.about}… »` : '(no purpose line)'}`);
+  }
+
+  const fails = [];
+  if (v.rows.length !== REGISTERED.length) fails.push(`expected ${REGISTERED.length} rows, found ${v.rows.length}`);
+  const withAbout = REGISTERED.filter((s) => s.about).length;
+  if (v.aboutCount !== withAbout) fails.push(`expected ${withAbout} purpose lines, found ${v.aboutCount}`);
+  for (const r of v.rows) {
+    if (!r.name) fails.push('a row rendered without a name');
+    if (!r.metaVisible) fails.push(`${r.name}: the transport/state line is not painted`);
+    if (r.about) {
+      if (r.clamp !== '2') fails.push(`${r.name}: line-clamp resolved to ${r.clamp}, not 2`);
+      if (r.lines > 2) fails.push(`${r.name}: the purpose line took ${r.lines} lines`);
+      if (r.aboutBeforeMeta !== true) fails.push(`${r.name}: the purpose line is not above the facts`);
+      if (!r.title) fails.push(`${r.name}: the purpose line has no source tooltip`);
+    }
+    if (r.overflow > 1) fails.push(`${r.name}: the row overflows its box by ${r.overflow}px`);
+  }
+  if (fails.length) {
+    console.error('FAIL: the registered rows are not explaining the servers as intended');
+    for (const f of fails) console.error(`  - ${f}`);
+    process.exitCode = 1;
+  } else {
+    console.log('ok  every purpose line sits above the facts, clamps to 2 lines and keeps its source');
+  }
 }
 

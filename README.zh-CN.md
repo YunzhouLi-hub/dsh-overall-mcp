@@ -31,7 +31,13 @@ dsh plugin --profile web add ./dsh-overall-mcp
 - 顶部统计：`N 台服务器 · M 已启用 · K 已停用 · C 已连接 · X 连接异常`
 - 筛选：来源下拉、状态下拉（已启用/已停用/已连接/连接异常）、名称搜索
 - 分组：按导入来源聚合（Claude Desktop / Claude Code / Cursor / VS Code / Windsurf / Codex CLI / Gemini CLI / 官方 Registry …），每组显示数量与"已启用"计数，右侧总开关批量启停，点击组头折叠/展开
-- 每行：连接状态点、名称、传输方式、状态、工具前缀（`mcp__<serverName>__`）、启用/停用、移除
+- 每行：连接状态点、名称、**用途行**、事实行（传输方式 · 状态 · 工具数 · 工具前缀 `mcp__<serverName>__` · 包名版本）、启用/停用、移除
+- **用途行（第十一轮）**：用户要求「MCP下载好之后后面的应该是解释这个MCP的作用」——一行只说 `stdio · 已连接 · 工具前缀 mcp__x__` 等于没说它是干什么的。宿主现在按**证据强度**取一句人话（`lib/about.js`，上限 150 字符、渲染两行）：
+  1. **服务器自己的说明**（`source: 'server'`）：MCP `initialize` 结果里的 `instructions`。dsh-mcp-client 把它**原样**发布成 system prompt 的 `mcp:<serverName>` 节（`### MCP server: <name>` 前缀由它加，宿主会剥掉），所以宿主只要 `ctx.inject(['systemPrompt'])` + `assemble({})` 把这一段读回来，就是服务器自我介绍的原话——不是我们从名字猜的；
+  2. **已注册的工具**（`source: 'tools'`）：服务器没写说明时的兜底，形如「工具：search、fetch、describe 等 4 个」（`ctx.tools.schemas()` 按 `mcp__<serverName>__` 前缀筛出）；
+  3. **启动命令**（`source: 'command'`）：还没连上过的条目至少能看到将要运行什么。
+  三者的取舍写在 `describeAbout()` 里，来源用 `aboutSourceLabel()` 标注成用途行的 `title`（「来自服务器自身的说明（MCP initialize）」/「根据该服务器已注册的工具推断」/「尚未连接，显示启动命令」），**不把推断伪装成事实**；三样都没有（连名字都推不出 serverName）就**不显示**这一行，而不是编一句。`lib/about.js` 还会剥掉行内 markdown（`###`、`**`、反引号、图片），跳过 `Tools:` 这类标签行与纯图片行——`instructions` 常常整段是 markdown 文档，第一段往往只是它的标题。
+  重读规则（`needsInstructionsRead()`，单测 + 探针都钉住）：dsh-mcp-client **只在服务器连接期间**发布该节，所以「没找到」不能当成最终结论缓存——否则第一次读到的是启动命令、连上之后也永远不会换成服务器自己的说明。宿主记下**上次读取时该服务器的存活状态**，只有状态翻转（或从未读过）才重新 `assemble()`；`source: 'server'` 即终态，`tools`/`command` 只在服务器存活时按 30 秒节流重试，停用的服务器不再产生任何读取。宿主日志里每次补齐都会留一行 `overall-mcp: purpose lines — server N, tools M, command K`，用来核对每台服务器实际命中的是哪一种证据。探针：`tools/probe-server-about.mjs`（离屏渲染三行，断言用途行在事实行之前、被 clamp、`title` 与证据一致）
 
 ### 「MCP 市场」标签页（自动发现市面上的 MCP）
 
@@ -234,13 +240,13 @@ key 就是市场卡片的 React key，因为官方 Registry 的 id 随版本变�
 ## 开发
 
 ```sh
-node --test test/scanner.test.mjs test/catalog.test.mjs test/schema-guard.test.mjs test/updates.test.mjs test/media.test.mjs
-                                                          # 纯逻辑测试（lib/ 零依赖，80 例全过）
+node --test test/*.mjs                                    # 纯逻辑测试（lib/ 零依赖）
 node tools/client-smoke.mjs                               # 客户端注册契约 smoke（模拟前端 module loader；并断言客户端版本号 == package.json）
 node tools/render-detail.mjs                              # 渲染详情页：事实表有值、链接齐全、命令可见
 node tools/render-card.mjs                                # 渲染卡片：标题是链接、正文不是 button、无嵌套交互元素、GitHub 标记/版本在位、命令行只在详情面板
 node tools/render-market-tab.mjs                          # 渲染整个市场页 chrome：页头两行、页签计数、搜索行、筛选行、元信息行、卡片流、页脚分工
-node tools/verify-css.mjs                                 # 校验所有 className 在注入的样式表里都有对应规则
+node tools/probe-server-about.mjs                          # 渲染「已注册」行：用途行在事实行之前、被 clamp 成两行、title 与证据来源一致、无证据时不留空元素
+node tools/verify-css.mjs                                 # 校验所有 className 在注入的样式表里都有对应规则（探针选择器除外，见文件内 HOOKS）
 node tools/layout-probe.mjs                               # 真实 Chrome 量卡片几何：长名称必须省略号、CTA 必须在卡内（npm run test:layout）
 node tools/shot.mjs                                       # 把真页面渲染成 HTML 交给 headless Chrome：出七张对照截图（tools/out/*.png，含带 240px 侧栏的 frame-2col.png / frame-wide.png / frame-loading.png），断言栅格列数跟着**容器**走而不是窗口走、四种窗口宽度下面板都不出现横向滚动、且加载态不会把行拉伸铺满面板（`npm run test:layout`）
 node tools/preview-paged.mjs "<base-url-with-?token=…>" 20 1 installs
@@ -263,6 +269,7 @@ node tools/fixture-bad-schema-mcp.mjs                     # 故意带 `^[^\0]*$`
 |---|---|
 | `lib/scanner.js` | 宿主机 MCP 配置扫描与规范化（纯函数） |
 | `lib/catalog.js` | 5 个远程开放目录的拉取、归一化、跨目录合并、排序与 GitHub 补充（纯 fetch） |
+| `lib/about.js` | 「这个 MCP 是干什么的」：从服务器 `instructions` / 已注册工具 / 启动命令中取一句人话，含 markdown 剥离、截断与证据标签；以及判断何时需要重读 system prompt 的 `needsInstructionsRead()` |
 | `index.js` | cordis 宿主插件（`inject:['tools']`）：注册表、每服务器 `ctx.plugin(mcpClient)` 桥接、`defineTool` 管理工具、HTTP 路由 |
 | `client/client.js` | `__ModuleLoader__` 客户端插件：注册侧栏入口（`sidebar.panellist`，id `overall-mcp`，order 5）与面板本体（布局的 `main` 键控插槽，同一 id） |
 | `cordis.patch.yml` | 宿主 composition 补丁 |

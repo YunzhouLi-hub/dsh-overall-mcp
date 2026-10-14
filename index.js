@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import * as mcpClient from '@deepseek-ai/dsh-mcp-client';
 import { defineTool } from '@deepseek-ai/dsh-tools';
+import { describeAbout, toolNamesFor, aboutSourceLabel, needsInstructionsRead } from './lib/about.js';
 import { scanHost, mergeIntoRegistry } from './lib/scanner.js';
 import { searchOpenCatalogs, browseCatalog, catalogItemToEntry, fetchRepoStats } from './lib/catalog.js';
 import {
@@ -280,8 +281,165 @@ export async function apply(ctx) {
         updateAvailable: s.updateCheck?.updateAvailable === true,
         update: s.updateCheck ?? null,
         updatedAt: s.updatedAt,
+        // 「这个 MCP 是干什么的」: the sentence shown after the name. Null until
+        // refreshAbout() has something honest to say.
+        about: s.about ?? null,
+        aboutAt: s.aboutAt,
+        aboutLabel: s.about ? aboutSourceLabel(s.about.source) : '',
       };
     });
+  }
+
+  // ---- 「这个 MCP 是干什么的」 ------------------------------------------------
+  //
+  // A registered row should explain the server, not just its transport. The
+  // authoritative source is the server's own `instructions` from the MCP
+  // `initialize` result: dsh-mcp-client publishes them verbatim as the
+  // system-prompt section `mcp:<serverName>`, so assembling the prompt once and
+  // reading those sections back gives the server's own words. Two fallbacks keep
+  // the line useful when that is empty: the server's registered tools, and —
+  // before a first successful connect — the launch command.
+  //
+  // The assembled prompt is not read on every payload: `instructionGen` records
+  // whether the server was live the last time we looked, so a server that has
+  // since connected (or dropped) is re-read exactly once, and a live server is
+  // re-read only when its about line is due for its 30s retry.
+
+  /** serverName → instructions text (verbatim, as published by dsh-mcp-client). */
+  const instructionSections = new Map();
+  /** serverName → 'live' | 'down' at the moment we last read its section. */
+  const instructionGen = new Map();
+  let instructionsRead = false;
+  /** A line built from tools/command is retried at most this often per server. */
+  const ABOUT_RETRY_MS = 30 * 1000;
+
+  /**
+   * Assemble the system prompt and return its `mcp:*` sections.
+   *
+   * `systemPrompt` is injected rather than assumed: on a host without it the
+   * promise resolves to null and every server falls back to its tools/command.
+   * Bounded, because a provider that never settles must not stall the page, and
+   * released as soon as the read is over — a one-shot injection that outlived its
+   * read would keep the whole prompt assembly scope alive for the session.
+   */
+  function readInstructionSections() {
+    return new Promise((resolve) => {
+      let settled = false;
+      let dispose = null;
+      const timer = setTimeout(() => finish(null), 2500);
+      timer.unref?.();
+      function finish(value) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        // The service reference we already took stays valid after dispose; only
+        // the reactive scope goes away.
+        if (typeof dispose === 'function') {
+          try { dispose(); } catch { /* scope already gone */ }
+        }
+        resolve(value);
+      }
+      try {
+        const maybeDispose = ctx.inject(['systemPrompt'], (inner) => {
+          Promise.resolve()
+            .then(() => inner.systemPrompt?.assemble?.({}))
+            .then((assembly) => {
+              const found = new Map();
+              for (const section of assembly?.sections ?? []) {
+                const sectionName = typeof section?.name === 'string' ? section.name : '';
+                if (sectionName.startsWith('mcp:')) {
+                  found.set(sectionName.slice(4), String(section?.text ?? ''));
+                }
+              }
+              finish(found);
+            }, () => finish(null));
+        });
+        if (typeof maybeDispose === 'function') dispose = maybeDispose;
+        // A synchronous callback can settle before `inject` hands back its
+        // disposer, in which case `finish` above saw a null one.
+        if (settled && typeof dispose === 'function') {
+          try { dispose(); } catch { /* scope already gone */ }
+        }
+      } catch {
+        finish(null);
+      }
+    });
+  }
+
+  const serverIsLive = (s) => fibers.has(s.name) || s.providedExternally === true;
+  const aboutGen = (s) => (serverIsLive(s) ? 'live' : 'down');
+
+  function aboutIsCurrent(s, now) {
+    if (!s.about?.text) return false;
+    if (s.about.source === 'server') return true;
+    // Tools/command lines are placeholders: retry while the server is live, at
+    // most once per ABOUT_RETRY_MS, so a stopped server stops costing anything.
+    if (!serverIsLive(s)) return false;
+    const at = Date.parse(s.aboutAt ?? '');
+    return Number.isFinite(at) && now - at < ABOUT_RETRY_MS;
+  }
+
+  /** Fill in (or upgrade) the purpose line for every server that needs one. */
+  async function refreshAbout() {
+    const now = Date.now();
+    const pending = registry.servers.filter((s) => s.enabled !== false && !aboutIsCurrent(s, now));
+    if (!pending.length) return false;
+
+    const wanted = pending.map((s) => ({ s, name: s.serverName ?? toServerName(s.name) }));
+    // Read again when we have never read, or when this server's liveness changed
+    // since we did: a section only appears once dsh-mcp-client connects, so a
+    // "not connected yet" answer must not be cached as final.
+    const stale = wanted.some(({ s, name }) => needsInstructionsRead({
+      read: instructionsRead, rememberedGen: name ? instructionGen.get(name) : undefined,
+      live: serverIsLive(s), name,
+    }));
+    if (stale) {
+      const sections = await readInstructionSections();
+      instructionsRead = true;
+      if (sections) {
+        for (const [sectionName, text] of sections) {
+          instructionSections.set(sectionName, text);
+          instructionGen.set(sectionName, 'live');
+        }
+      }
+      for (const { s, name } of wanted) if (name) instructionGen.set(name, aboutGen(s));
+    }
+
+    const schemas = typeof ctx.tools?.schemas === 'function' ? ctx.tools.schemas() : [];
+    let changed = false;
+    for (const { s, name } of wanted) {
+      const about = describeAbout({
+        instructions: name ? instructionSections.get(name) : '',
+        toolNames: toolNamesFor(schemas, name),
+        command: s.transport === 'stdio' || !s.transport
+          ? [s.command, ...(s.args ?? [])]
+          : [s.url],
+      });
+      if (!about) continue;
+      s.about = about;
+      s.aboutAt = new Date(now).toISOString();
+      changed = true;
+    }
+    if (changed) {
+      await save();
+      // One line per change, so the source that actually supplied each server's
+      // sentence is checkable from the harness log instead of guessed at.
+      const tally = {};
+      for (const s of registry.servers) if (s.about) tally[s.about.source] = (tally[s.about.source] ?? 0) + 1;
+      log?.info?.(`overall-mcp: purpose lines — ${Object.entries(tally).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+    }
+    return changed;
+  }
+
+  /**
+   * Every payload that carries the server list goes through here, so a row's
+   * purpose line is present (or upgraded) by the time the client renders it.
+   * Cheap when nothing needs refreshing: refreshAbout() then returns at once.
+   */
+  async function serversPayload() {
+    await refreshAbout();
+    const servers = publicList();
+    return { servers };
   }
 
   // First install: scan well-known host MCP configs and import them.
@@ -332,7 +490,7 @@ export async function apply(ctx) {
     return {
       installed: entry.name,
       localInstalls: record?.count ?? 0,
-      servers: publicList(),
+      servers: (await serversPayload()).servers,
       connect: conn,
     };
   }
@@ -357,7 +515,7 @@ export async function apply(ctx) {
       if (!enabled) await disconnect(entry.name);
       else if (!fibers.has(entry.name)) await connect(entry);
     }
-    return { source, enabled, changed: targets.length, servers: publicList() };
+    return { source, enabled, changed: targets.length, ...(await serversPayload()) };
   }
 
   async function doRemove(name) {
@@ -366,7 +524,7 @@ export async function apply(ctx) {
     await disconnect(name);
     registry.servers.splice(i, 1);
     await save();
-    return { removed: name, servers: publicList() };
+    return { removed: name, ...(await serversPayload()) };
   }
 
   // ---- package updates ------------------------------------------------------
@@ -395,7 +553,7 @@ export async function apply(ctx) {
         : { at: new Date().toISOString(), detectable: false, reason: check.reason };
     }
     await save();
-    return { ...result, servers: publicList() };
+    return { ...result, ...(await serversPayload()) };
   }
 
   async function doUpdate(name) {
@@ -494,7 +652,7 @@ export async function apply(ctx) {
       total: cached.data.total,
       cached: !refresh && hit !== undefined,
       fetchedAt: new Date(cached.at).toISOString(),
-      servers: publicList(),
+      servers: (await serversPayload()).servers,
     };
   }
 
@@ -624,7 +782,7 @@ export async function apply(ctx) {
       parameters: {},
       output: jsonOut,
       async execute() {
-        return { servers: publicList() };
+        return serversPayload();
       },
     }),
     defineTool({
@@ -737,7 +895,7 @@ export async function apply(ctx) {
     };
 
     const routes = [
-      ['/api/overall-mcp/servers', ['GET'], guard(async () => json({ servers: publicList() }))],
+      ['/api/overall-mcp/servers', ['GET'], guard(async () => json(await serversPayload()))],
       ['/api/overall-mcp/scan', ['GET', 'POST'], guard(async () => json(await doScan()))],
       ['/api/overall-mcp/search', ['POST'], guard(async (req) => {
         const { query } = await readBody(req);
