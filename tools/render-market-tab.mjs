@@ -395,7 +395,7 @@ assert.ok(registryNodes.some((n) => n.type === 'button' && textOf(n) === '重新
   assert.ok(regText.includes('全局 MCP'), `head names the page — got: ${regText}`);
   assert.match(regText, /v\d+\.\d+\.\d+/, 'version chip missing from the head');
   assert.ok(regText.includes('宿主机扫描 · 市场发现 · 一键接入'), 'sub-line missing');
-  assert.ok(regText.includes('申请收录插件'), 'contribution link missing');
+  assert.ok(regText.includes('申请收录 MCP 服务'), 'contribution link missing');
   assert.ok(walk(regHead).some((n) => n.type === 'svg'), 'brand mark is not drawn');
   // `findByKey` walks the flattened tree, so the keyed button itself is a hit.
   assert.equal(textOf(findByKey(registry, 'hd-primary')[0]), '重新扫描宿主机',

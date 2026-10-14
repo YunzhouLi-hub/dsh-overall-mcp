@@ -71,35 +71,53 @@ const samples = [
     item: {
       id: 'official:ac.snag/snag', title: 'snag', source: 'official-registry', author: 'ac.snag',
       description: 'Evidence capture.', version: '1.0.0', transport: 'stdio',
+      group: '开发工具', category: 'Developer Tools', tags: ['npm'],
       install: { transport: 'stdio', command: 'npx', args: ['-y', '@snag/mcp'] },
       repository: 'https://github.com/snag/mcp', homepage: 'https://snag.ac',
       official: true, installable: true, installed: false,
     },
     titleHref: 'https://github.com/snag/mcp', installable: true,
+    chips: ['开发工具', 'stdio · npx'],
   },
   {
     name: 'awesome-list (repo only): title links the repo',
     item: {
       id: 'awesome:gatyh/3dtexel-mcp', title: '3dtexel-mcp', source: 'awesome-list', author: 'Gatyh',
       description: '3D texels.', transport: 'unknown', install: null,
+      group: '游戏娱乐', category: 'Art & Culture',
       repository: 'https://github.com/Gatyh/3dtexel-mcp', tags: ['Art & Culture'],
       installable: false, installed: false,
     },
     titleHref: 'https://github.com/Gatyh/3dtexel-mcp', installable: false,
+    chips: ['游戏娱乐', '需手动配置'],
   },
   {
     name: 'smithery (no repo): title links the registry listing',
     item: {
       id: 'smithery:brave', title: 'Brave Search', source: 'smithery', author: 'brave',
-      description: 'Web search.', transport: 'stdio',
+      description: 'Web search.', transport: 'stdio', group: '搜索与知识',
       install: { transport: 'stdio', command: 'npx', args: ['-y', '@smithery/cli', 'run', 'brave'] },
       qualifiedName: 'brave', verified: true, installable: true, installed: false,
+      tags: ['托管', '搜索与知识'],
     },
     titleHref: 'https://smithery.ai/servers/brave', installable: true,
+    chips: ['搜索与知识', 'stdio · npx'],
+  },
+  {
+    name: 'remote entry: a hosted endpoint installs nothing',
+    item: {
+      id: 'official:ai.example/remote', title: 'Remote Thing', source: 'official-registry',
+      description: 'Hosted.', transport: 'http', group: '聚合网关', tags: ['pypi'],
+      install: { transport: 'http', url: 'https://mcp.example/mcp' },
+      homepage: 'https://mcp.example',
+      official: true, installable: true, installed: false,
+    },
+    titleHref: 'https://mcp.example', installable: true,
+    chips: ['聚合网关', '远程 · 免安装'],
   },
 ];
 
-for (const { name, item, titleHref, installable } of samples) {
+for (const { name, item, titleHref, installable, chips } of samples) {
   const tree = __test.MarketCard({
     item, stats: {}, media: {}, busy: false, onInstall: () => {}, onOpen: () => {},
     onToggleFavorite: () => {},
@@ -126,6 +144,27 @@ for (const { name, item, titleHref, installable } of samples) {
     for (const m of inner) {
       assert.fail(`${name}: <${m.type}> nested inside <${n.type}>`);
     }
+  }
+  // 2b. The footer leads with the two facts a reader wants — the functional
+  //     group and how it installs — and never with a source's hosting note.
+  //     「托管」/「本地」/package-manager tags are exactly what the chips used
+  //     to be, and they answer neither question.
+  const footer = deep.find((n) => n.type === 'div' && n.props?.key === 'ft');
+  assert.ok(footer, `${name}: card footer missing`);
+  const footerSpans = walk(footer).filter((n) => n.type === 'span'
+    && typeof n.props?.title === 'string');
+  const semantic = footerSpans
+    .filter((n) => /^(分类|安装方式)：/.test(n.props.title))
+    .map((n) => ({ text: textOf(n), title: n.props.title }));
+  assert.deepEqual(semantic.map((c) => c.text), chips,
+    `${name}: footer chips are ${JSON.stringify(semantic.map((c) => c.text))}`);
+  assert.match(semantic[0]?.title ?? '', /^分类：/, `${name}: first chip is not the taxonomy`);
+  assert.match(semantic[1]?.title ?? '', /^安装方式：/, `${name}: second chip is not the install method`);
+  const shown = [...semantic.map((c) => c.text),
+    ...footerSpans.filter((n) => n.props.title.startsWith('上游标签：')).map(textOf)];
+  for (const banned of ['托管', '本地', 'npm', 'pypi']) {
+    assert.ok(!shown.includes(banned),
+      `${name}: a hosting/registry tag (${banned}) is still rendered as a chip`);
   }
   function contains(nodes, outer, inner) {
     // Walk outer's subtree; inner must not be outer itself.

@@ -287,6 +287,11 @@ window.__ModuleLoader__.load({
 				padding: "7px 14px", borderRadius: 8, cursor: "pointer", fontSize: 13,
 				fontWeight: 500,
 				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text,
+				// A CJK label breaks between characters, so a shrunk flex button
+				// has a one-glyph minimum: it would wrap inside a box too narrow
+				// for it and clip the second line (the app's 搜索 button was 38px
+				// wide for two characters). Buttons never shrink and never wrap.
+				flexShrink: 0, whiteSpace: "nowrap", boxSizing: "border-box",
 			},
 			// v4's primary is INK, not accent: exactly one filled button per
 			// view, with the accent spent on links, tab rules and badges
@@ -298,6 +303,7 @@ window.__ModuleLoader__.load({
 			textBtn: {
 				padding: "7px 4px", borderRadius: 8, cursor: "pointer", fontSize: 13,
 				fontWeight: 500, border: "none", background: "transparent", color: T.text3,
+				flexShrink: 0, whiteSpace: "nowrap",
 			},
 			// v4's `.btn-outline`, used by 导出日志 alone.
 			outlineBtn: {
@@ -330,6 +336,12 @@ window.__ModuleLoader__.load({
 			// is what made the old page read as a form.
 			searchWrap: {
 				display: "flex", gap: 10, alignItems: "center", width: "100%",
+				// `width: 100%` plus padding overflows its parent by exactly the
+				// padding unless the box is border-box, and the market body now
+				// clips (it owns the card scroller) — that combination is what cut
+				// the 搜索 button in half on the real desktop window. Every box
+				// that states a width AND has padding must say border-box.
+				boxSizing: "border-box", minWidth: 0,
 				padding: "11px 16px", borderRadius: 999,
 				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text3,
 			},
@@ -348,7 +360,7 @@ window.__ModuleLoader__.load({
 			groupSelect: {
 				flexShrink: 0, padding: "6px 10px", borderRadius: 8, fontSize: 12.5,
 				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text2,
-				minWidth: 160, maxWidth: 280,
+				minWidth: 160, maxWidth: 280, boxSizing: "border-box",
 			},
 			// The compact controls sit at the far end of the same row, so the
 			// gap between the taxonomy and the filters is the row's own free
@@ -360,10 +372,12 @@ window.__ModuleLoader__.load({
 			filterBtn: {
 				flexShrink: 0, padding: "6px 12px", borderRadius: 8, fontSize: 12.5, cursor: "pointer",
 				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text2,
+				whiteSpace: "nowrap", boxSizing: "border-box",
 			},
 			filterSelect: {
 				flexShrink: 0, padding: "6px 10px", borderRadius: 8, fontSize: 12.5,
 				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text2,
+				boxSizing: "border-box",
 			},
 			// v4's meta line: bold numbers with their units in muted text, and
 			// the freshness note pushed to the far right.
@@ -484,6 +498,10 @@ window.__ModuleLoader__.load({
 				fontSize: 11.5, padding: "3px 9px", borderRadius: 999,
 				border: `1px solid ${T.line}`, background: "transparent", color: T.text2,
 			},
+			// The two chips that answer questions (分类 / 安装方式) sit a shade
+			// darker than the upstream tags beside them, so the footer reads as
+			// "two facts, then whatever else the source said".
+			tagKind: { background: T.soft, color: T.text, fontWeight: 500 },
 			verified: {
 				fontSize: 11, padding: "1px 7px", borderRadius: 999, fontWeight: 600,
 				background: "rgba(22,95,255,0.12)", color: T.blue,
@@ -977,9 +995,45 @@ window.__ModuleLoader__.load({
 			const stars = starCountOf(item, stats);
 			const author = enriched?.author ?? item.author;
 			const description = item.description || enriched?.description || "（无描述）";
+			// Upstream tags are *labels the source chose*, and the sources label
+			// very different things with them (Smithery writes 「托管」/「本地」,
+			// the official registry writes the package manager, awesome lists
+			// write their own `###` heading plus legend flags). The footer leads
+			// with the two answers a reader actually wants — which functional
+			// group this is, and how it gets installed — and only then shows the
+			// upstream tags that say something the two chips do not.
+			const groupChip = (item.group && item.group !== "__none__")
+				? item.group
+				: (item.category || null);
+			const groupTitle = [item.group, item.category].filter(Boolean)
+				.filter((v, i, arr) => arr.indexOf(v) === i).join(" · ");
+			const runnerOf = (command) => {
+				const cmd = String(command ?? "");
+				if (/(^|[\\/ ])npx(\.cmd)?\b/i.test(cmd)) return "npx";
+				if (/(^|[\\/ ])uvx(\.exe)?\b/i.test(cmd)) return "uvx";
+				if (/(^|[\\/ ])(python[0-9.]*|py)(\.exe)?\b/i.test(cmd)) return "python";
+				if (/(^|[\\/ ])node(\.exe)?\b/i.test(cmd)) return "node";
+				if (/(^|[\\/ ])docker(\.exe)?\b/i.test(cmd)) return "docker";
+				return null;
+			};
+			const installTransport = item.install?.transport ?? item.transport ?? null;
+			const installRunner = item.install ? runnerOf(item.install.command) : null;
+			const installChip = !item.install
+				? (item.installable ? "可一键安装" : "需手动配置")
+				: installTransport === "stdio"
+					? `stdio · ${installRunner ?? "本地命令"}`
+					: "远程 · 免安装";
+			const installTitle = item.install
+				? [installTransport, item.install.command, item.install.url].filter(Boolean).join(" ")
+				: installChip;
+			const CHIP_ALREADY_SHOWN = new Set(["托管", "本地", "npm", "pypi"]);
 			const tags = [...(item.tags ?? []), ...((enriched?.topics ?? []).slice(0, 3))]
 				.filter((t, i, arr) => t && arr.indexOf(t) === i)
-				.slice(0, 4);
+				// `groupChip` already says the group, and `category` is its
+				// tooltip: repeating either one as an upstream tag would print the
+				// same word twice in a two-inch row.
+				.filter((t) => !CHIP_ALREADY_SHOWN.has(t) && t !== item.category && t !== groupChip)
+				.slice(0, 2);
 			// Smithery's repository field is its own listing when the upstream
 			// project is unknown, so that listing is the honest front door too.
 			const registryPage = item.source === "smithery" && item.qualifiedName
@@ -1180,15 +1234,26 @@ window.__ModuleLoader__.load({
 					}, transportChip)),
 				]), // body (clickable surface)
 
-				// 7. footer: tags on the left, the actions a card can decide by
-				//    itself on the right. It sits OUTSIDE the role=button body
-				//    so starring or ⋯ never also opens the detail panel.
+				// 7. footer: what this entry *is* and how it installs, then the
+				//    actions a card can decide by itself on the right. It sits
+				//    OUTSIDE the role=button body so starring or ⋯ never also
+				//    opens the detail panel.
 				createElement("div", { key: "ft", style: styles.cardFt }, [
-					tags.length
-						? createElement("div", { key: "tags", style: { ...styles.tags, flex: 1, minWidth: 0 } },
-							tags.map((t) => createElement("span", { key: t, style: styles.tag }, t)))
-						: createElement("span", { key: "notags", style: styles.hint },
-							item.installable ? "可一键安装" : "需手动配置"),
+					createElement("div", { key: "tags", style: { ...styles.tags, flex: 1, minWidth: 0 } }, [
+						groupChip
+							? createElement("span", {
+								key: "group", style: { ...styles.tag, ...styles.tagKind },
+								title: groupTitle ? `分类：${groupTitle}` : "分类",
+							}, groupChip)
+							: null,
+						createElement("span", {
+							key: "install", style: { ...styles.tag, ...styles.tagKind },
+							title: `安装方式：${installTitle}`,
+						}, installChip),
+						...tags.map((t) => createElement("span", {
+							key: t, style: styles.tag, title: `上游标签：${t}`,
+						}, t)),
+					].filter(Boolean)),
 					createElement("span", { key: "acts", style: { display: "flex", gap: 4, flexShrink: 0 } }, [
 						createElement("button", {
 							key: "fav", type: "button",
@@ -2175,7 +2240,7 @@ window.__ModuleLoader__.load({
 								href: "https://github.com/punkpeye/awesome-mcp-servers#contributing",
 								target: "_blank", rel: "noreferrer",
 								title: "收录标准与提交方式（awesome-mcp-servers 贡献指南）",
-							}, "申请收录插件 ↗"),
+							}, "申请收录 MCP 服务 ↗"),
 						]),
 						logButton,
 					]),

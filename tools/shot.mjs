@@ -510,6 +510,46 @@ const frameOf = (inner) => `
   // would do it, so the widest card overflow is asserted rather than eyeballed.
   const cards = Array.from(grid.querySelectorAll('article:not([data-omkt="wide"])'));
   const bleed = cards.reduce((m, c) => Math.max(m, Math.round(c.scrollWidth - c.clientWidth)), 0);
+  // A CJK label breaks between characters, so a flex button's automatic minimum
+  // width is ONE glyph: when its row is over-constrained the label wraps inside
+  // a box too narrow for it and the second line is clipped away. The real app
+  // shipped a 38px 搜索 button with its text cut in half. No button in the page
+  // may clip or wrap its own label, at any window width.
+  const buttons = Array.from(page.querySelectorAll('button'))
+    .filter((b) => (b.textContent || '').trim().length > 0);
+  const clipped = buttons
+    .map((b) => ({
+      label: (b.textContent || '').trim().slice(0, 12),
+      w: Math.round(b.getBoundingClientRect().width),
+      h: Math.round(b.getBoundingClientRect().height),
+      clip: Math.round(b.scrollWidth - b.clientWidth),
+      wrapped: Math.round(b.scrollHeight - b.clientHeight),
+    }))
+    .filter((b) => b.clip > 1 || b.wrapped > 1);
+  const searchButton = buttons.find((b) => (b.textContent || '').trim() === '搜索');
+  const searchButtonWidth = searchButton ? Math.round(searchButton.getBoundingClientRect().width) : null;
+  // The second half of the same bug: an element can also be *cut off* by an
+  // ancestor's non-visible overflow (the market body clips now) without its own
+  // scrollWidth noticing. A row that is width:100% plus padding overflows by
+  // exactly its padding unless it is border-box — which is how the app ended up
+  // showing a half-visible search button. (No backticks in this block.)
+  const marketBody = document.querySelector('[data-omkt="market"]');
+  const bodyRight = marketBody
+    ? marketBody.getBoundingClientRect().right - parseFloat(getComputedStyle(marketBody).paddingRight)
+    : null;
+  const pastBody = marketBody
+    ? Array.from(marketBody.querySelectorAll('button, input, select'))
+      // The hostile card is deliberately wider than the page; only what the
+      // chrome rows place matters here.
+      .filter((el) => !el.closest('[data-omkt="wide"]'))
+      .map((el) => ({
+        label: (el.textContent || el.getAttribute('placeholder') || el.tagName).trim().slice(0, 12),
+        over: Math.round(el.getBoundingClientRect().right - bodyRight),
+      }))
+      .filter((x) => x.over > 1)
+    : [];
+  const marketBodyScroll = marketBody
+    ? Math.round(marketBody.scrollWidth - marketBody.clientWidth) : null;
   // Scrolling belongs to the card box alone: the search pill, the 分类 row and
   // the meta lines are chrome and must not move when the wall is dragged. That
   // is measured, not assumed — scroll the inner box and re-read the chrome.
@@ -590,6 +630,10 @@ const frameOf = (inner) => `
     underlines: underlines,
     inkedTabs: inkedTabs,
     tabsSelected: tabsSelected,
+    clippedButtons: clipped,
+    searchButtonWidth: searchButtonWidth,
+    pastBody: pastBody,
+    marketBodyScroll: marketBodyScroll,
     descClamp: descStyle ? descStyle.webkitLineClamp : 'n/a',
     descH: desc ? Math.round(desc.getBoundingClientRect().height) : 0,
     descScroll: desc ? Math.round(desc.scrollHeight) : 0,
@@ -613,7 +657,8 @@ const frameOf = (inner) => `
        #center > div > *{display:grid !important;min-width:auto !important}
        #center > div > * > *{min-width:auto !important}
        #center .omkt-page > *,#center .omkt-tabbody > *{flex-shrink:1 !important}
-       #center .omkt-tab::after{background:#000 !important}</style>`
+       #center .omkt-tab::after{background:#000 !important}
+       #center [data-omkt="market"] > div:first-child{min-width:2000px !important}</style>`
     : '';
   await writeFile(frameFile, `<!doctype html><meta charset="utf-8"><title>frame-probe</title>
 <style>${SHELL}</style><style>${sheetTexts.join('\n')}</style><style>${frameCss}</style>
@@ -652,10 +697,18 @@ ${frameVerdict}`.replace(/src="https:\/\/images\.weserv\.nl[^"]*"/g, `src="${IMG
     // at scrollTop 0. (`scrollRoom` is the box's overflow; when the fixture has
     // too few cards to overflow, the assertion is vacuous but reported.)
     const pins = f.chromeShift === 0 && f.searchShift === 0 && f.pageScrolled === 0;
+    // No button may clip or wrap its own label (see the CJK min-content note),
+    // and no control may stick out of the market body that now clips.
+    const labelsFit = (f.clippedButtons || []).length === 0 && (f.pastBody || []).length === 0
+      && f.marketBodyScroll === 0;
     console.log(`  card scroller: ${f.scrollRoom}px of room, scrolled ${f.innerScrolled}px ->`
       + ` tab bar moved ${f.chromeShift}px, search moved ${f.searchShift}px,`
       + ` page scrollTop ${f.pageScrolled}`);
-    if (!fits || !band || !sizing || !clamped || f.rowMin < 16 || f.inkedTabs !== 1 || !pins) {
+    console.log(`  buttons: ${f.searchButtonWidth}px for 搜索, market body overflow`
+      + ` ${f.marketBodyScroll}px;`
+      + (labelsFit ? ' every label fits and stays inside the body'
+        : ` clipped ${JSON.stringify(f.clippedButtons)} past-body ${JSON.stringify(f.pastBody)}`));
+    if (!fits || !band || !sizing || !clamped || f.rowMin < 16 || f.inkedTabs !== 1 || !pins || !labelsFit) {
       bad += 1;
       console.error(`FAIL at ${f.viewport}px: expected ${expected(f.avail)} columns for a`
         + ` ${f.avail}px page, got ${f.columns} for a ${f.gridBox}px wall`
@@ -663,7 +716,10 @@ ${frameVerdict}`.replace(/src="https:\/\/images\.weserv\.nl[^"]*"/g, `src="${IMG
         + ` card bleed ${f.bleed}px, shortest page row ${f.rowMin}px,`
         + ` inked tabs ${f.inkedTabs} [${(f.underlines || []).join(' | ')}],`
         + ` chrome shift ${f.chromeShift}px / search shift ${f.searchShift}px /`
-        + ` page scrollTop ${f.pageScrolled}`);
+        + ` page scrollTop ${f.pageScrolled},`
+        + ` market body overflow ${f.marketBodyScroll}px,`
+        + ` clipped buttons ${JSON.stringify(f.clippedButtons)},`
+        + ` controls past the body ${JSON.stringify(f.pastBody)}`);
       console.error(`  chain: ${f.chain.join(' > ')}`);
     }
   }
