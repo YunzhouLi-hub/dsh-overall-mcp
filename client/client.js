@@ -703,6 +703,14 @@ window.__ModuleLoader__.load({
 				".omkt-btn-text:hover{opacity:.7}",
 				".omkt-btn-outline:hover{background:rgba(128,128,128,.10)}",
 				".omkt-btn:disabled{opacity:.55;cursor:default}",
+				// The page and each tab body are column flex containers that only
+				// stack their children. Flex items shrink along the main axis by
+				// default, and the page is a definite-height scroll container, so
+				// with the tall market list the *tab bar* was the cheapest item to
+				// shrink: it collapsed to a 1px band and its labels vanished, which
+				// made「MCP 市场」a one-way door. Children never shrink here; the
+				// page scrolls instead.
+				".omkt-page > *,.omkt-tabbody > *{flex-shrink:0;min-width:0}",
 				// v4's breakpoints for the card grid. Inline `columns:2` is the
 				// fallback; these rules only ever *raise* or *lower* the count,
 				// hence !important — nothing else can beat an inline style, and
@@ -1997,7 +2005,7 @@ window.__ModuleLoader__.load({
 				key: "hd-log", type: "button", className: "omkt-btn omkt-btn-outline",
 				style: styles.outlineBtn, onClick: doExportLog,
 			}, "⤓ 导出日志");
-			return createElement("div", { style: styles.page, ref: pageRef }, [
+			return createElement("div", { className: "omkt-page", style: styles.page, ref: pageRef }, [
 				// ---- page head (v4 prototype): identity, then actions ----
 				// The primary action follows the tab, because each tab has one
 				// action that matters and two primary buttons is none.
@@ -2080,7 +2088,7 @@ window.__ModuleLoader__.load({
 				message ? createElement("div", { key: "message", style: styles.message }, message) : null,
 
 				// ---------------- registry tab ----------------
-				tab === "registry" ? createElement("div", { key: "reg", style: styles.tabBody }, [
+				tab === "registry" ? createElement("div", { key: "reg", className: "omkt-tabbody", style: styles.tabBody }, [
 					createElement("div", { key: "stats", style: styles.stats }, [
 						createElement("span", { key: "t" }, `${stats.total} 台服务器`),
 						createElement("span", { key: "e" }, `${stats.enabled} 已启用`),
@@ -2132,7 +2140,7 @@ window.__ModuleLoader__.load({
 				]) : null,
 
 				// ---------------- market tab ----------------
-				tab === "market" ? createElement("div", { key: "mkt", style: styles.tabBody }, [
+				tab === "market" ? createElement("div", { key: "mkt", className: "omkt-tabbody", style: styles.tabBody }, [
 					// Row 1 — the search pill, on a line of its own. v4 makes it
 					// the widest control on the page because it is the one thing
 					// that turns five thousand entries into the one you meant.

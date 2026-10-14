@@ -510,6 +510,15 @@ const frameOf = (inner) => `
   // would do it, so the widest card overflow is asserted rather than eyeballed.
   const cards = Array.from(grid.querySelectorAll('article:not([data-omkt="wide"])'));
   const bleed = cards.reduce((m, c) => Math.max(m, Math.round(c.scrollWidth - c.clientWidth)), 0);
+  // A column flex container shrinks its items along the main axis when their
+  // content is taller than the box, and this page *is* a definite-height scroll
+  // container: with the tall market body the tab bar was the cheapest item to
+  // shrink, so it collapsed to its own 1px border and 「已注册」 became
+  // unreachable — the market tab turned into a one-way door. Every row of the
+  // page must keep its own height.
+  const rowHeights = Array.from(page.children)
+    .map((el) => Math.round(el.getBoundingClientRect().height));
+  const rowMin = rowHeights.reduce((m, h) => Math.min(m, h), 1e9);
   const descStyle = desc ? getComputedStyle(desc) : null;
   const verdict = {
     viewport: window.innerWidth,
@@ -524,6 +533,8 @@ const frameOf = (inner) => `
     kids: kids,
     named: Boolean(nameEl),
     bleed: bleed,
+    rowHeights: rowHeights,
+    rowMin: rowMin,
     descClamp: descStyle ? descStyle.webkitLineClamp : 'n/a',
     descH: desc ? Math.round(desc.getBoundingClientRect().height) : 0,
     descScroll: desc ? Math.round(desc.scrollHeight) : 0,
@@ -545,7 +556,8 @@ const frameOf = (inner) => `
   const redFrame = process.env.OMKT_RED_FRAME
     ? `<style>#center > div{display:grid !important;min-width:auto !important}
        #center > div > *{display:grid !important;min-width:auto !important}
-       #center > div > * > *{min-width:auto !important}</style>`
+       #center > div > * > *{min-width:auto !important}
+       #center .omkt-page > *,#center .omkt-tabbody > *{flex-shrink:1 !important}</style>`
     : '';
   await writeFile(frameFile, `<!doctype html><meta charset="utf-8"><title>frame-probe</title>
 <style>${SHELL}</style><style>${sheetTexts.join('\n')}</style><style>${frameCss}</style>
@@ -577,12 +589,13 @@ ${frameVerdict}`.replace(/src="https:\/\/images\.weserv\.nl[^"]*"/g, `src="${IMG
       + ` measured against ${f.container}`);
     console.log(`  widest card overflow ${f.bleed}px; description clamped to ${f.descClamp}`
       + ` (${f.descH}px shown of ${f.descScroll}px)`);
-    if (!fits || !band || !sizing || !clamped) {
+    console.log(`  page rows [${(f.rowHeights || []).join(', ')}]px`);
+    if (!fits || !band || !sizing || !clamped || f.rowMin < 16) {
       bad += 1;
       console.error(`FAIL at ${f.viewport}px: expected ${expected(f.avail)} columns for a`
         + ` ${f.avail}px page, got ${f.columns} for a ${f.gridBox}px wall`
         + ` (min-content ${f.gridMin}px); overflow ${f.scroll - f.page}px,`
-        + ` card bleed ${f.bleed}px`);
+        + ` card bleed ${f.bleed}px, shortest page row ${f.rowMin}px`);
       console.error(`  chain: ${f.chain.join(' > ')}`);
     }
   }
