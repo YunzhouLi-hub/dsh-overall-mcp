@@ -64,6 +64,9 @@ const MARKET = {
       install: { transport: 'stdio', command: 'npx', args: ['-y', '@snag/mcp'] },
       repository: 'https://github.com/snag/mcp', version: '1.0.0', group: '开发工具',
       installable: true, installed: true, favorite: true,
+      // No installs figure: the official registry publishes none, and the
+      // 「使用量最多」 order must still place it *after* the counted entries.
+      official: true,
     },
     {
       id: 'awesome:Gatyh/3dtexel-mcp', title: '3dtexel-mcp', source: 'awesome-list', author: 'Gatyh',
@@ -71,11 +74,13 @@ const MARKET = {
       install: { transport: 'stdio', command: 'npx', args: ['-y', '3dtexel-mcp'] },
       repository: 'https://github.com/Gatyh/3dtexel-mcp', version: null, group: '搜索与知识',
       installable: true, installed: false, favorite: false,
+      installs: 1200, installsLabel: '次启动',
     },
     {
       id: 'remote:example.com/mcp', title: 'example-mcp', source: 'awesome-remote', author: 'example.com',
       description: 'A hosted endpoint.', transport: 'unknown', install: null,
       installable: false, installed: false, favorite: false,
+      installs: 90000, installsLabel: '次启动',
     },
   ],
   counts: { 'official-registry': 1, 'awesome-list': 1, 'awesome-remote': 1 },
@@ -94,7 +99,13 @@ globalThis.document = {
 globalThis.fetch = async (url, init) => {
   const ok = (value) => ({ ok: true, status: 200, json: async () => value });
   const path = String(url).replace('/api/overall-mcp', '');
-  if (path.startsWith('/catalog')) return ok(MARKET);
+  if (path.startsWith('/catalog')) {
+    // The source filter travels in the POST body, not the query string.
+    let source = '';
+    try { source = JSON.parse(init?.body ?? '{}').source ?? ''; } catch { source = ''; }
+    calls.push(`POST /catalog${source ? ` source=${source}` : ''}`);
+    return ok(MARKET);
+  }
   if (path.startsWith('/servers')) return ok({ servers: [{ name: 'codegraph', source: 'claude-code', enabled: true }] });
   if (path.startsWith('/repo-stats')) return ok({ stats: {} });
   if (path.startsWith('/repo-media')) return ok({ media: {} });
@@ -351,7 +362,83 @@ function containsNode(root, target) {
   return found;
 }
 
-// --- 4b. only the cards scroll, and the chrome above them stays put ---------
+// --- 4c. choosing an order actually reorders, and says so -------------------
+// 「我选择了使用量最多，没有按我选择的筛选」: the comparator was right, but the
+// wall is CSS multi-column, so a ranked list reads DOWN each column and looked
+// unsorted; and a select looked the same whether or not it was filtering. This
+// drives the real select and checks the document order, the rank chips, the
+// active style and the meta line.
+{
+  const isSortSelect = (n) => n.type === 'select'
+    && directChildren(n).some((o) => o.type === 'option' && o.props?.value === 'installs');
+  // `loadedNodes` is already the flat list (re-walking it would duplicate every
+  // ancestor once per descendant path).
+  const selects = loadedNodes.filter(isSortSelect);
+  assert.equal(selects.length, 1, 'the sort select is present exactly once');
+  const sortSelect = selects[0];
+  assert.ok(!String(sortSelect.props.className).includes('omkt-select-on'),
+    'the default order must not be marked as an active filter');
+  assert.equal(findByKey(loadedNodes, 'rank').length, 0,
+    'no rank chips before a ranking order is chosen');
+
+  sortSelect.props.onChange({ target: { value: 'installs' } });
+  const sorted = walk(await render());
+  const sortedSelect = sorted.filter(isSortSelect)[0];
+  assert.ok(String(sortedSelect.props.className).includes('omkt-select-on'),
+    'an active order carries the marker class');
+  assert.ok(sortedSelect.props.style.borderColor, 'and paints its own border');
+
+  const grid = findByKey(sorted, 'grid')[0];
+  // Read the cards themselves (the article's title attribute), not the title
+  // anchors: an entry with no repository renders its title as plain text.
+  const titleOrder = walk(grid).filter((n) => n.type === 'article')
+    .map((n) => String(n.props.title ?? '').split(' · ')[0])
+    .filter((t) => ['snag', '3dtexel-mcp', 'example-mcp'].includes(t));
+  assert.deepEqual(titleOrder, ['example-mcp', '3dtexel-mcp', 'snag'],
+    `使用量最多 must order by installs descending, missing counts last (got ${JSON.stringify(titleOrder)})`);
+
+  const ranks = findByKey(sorted, 'rank');
+  assert.deepEqual(ranks.map((n) => textOf(n)), ['#1', '#2', '#3'],
+    'each card states its place in the ranking');
+  const meta = textOf(findByKey(sorted, 'meta')[0] ?? { props: {} });
+  assert.ok(meta.includes('按使用量最多排序'), `the meta line names the order (got ${meta})`);
+  console.log('sorting: 使用量最多 reorders the wall, ranks it, and marks the control ✓');
+
+  // Back to the default so the later sections see the page as first painted.
+  sortedSelect.props.onChange({ target: { value: 'default' } });
+  await render();
+}
+
+// --- 4d. the other two filters narrow the list too --------------------------
+// The user's follow-up: "其他的筛选条件应该也有同样的问题". 分类 filters in place;
+// 全部市场 re-asks the host with the chosen source.
+{
+  const groupSelect = loadedNodes.find((n) => n.type === 'select'
+    && directChildren(n).some((o) => o.type === 'option' && o.props?.value === '开发工具'));
+  assert.ok(groupSelect, 'the 分类 select exists');
+  groupSelect.props.onChange({ target: { value: '开发工具' } });
+  const filtered = walk(await render());
+  const cards = walk(findByKey(filtered, 'grid')[0]).filter((n) => n.type === 'article');
+  assert.equal(cards.length, 1, `分类清单一开就该只剩该组（got ${cards.length} cards）`);
+  assert.ok(textOf(findByKey(filtered, 'srcline')[0]).includes('筛选后 1 条'),
+    'the provenance line states how many entries survived the filter');
+
+  const srcSelect = loadedNodes.find((n) => n.type === 'select'
+    && directChildren(n).some((o) => o.type === 'option' && o.props?.value === 'smithery'));
+  assert.ok(srcSelect, 'the source select exists');
+  const before = calls.length;
+  srcSelect.props.onChange({ target: { value: 'smithery' } });
+  await render();
+  const asked = calls.slice(before).join(' ');
+  assert.ok(asked.includes('source=smithery'),
+    `choosing a source must re-query the host for it (asked: ${asked || 'nothing'})`);
+  console.log('filters: 分类 narrows in place, 全部市场 re-queries the host ✓');
+
+  groupSelect.props.onChange({ target: { value: '' } });
+  srcSelect.props.onChange({ target: { value: '' } });
+  await render();
+}
+
 // The page is a fixed shell now: scrolling belongs to the card box alone, so
 // the search pill, the 分类 dropdown, the filter row and the meta lines must
 // all live OUTSIDE it — otherwise dragging the wall carries the controls away.

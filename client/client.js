@@ -379,6 +379,13 @@ window.__ModuleLoader__.load({
 				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text2,
 				boxSizing: "border-box",
 			},
+			// A control that is actually filtering says so: ink border, ink text.
+			// Before this, a select looked identical whether it was narrowing the
+			// list or sitting on its default, which is half of why "我选了使用量
+			// 最多但列表没变" felt like the filter was ignored.
+			filterSelectOn: {
+				borderColor: T.text, color: T.text, fontWeight: 500, background: T.soft,
+			},
 			// v4's meta line: bold numbers with their units in muted text, and
 			// the freshness note pushed to the far right.
 			metaLine: {
@@ -386,6 +393,7 @@ window.__ModuleLoader__.load({
 				fontSize: 12, color: T.text3, margin: "-6px 0 14px",
 			},
 			metaB: { fontWeight: 600, color: T.text2 },
+			metaSort: { fontWeight: 600, color: T.text },
 			metaTail: { marginLeft: "auto" },
 			select: {
 				padding: "6px 10px", borderRadius: 8, fontSize: 13,
@@ -502,6 +510,12 @@ window.__ModuleLoader__.load({
 			// darker than the upstream tags beside them, so the footer reads as
 			// "two facts, then whatever else the source said".
 			tagKind: { background: T.soft, color: T.text, fontWeight: 500 },
+			// `#12` — the place in the current ranking. Tabular figures so a
+			// column of ranks lines up, muted so it never competes with 分类.
+			rank: {
+				fontWeight: 600, color: T.text3, background: "transparent",
+				fontVariantNumeric: "tabular-nums", letterSpacing: ".02em",
+			},
 			verified: {
 				fontSize: 11, padding: "1px 7px", borderRadius: 999, fontWeight: 600,
 				background: "rgba(22,95,255,0.12)", color: T.blue,
@@ -766,7 +780,20 @@ window.__ModuleLoader__.load({
 				// layout either way.
 				".omkt-tabbar{scrollbar-width:none}",
 				".omkt-select{cursor:pointer;transition:border-color .12s ease}",
-				".omkt-select:hover{border-color:rgba(128,128,128,.55)}",
+				// These need `!important`: every one of these controls carries its
+				// border inline (so it can flip with the theme), and an inline
+				// declaration beats a class rule — without it the hover/focus
+				// feedback below silently never painted.
+				".omkt-select:hover{border-color:rgba(128,128,128,.55) !important}",
+				`.omkt-select-on,.omkt-select-on:hover{border-color:${T.text} !important;color:${T.text} !important}`,
+				// Focus has to be visible: the resting border is 1px of hairline
+				// grey, and a keyboard user tabbing through the filter row had no
+				// way to see which control was live. The market search box has no
+				// border of its own (the pill draws it), so the *pill* takes the
+				// ink when the input inside it is focused.
+				`.omkt-select:focus-visible,.omkt-input:focus-visible{outline:2px solid ${T.text};outline-offset:1px}`,
+				`.omkt-search:has(.omkt-input:focus-visible){border-color:${T.text} !important}`,
+				".omkt-input:focus{border-color:rgba(128,128,128,.55) !important}",
 				".omkt-btn:hover{border-color:rgba(128,128,128,.75)}",
 				// The primary button's *colours* live inline (ink background,
 				// surface foreground — they flip with the theme). Nothing here
@@ -988,7 +1015,7 @@ window.__ModuleLoader__.load({
 		 * inside a button — that nesting is what once made the card's links
 		 * race its click handler and "not go anywhere".
 		 */
-		function MarketCard({ item, stats, media, busy, onInstall, onOpen, onToggleFavorite }) {
+		function MarketCard({ item, stats, media, busy, rank, onInstall, onOpen, onToggleFavorite }) {
 			const repo = repoKeyOf(item);
 			const enriched = repo ? (stats ?? {})[repo] : null;
 			const repoMedia = repo ? (media ?? {})[repo] : null;
@@ -1240,6 +1267,12 @@ window.__ModuleLoader__.load({
 				//    opens the detail panel.
 				createElement("div", { key: "ft", style: styles.cardFt }, [
 					createElement("div", { key: "tags", style: { ...styles.tags, flex: 1, minWidth: 0 } }, [
+						rank
+							? createElement("span", {
+								key: "rank", style: { ...styles.tag, ...styles.rank },
+								title: `当前排序下的名次：第 ${rank} 名`,
+							}, `#${rank}`)
+							: null,
 						groupChip
 							? createElement("span", {
 								key: "group", style: { ...styles.tag, ...styles.tagKind },
@@ -2276,14 +2309,20 @@ window.__ModuleLoader__.load({
 					!error && servers === null ? createElement("div", { key: "loading", style: styles.message }, "加载中…") : null,
 					servers ? createElement("div", { key: "filters", style: styles.filters }, [
 						createElement("select", {
-							key: "source", style: styles.select, value: sourceFilter,
+							key: "source", className: `omkt-select${sourceFilter ? " omkt-select-on" : ""}`,
+							style: sourceFilter ? { ...styles.select, ...styles.filterSelectOn } : styles.select,
+							value: sourceFilter,
+							title: sourceFilter ? `来源：${sourceLabel(sourceFilter)}` : "按来源筛选",
 							onChange: (e) => setSourceFilter(e.target.value),
 						}, [
 							createElement("option", { key: "", value: "" }, "全部来源"),
 							...sourceOptions.map((s) => createElement("option", { key: s, value: s }, sourceLabel(s))),
 						]),
 						createElement("select", {
-							key: "state", style: styles.select, value: stateFilter,
+							key: "state", className: `omkt-select${stateFilter ? " omkt-select-on" : ""}`,
+							style: stateFilter ? { ...styles.select, ...styles.filterSelectOn } : styles.select,
+							value: stateFilter,
+							title: stateFilter ? "按连接状态筛选" : "全部状态",
 							onChange: (e) => setStateFilter(e.target.value),
 						}, [
 							createElement("option", { key: "", value: "" }, "全部状态"),
@@ -2293,7 +2332,7 @@ window.__ModuleLoader__.load({
 							createElement("option", { key: "failed", value: "failed" }, "连接异常"),
 						]),
 						createElement("input", {
-							key: "name", style: styles.searchBox, value: nameFilter,
+							key: "name", className: "omkt-input", style: styles.searchBox, value: nameFilter,
 							placeholder: "搜索 MCP",
 							title: "按服务器名称、来源或命令过滤",
 							onChange: (e) => setNameFilter(e.target.value),
@@ -2324,10 +2363,10 @@ window.__ModuleLoader__.load({
 					// Row 1 — the search pill, on a line of its own. v4 makes it
 					// the widest control on the page because it is the one thing
 					// that turns five thousand entries into the one you meant.
-					createElement("div", { key: "search", style: styles.searchWrap }, [
+					createElement("div", { key: "search", className: "omkt-search", style: styles.searchWrap }, [
 						createElement("span", { key: "ico", style: styles.searchIcon }, "🔍"),
 						createElement("input", {
-							key: "q", style: styles.searchInput, value: marketQuery, disabled: marketBusy,
+							key: "q", className: "omkt-input", style: styles.searchInput, value: marketQuery, disabled: marketBusy,
 							placeholder: "搜索 MCP",
 							title: "搜索名称、描述或安装命令（回车或点「搜索」）",
 							onChange: (e) => setMarketQuery(e.target.value),
@@ -2357,8 +2396,14 @@ window.__ModuleLoader__.load({
 							? createElement("div", { key: "group", style: styles.groupFilter }, [
 								createElement("span", { key: "l", style: styles.groupLabel }, "分类"),
 								createElement("select", {
-									key: "g", className: "omkt-select", style: styles.groupSelect, value: marketGroup,
-									title: "按功能分类筛选",
+									key: "g", className: `omkt-select${marketGroup ? " omkt-select-on" : ""}`,
+									style: marketGroup
+										? { ...styles.groupSelect, ...styles.filterSelectOn }
+										: styles.groupSelect,
+									value: marketGroup,
+									title: marketGroup
+										? `分类筛选：${marketGroup === "__none__" ? "未分类" : marketGroup}`
+										: "按功能分类筛选",
 									onChange: (e) => { setMarketGroup(e.target.value); setMarketPage(0); },
 								}, [
 									createElement("option", { key: "", value: "" },
@@ -2375,7 +2420,12 @@ window.__ModuleLoader__.load({
 							: null,
 						createElement("div", { key: "right", style: styles.filterRight }, [
 							createElement("select", {
-								key: "src", className: "omkt-select", style: styles.filterSelect, value: marketSource,
+								key: "src", className: `omkt-select${marketSource ? " omkt-select-on" : ""}`,
+								style: marketSource
+									? { ...styles.filterSelect, ...styles.filterSelectOn }
+									: styles.filterSelect,
+								value: marketSource,
+								title: marketSource ? `来源筛选：${marketSource}` : "按来源筛选",
 								onChange: (e) => {
 									setMarketSource(e.target.value);
 									// A new listing may not hold the selected group;
@@ -2385,7 +2435,17 @@ window.__ModuleLoader__.load({
 								},
 							}, MARKET_SOURCES.map(([value, label]) => createElement("option", { key: value, value }, label))),
 							createElement("select", {
-								key: "sort", className: "omkt-select", style: styles.filterSelect, value: marketSort,
+								key: "sort", className: `omkt-select${marketSort !== "default" ? " omkt-select-on" : ""}`,
+								style: marketSort !== "default"
+									? { ...styles.filterSelect, ...styles.filterSelectOn }
+									: styles.filterSelect,
+								value: marketSort,
+								// The chosen order is stated on the control itself: a
+								// select that looks identical whether or not it is
+								// doing anything is how "我选了使用量最多但没生效" reads.
+								title: marketSort === "default"
+									? "排序：综合推荐"
+									: `排序：${(SORT_OPTIONS.find(([v]) => v === marketSort) ?? [, marketSort])[1]}`,
 								onChange: (e) => { setMarketSort(e.target.value); setMarketPage(0); },
 							}, SORT_OPTIONS.map(([value, label]) => createElement("option", { key: value, value }, label))),
 							createElement("button", {
@@ -2410,6 +2470,16 @@ window.__ModuleLoader__.load({
 								` / ${pageCount} 页`,
 							]),
 							createElement("span", { key: "n" }, `每页 ${pageSize} 条`),
+							// The order in force, in words. `column-count` lays
+							// the wall out column by column, so a ranked list
+							// reads *down* each column: saying "按使用量最多"
+							// here is what makes that legible, next to the rank
+							// chips on the cards themselves.
+							marketSort !== "default"
+								? createElement("span", { key: "sort", style: styles.metaSort,
+									title: "名次顺着每列自上而下；没有该项数据的条目排在后面" },
+									`按${(SORT_OPTIONS.find(([v]) => v === marketSort) ?? [, marketSort])[1]}排序`)
+								: null,
 							marketAt
 								? createElement("span", { key: "at", style: styles.metaTail },
 									`更新于 ${marketAt}${market && market.cached ? "（缓存）" : ""}`)
@@ -2459,9 +2529,17 @@ window.__ModuleLoader__.load({
 							// container the sheet's @container rules measure.
 							createElement("div", { key: "gridwrap", style: styles.gridHost },
 								createElement("div", { key: "grid", className: "omkt-grid", style: styles.cardColumns },
-									pageItems.map((item) => createElement(MarketCard, {
+									pageItems.map((item, i) => createElement(MarketCard, {
 										key: `${item.source}:${item.id ?? item.title}`,
 										item, stats: repoStats, media: repoMedia, busy,
+										// A ranked list has to *show* its ranking.
+										// The wall is CSS multi-column, so a sorted
+										// list reads down each column, not across
+										// the row — without a number it looks
+										// unsorted ("我选了使用量最多但没生效"). On the
+										// default (综合推荐) there is no ranking to
+										// state, so no chip.
+										rank: marketSort === "default" ? null : safePage * pageSize + i + 1,
 										onInstall: doInstall, onOpen: setDetail,
 										onToggleFavorite: doToggleFavorite,
 									})))))
