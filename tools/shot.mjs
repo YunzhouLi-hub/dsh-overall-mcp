@@ -519,6 +519,26 @@ const frameOf = (inner) => `
   const rowHeights = Array.from(page.children)
     .map((el) => Math.round(el.getBoundingClientRect().height));
   const rowMin = rowHeights.reduce((m, h) => Math.min(m, h), 1e9);
+  // Only the selected tab may carry the ink underline. It is painted by a
+  // pseudo-element rule keyed on aria-selected, so the inactive tab has no
+  // visible line at all — the earlier inline 2px transparent border-bottom
+  // rendered *black* in the real app (the UA button border colour), which made
+  // both tabs look selected at once. (No backticks in this block.)
+  const tabBarEl = Array.from(page.children).find((el) => el.querySelectorAll('.omkt-tab').length >= 2
+    && el.getBoundingClientRect().height < 60);
+  const tabs = tabBarEl ? Array.from(tabBarEl.querySelectorAll('.omkt-tab')) : [];
+  const underlines = tabs.map((btn) => {
+    const after = getComputedStyle(btn, '::after');
+    const ink = after.backgroundColor !== 'rgba(0, 0, 0, 0)' && after.backgroundColor !== 'transparent';
+    const border = getComputedStyle(btn);
+    const borderVisible = border.borderBottomStyle !== 'none'
+      && parseFloat(border.borderBottomWidth) > 0
+      && border.borderBottomColor !== 'rgba(0, 0, 0, 0)';
+    return (ink ? 'ink' : 'clear') + ':' + after.backgroundColor
+      + (borderVisible ? '+border' : '');
+  });
+  const inkedTabs = underlines.filter((u) => u.startsWith('ink')).length;
+  const tabsSelected = tabs.map((btn) => btn.getAttribute('aria-selected')).join(',');
   const descStyle = desc ? getComputedStyle(desc) : null;
   const verdict = {
     viewport: window.innerWidth,
@@ -535,6 +555,9 @@ const frameOf = (inner) => `
     bleed: bleed,
     rowHeights: rowHeights,
     rowMin: rowMin,
+    underlines: underlines,
+    inkedTabs: inkedTabs,
+    tabsSelected: tabsSelected,
     descClamp: descStyle ? descStyle.webkitLineClamp : 'n/a',
     descH: desc ? Math.round(desc.getBoundingClientRect().height) : 0,
     descScroll: desc ? Math.round(desc.scrollHeight) : 0,
@@ -557,7 +580,8 @@ const frameOf = (inner) => `
     ? `<style>#center > div{display:grid !important;min-width:auto !important}
        #center > div > *{display:grid !important;min-width:auto !important}
        #center > div > * > *{min-width:auto !important}
-       #center .omkt-page > *,#center .omkt-tabbody > *{flex-shrink:1 !important}</style>`
+       #center .omkt-page > *,#center .omkt-tabbody > *{flex-shrink:1 !important}
+       #center .omkt-tab::after{background:#000 !important}</style>`
     : '';
   await writeFile(frameFile, `<!doctype html><meta charset="utf-8"><title>frame-probe</title>
 <style>${SHELL}</style><style>${sheetTexts.join('\n')}</style><style>${frameCss}</style>
@@ -589,13 +613,15 @@ ${frameVerdict}`.replace(/src="https:\/\/images\.weserv\.nl[^"]*"/g, `src="${IMG
       + ` measured against ${f.container}`);
     console.log(`  widest card overflow ${f.bleed}px; description clamped to ${f.descClamp}`
       + ` (${f.descH}px shown of ${f.descScroll}px)`);
-    console.log(`  page rows [${(f.rowHeights || []).join(', ')}]px`);
-    if (!fits || !band || !sizing || !clamped || f.rowMin < 16) {
+    console.log(`  page rows [${(f.rowHeights || []).join(', ')}]px;`
+      + ` tab underlines [${(f.underlines || []).join(' | ')}] (aria-selected ${f.tabsSelected})`);
+    if (!fits || !band || !sizing || !clamped || f.rowMin < 16 || f.inkedTabs !== 1) {
       bad += 1;
       console.error(`FAIL at ${f.viewport}px: expected ${expected(f.avail)} columns for a`
         + ` ${f.avail}px page, got ${f.columns} for a ${f.gridBox}px wall`
         + ` (min-content ${f.gridMin}px); overflow ${f.scroll - f.page}px,`
-        + ` card bleed ${f.bleed}px, shortest page row ${f.rowMin}px`);
+        + ` card bleed ${f.bleed}px, shortest page row ${f.rowMin}px,`
+        + ` inked tabs ${f.inkedTabs} [${(f.underlines || []).join(' | ')}]`);
       console.error(`  chain: ${f.chain.join(' > ')}`);
     }
   }

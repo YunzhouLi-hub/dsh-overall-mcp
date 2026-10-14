@@ -276,9 +276,13 @@ window.__ModuleLoader__.load({
 				display: "inline-flex", alignItems: "center", gap: 6,
 			},
 			// Underline tabs: the label sits on a rule and the active rule is
-			// ink, not accent. v4 insets the rule by 8px on each side; the
-			// inline border spans the label instead, which at a 12px tab pad
-			// is the same 2px rule under the same word.
+			// ink, not accent. The rule is drawn by the injected sheet on
+			// `.omkt-tab[aria-selected="true"]::after` rather than as an inline
+			// `border-bottom: 2px solid transparent` on the inactive tab: in the
+			// real app that transparent border painted *black* (the UA button
+			// border colour), so both tabs looked selected at once. A pseudo
+			// element that is transparent unless the tab is selected cannot do
+			// that, and `aria-selected` is also what a screen reader reads.
 			tabBar: {
 				display: "flex", gap: 2, alignItems: "center",
 				borderBottom: `1px solid ${T.line}`, marginBottom: 14, overflowX: "auto",
@@ -286,9 +290,9 @@ window.__ModuleLoader__.load({
 			tab: {
 				padding: "10px 12px", background: "transparent", cursor: "pointer", fontSize: 13.5,
 				fontWeight: 500, color: T.text3, border: "none", whiteSpace: "nowrap",
-				borderBottom: "2px solid transparent",
+				textDecoration: "none",
 			},
-			tabActive: { color: T.text, fontWeight: 600, borderBottomColor: T.text },
+			tabActive: { color: T.text, fontWeight: 600 },
 			stats: { display: "flex", gap: 14, flexWrap: "wrap", fontSize: 12, color: T.text3 },
 			// v4's market chrome is three rows, and each row has one job: a
 			// search pill, a chip row with the page's compact controls at its
@@ -305,10 +309,24 @@ window.__ModuleLoader__.load({
 				fontSize: 14, color: T.text,
 			},
 			filters: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 18 },
-			// The chip row is the one horizontally scrollable thing on the page:
-			// a 5k-entry catalogue carries a long taxonomy, and twenty wrapped
-			// chips push the grid below the fold.
-			chips: { display: "flex", gap: 8, flex: 1, minWidth: 200, overflowX: "auto", paddingBottom: 2 },
+			// The taxonomy is a *dropdown*, not a scrolling chip row: twenty
+			// category chips either scrolled sideways (so half of them were
+			// never seen) or wrapped to three lines and pushed the grid below
+			// the fold. One select shows the whole taxonomy on demand.
+			groupFilter: { display: "flex", gap: 8, alignItems: "center", flexShrink: 0 },
+			groupLabel: { fontSize: 12.5, color: T.text3, whiteSpace: "nowrap" },
+			groupSelect: {
+				flexShrink: 0, padding: "6px 10px", borderRadius: 8, fontSize: 12.5,
+				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text2,
+				minWidth: 160, maxWidth: 280,
+			},
+			// The compact controls sit at the far end of the same row, so the
+			// gap between the taxonomy and the filters is the row's own free
+			// space rather than a fixed 8px.
+			filterRight: {
+				display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap",
+				marginLeft: "auto",
+			},
 			filterBtn: {
 				flexShrink: 0, padding: "6px 12px", borderRadius: 8, fontSize: 12.5, cursor: "pointer",
 				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text2,
@@ -338,14 +356,6 @@ window.__ModuleLoader__.load({
 			groupTitle: { fontWeight: 600 },
 			badge: { fontSize: 11, padding: "1px 7px", borderRadius: 999, background: T.soft2, color: T.text2, fontWeight: 500 },
 			pager: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 },
-			// v4's chip: outlined at rest, and the active one steps to grey
-			// rather than to the accent — a filter is a state, not an action.
-			chip: {
-				flex: "none", padding: "5px 12px", borderRadius: 999, fontSize: 12, cursor: "pointer",
-				fontWeight: 500, whiteSpace: "nowrap",
-				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text2,
-			},
-			chipActive: { background: T.soft, color: T.text, fontWeight: 600, borderColor: T.line },
 			updateBadge: {
 				fontSize: 12, padding: "1px 8px", borderRadius: 999,
 				background: "rgba(0,180,42,0.12)", color: T.green, fontWeight: 600,
@@ -692,7 +702,23 @@ window.__ModuleLoader__.load({
 				".omkt-card:focus-visible{outline:2px solid #4d6bfe;outline-offset:2px}",
 				".omkt-title{color:inherit;text-decoration:none}",
 				".omkt-title:hover{color:#4d6bfe}",
-				".omkt-btn,.omkt-chip,.omkt-link{transition:border-color .12s ease,background .12s ease,color .12s ease}",
+				".omkt-btn,.omkt-link{transition:border-color .12s ease,background .12s ease,color .12s ease}",
+				// The tab underline, drawn here instead of as an inline border on
+				// each tab: `border-bottom: 2px solid transparent` on the
+				// *inactive* tab rendered black in the app (the UA button border
+				// colour), so both tabs looked selected. A transparent pseudo
+				// element is inert until the tab is selected, and `aria-selected`
+				// is the state a screen reader announces too.
+				".omkt-tab{position:relative;text-decoration:none;border:0}",
+				".omkt-tab::after{content:\"\";position:absolute;left:0;right:0;bottom:0;height:2px;"
+					+ "background:transparent;border-radius:2px}",
+				`.omkt-tab[aria-selected="true"]::after{background:${T.text}}`,
+				// Two tabs never overflow, so the bar's scroll container is only
+				// there for a future third one: keep its scrollbar out of the
+				// layout either way.
+				".omkt-tabbar{scrollbar-width:none}",
+				".omkt-select{cursor:pointer;transition:border-color .12s ease}",
+				".omkt-select:hover{border-color:rgba(128,128,128,.55)}",
 				".omkt-btn:hover{border-color:rgba(128,128,128,.75)}",
 				// The primary button's *colours* live inline (ink background,
 				// surface foreground — they flip with the theme). Nothing here
@@ -2071,14 +2097,16 @@ window.__ModuleLoader__.load({
 					]),
 				]),
 
-				createElement("div", { key: "tabs", style: styles.tabBar }, [
+				createElement("div", { key: "tabs", className: "omkt-tabbar", role: "tablist", style: styles.tabBar }, [
 					createElement("button", {
-						key: "registry", type: "button",
+						key: "registry", type: "button", className: "omkt-tab",
+						role: "tab", "aria-selected": tab === "registry" ? "true" : "false",
 						style: { ...styles.tab, ...(tab === "registry" ? styles.tabActive : {}) },
 						onClick: () => setTab("registry"),
 					}, `已注册${servers ? ` (${stats.total})` : ""}`),
 					createElement("button", {
-						key: "market", type: "button",
+						key: "market", type: "button", className: "omkt-tab",
+						role: "tab", "aria-selected": tab === "market" ? "true" : "false",
 						style: { ...styles.tab, ...(tab === "market" ? styles.tabActive : {}) },
 						onClick: () => setTab("market"),
 					}, `MCP 市场${market ? ` (${compactCount(market.total ?? marketItems.length)})` : ""}`),
@@ -2161,57 +2189,58 @@ window.__ModuleLoader__.load({
 						}, marketBusy ? "搜索中…" : "搜索"),
 					]),
 					// Row 2 — the taxonomy on the left, the compact controls that
-					// narrow it on the right: v4 pairs `.chips` with `.filter-btn`
-					// and keeps both off the search line.
+					// narrow it pushed to the far end of the same row. The
+					// taxonomy is one dropdown rather than a row of scrolling
+					// chips: a 5k-entry catalogue carries ~20 functional groups,
+					// and as chips they either scrolled sideways (half of them
+					// never seen) or wrapped into three lines of chrome.
+					//
+					// A listing where NOTHING carries a group means the host is
+					// older than this page (group is computed host-side at DSH
+					// startup). Saying that is far more useful than a taxonomy of
+					// just 全部/未分类, which reads as "the taxonomy is broken".
 					createElement("div", { key: "filters", style: styles.filters }, [
-						// Functional-group chips, laid out in a scrolling row like
-						// the plugin market's category bar: 全部 first, then every
-						// group the listing holds, 未分类 last. Clicking the active
-						// chip returns to 全部. Client-side only — the whole
-						// listing is loaded, so switching is free.
-						//
-						// A listing where NOTHING carries a group means the host is
-						// older than this page (group is computed host-side at DSH
-						// startup). Saying that is far more useful than a chip row of
-						// just 全部/未分类, which reads as "the taxonomy is broken".
 						groupOptions.length > 1 || (groupOptions.length === 1 && groupOptions[0][0] !== "__none__")
-							? createElement("div", { key: "groups", style: styles.chips }, [
-								createElement("button", {
-									key: "", type: "button", className: "omkt-chip",
-									style: { ...styles.chip, ...(!marketGroup ? styles.chipActive : {}) },
-									onClick: () => { setMarketGroup(""); setMarketPage(0); },
-								}, `全部 (${marketItems.length})`),
-								...groupOptions.map(([name]) => {
-									const active = marketGroup === name;
-									return createElement("button", {
-										key: name, type: "button", className: "omkt-chip",
-										style: { ...styles.chip, ...(active ? styles.chipActive : {}) },
-										onClick: () => { setMarketGroup(active ? "" : name); setMarketPage(0); },
-									// No per-group counts (user request): the total lives on 全部 alone;
-								// group order still follows size, so the shape of the taxonomy shows.
-								}, name === "__none__" ? "未分类" : name);
-								}),
+							? createElement("div", { key: "group", style: styles.groupFilter }, [
+								createElement("span", { key: "l", style: styles.groupLabel }, "分类"),
+								createElement("select", {
+									key: "g", className: "omkt-select", style: styles.groupSelect, value: marketGroup,
+									title: "按功能分类筛选",
+									onChange: (e) => { setMarketGroup(e.target.value); setMarketPage(0); },
+								}, [
+									createElement("option", { key: "", value: "" },
+										`全部分类 (${marketItems.length})`),
+									// No per-group counts (user request): the total
+									// lives on 全部分类 alone, but the order still
+									// follows group size, so the shape of the
+									// taxonomy shows in the list.
+									...groupOptions.map(([name]) => createElement("option", {
+										key: name, value: name,
+									}, name === "__none__" ? "未分类" : name)),
+								]),
 							])
 							: null,
-						createElement("select", {
-							key: "src", style: styles.filterSelect, value: marketSource,
-							onChange: (e) => {
-								setMarketSource(e.target.value);
-								// A new listing may not hold the selected group;
-								// leaving it set would filter everything out.
-								setMarketGroup("");
-								loadMarket({ source: e.target.value });
-							},
-						}, MARKET_SOURCES.map(([value, label]) => createElement("option", { key: value, value }, label))),
-						createElement("select", {
-							key: "sort", style: styles.filterSelect, value: marketSort,
-							onChange: (e) => { setMarketSort(e.target.value); setMarketPage(0); },
-						}, SORT_OPTIONS.map(([value, label]) => createElement("option", { key: value, value }, label))),
-						createElement("button", {
-							key: "refresh", type: "button", className: "omkt-btn omkt-btn-outline",
-							style: styles.filterBtn, disabled: marketBusy,
-							onClick: () => loadMarket({ refresh: true }),
-						}, marketBusy ? "拉取中…" : "刷新"),
+						createElement("div", { key: "right", style: styles.filterRight }, [
+							createElement("select", {
+								key: "src", className: "omkt-select", style: styles.filterSelect, value: marketSource,
+								onChange: (e) => {
+									setMarketSource(e.target.value);
+									// A new listing may not hold the selected group;
+									// leaving it set would filter everything out.
+									setMarketGroup("");
+									loadMarket({ source: e.target.value });
+								},
+							}, MARKET_SOURCES.map(([value, label]) => createElement("option", { key: value, value }, label))),
+							createElement("select", {
+								key: "sort", className: "omkt-select", style: styles.filterSelect, value: marketSort,
+								onChange: (e) => { setMarketSort(e.target.value); setMarketPage(0); },
+							}, SORT_OPTIONS.map(([value, label]) => createElement("option", { key: value, value }, label))),
+							createElement("button", {
+								key: "refresh", type: "button", className: "omkt-btn omkt-btn-outline",
+								style: styles.filterBtn, disabled: marketBusy,
+								onClick: () => loadMarket({ refresh: true }),
+							}, marketBusy ? "拉取中…" : "刷新"),
+						]),
 					].filter(Boolean)),
 					// Row 3 — v4's meta line: the three numbers a reader checks
 					// before paging, with the freshness note pushed to the end.

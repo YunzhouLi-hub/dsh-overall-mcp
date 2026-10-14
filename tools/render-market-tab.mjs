@@ -241,13 +241,30 @@ assert.ok(metaText.includes('3 个可用 MCP'), `meta line names the total — g
 assert.ok(metaText.includes('第 1 / 1 页'), 'meta line names the page');
 assert.ok(metaText.includes('每页 20 条'), 'meta line names the page size');
 
-// The controls live inside the chip row's line, and the chips scroll there.
+// The taxonomy and the compact filters share one line, but they are two
+// groups: the taxonomy is a *dropdown* (a scrolling chip row hid half the
+// categories), and the source/sort/refresh controls are pushed to the far end
+// with `margin-left: auto`, so the gap between the two groups is the row's own
+// free space instead of a fixed 8px.
 const filters = marketOwn.filter((n) => n.props?.key === 'filters');
 assert.equal(filters.length, 1, 'filter row present');
-const chipRow = findByKey(walk(filters[0]), 'groups');
-assert.equal(chipRow.length, 1, 'chip row sits inside the filter line');
-assert.ok(walk(filters[0]).some((n) => n.type === 'select'), 'filter line carries the source/sort selects');
-assert.ok(walk(filters[0]).some((n) => n.type === 'button' && textOf(n) === '刷新'), 'filter line carries refresh');
+const filterRow = walk(filters[0]);
+const groupWrap = filterRow.filter((n) => n.props?.key === 'group');
+assert.equal(groupWrap.length, 1, 'taxonomy group sits inside the filter line');
+const groupSelect = walk(groupWrap[0]).find((n) => n.type === 'select');
+assert.ok(groupSelect, 'the taxonomy is a select, not a chip row');
+const groupOptions = walk(groupWrap[0]).filter((n) => n.type === 'option');
+assert.equal(groupOptions.length, 4, 'the dropdown lists 全部分类 plus one option per group');
+assert.equal(textOf(groupOptions[0]), '全部分类 (3)', 'the dropdown total lives on 全部分类 alone');
+assert.deepEqual(groupOptions.slice(1).map(textOf), ['开发工具', '搜索与知识', '未分类'],
+  'every functional group is reachable from the dropdown, biggest first');
+assert.equal(filterRow.filter((n) => n.type === 'button' && /chip|分类/.test(String(n.props?.className))).length,
+  0, 'no chip buttons remain in the filter line');
+const rightWrap = filterRow.filter((n) => n.props?.key === 'right');
+assert.equal(rightWrap.length, 1, 'the compact controls live in their own right-hand group');
+assert.equal(rightWrap[0].props.style.marginLeft, 'auto', 'and that group is pushed to the far end');
+assert.ok(walk(rightWrap[0]).some((n) => n.type === 'select'), 'filter line carries the source/sort selects');
+assert.ok(walk(rightWrap[0]).some((n) => n.type === 'button' && textOf(n) === '刷新'), 'filter line carries refresh');
 
 const sourceLine = marketOwn.filter((n) => n.props?.key === 'srcline');
 assert.equal(sourceLine.length, 1, 'per-source line present');
