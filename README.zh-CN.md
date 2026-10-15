@@ -41,7 +41,7 @@ dsh plugin --profile web add ./dsh-overall-mcp
   6. **失败安装不计数**：「本市场 N 次」现在只在**挂载成功之后** +1。进了注册表但没挂起来的条目仍然留着（用户能修好再重试），但返回体会带 `counted: false` 和一句说明，而不是像成功一样回答。
   7. **来源总开关按名字收敛**（`syncFiber`）：关掉一个来源时，同名条目可能还属于别的来源，那个来源没关就不该把它的 fiber 拿走。旧循环逐行断开再逐行重连，会把不属于这个来源的同名行的工具一起带走。
   8. **工具描述与参数对齐代码**（`overall_mcp_scan` 不再声称「同名不同契约会改名导入，绝不覆盖」——改名导入早在 `820641c` 就删了，现在是同名原地更新、手工条目不动）；`overall_mcp_update` 补上 `slot`/`from`，而且**同名不唯一时报错而不是取第一条**（此前只有面板能指明是哪一行，agent 只能猜，更新错行的结果还回报「无需更新」）；`overall_mcp_remove` 的「不带 `slot` 就删第一条」改成同一套 409 语义。
-  9. **宿主契约有了单测**：`test/index.test.mjs` 用假宿主跑 `apply(ctx)`（mount 必定失败，正好走容错路径），覆盖路由/工具面、同名行的拒绝与 `slot` 命中、手工条目 409 与 `overwrite`、失败安装不计数、损坏注册表被隔离并上报、以及工具参数与文案。两个宿主 peer 依赖（`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-mcp-client`）本仓库不安装，由 `test/hooks.mjs` 映射到 `test/stubs/`；每个用例一个临时 `DSH_HOME`，绝不碰真实 `~/.dsh`。`package.json` 的 `test` 脚本是显式文件列表，这个文件也已列进去（否则新增测试会被静默跳过）。
+  9. **宿主契约有了单测**：`test/index.test.mjs` 用假宿主跑 `apply(ctx)`（mount 必定失败，正好走容错路径），覆盖路由/工具面、同名行的拒绝与 `slot` 命中、手工条目 409 与 `overwrite`、失败安装不计数、损坏注册表被隔离并上报、安装失败时的诊断（问到 / 问不到 / 没有路由 / 没有模型四种）、以及工具参数与文案。三个宿主 peer 依赖（`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-mcp-client`、`@deepseek-ai/dsh-llm`）本仓库不安装，由 `test/hooks.mjs` 映射到 `test/stubs/`；每个用例一个临时 `DSH_HOME`，绝不碰真实 `~/.dsh`。`package.json` 的 `test` 脚本是显式文件列表，这个文件也已列进去（否则新增测试会被静默跳过）。
   10. **面板能看见注册表坏掉**：`registryError` 随 `/servers` 返回，页签上方显示「⚠ 注册表文件无法解析（…），本次以空注册表启动；原文件已备份为 registry.json.corrupt-…」——空的列表不再等于「你从没加过服务器」。
 - **用途行（第十一轮）**：用户要求「MCP下载好之后后面的应该是解释这个MCP的作用」——一行只说 `stdio · 已连接 · 工具前缀 mcp__x__` 等于没说它是干什么的。宿主现在按**证据强度**取一句人话（`lib/about.js`，上限 150 字符、渲染两行）：
   1. **服务器自己的说明**（`source: 'server'`）：MCP `initialize` 结果里的 `instructions`。dsh-mcp-client 把它**原样**发布成 system prompt 的 `mcp:<serverName>` 节（`### MCP server: <name>` 前缀由它加，宿主会剥掉），所以宿主只要 `ctx.inject(['systemPrompt'])` + `assemble({})` 把这一段读回来，就是服务器自我介绍的原话——不是我们从名字猜的；
@@ -96,6 +96,19 @@ dsh plugin --profile web add ./dsh-overall-mcp
 - **详情页**：点卡片主体或「详情」按钮弹出完整面板（按 v4 原型：680px、圆角 16、**一整张白纸**——页头不再是灰底带、底部只有一条分隔线），含：页头（头像 + 标题 + 贴着标题的徽标，关闭按钮在右上角）、完整描述（卡片只显示 3 行）、全部标签、**GitHub 仓库区块**（浅灰底卡片、owner/repo 锚点用品牌蓝、★ Star · Fork · Issue（含 PR）· Watch（订阅）竖排大数字带小标签、语言/许可证/最近推送/创建于事实行、归档警示；缺失数字保持缺失——没有任何目录发布 GitHub 数据，缺数字不等于 0，也不等于排最后）、逐项标注的**无底色事实表**（来源/作者/版本/传输/Star/使用量口径/更新时间（优先 GitHub pushed_at）/安装方式）、**将执行的确切命令**（stdio 为完整命令行，http 为端点 URL；标题右侧有**复制**按钮，成功显示「已复制」、两条复制路径都失败时显示「复制失败，请手动选中」而不是谎报成功）、按 URL 去重的链接组（官网 / GitHub 仓库 / **GitHub 镜像** / MCP 端点 / Smithery 页面）、底部「安装 + ♡ 收藏」。Smithery 的 `repository` 指向它自己的列表页而非上游项目，因此额外提供其目录页链接（实测 `smithery.ai/server/<name>` 308 到 `/servers/<name>`，直接用后者）
 - **GitHub 镜像链接**：GitHub 在本网络环境下时通时断（实测连续数小时 TCP 超时后恢复 200）。实测（2026-10-12）`gh-proxy.com` 现已代理 github.com 仓库页面（200/640ms）——与 dshmarket 2026-09 实测的 403 相反，其注释明确要求"重新测量而非推断"。因此有仓库的条目同时提供直连与镜像两个链接，由用户择一
 - **废弃标记**：上游标记为 deprecated 的条目不隐藏、仍可安装（有人可能需要旧版），但降到最后、显示橙色「已废弃」徽标、按钮改为「仍要安装」，并附上上游自己的 `statusMessage` 说明。目前仅官方 Registry（`_meta…official.status`）与 Smithery（`inactive`）发布该信号；两个 Awesome 清单没有生命周期字段，因此这些条目的 `status` 为**缺省**而非 `active`——界面不会把"没人扫过"显示成"正常"
+
+### 安装失败时的自动诊断（可选，静默）
+
+「挂载没有成功」是用户真正会撞上的那种失败：`spawn npx ENOENT`、`MCP error -32000: Connection closed`。这一行本身几乎不可行动——命令不存在、包名写错、版本被撤、代理挡住、远端握手失败，宿主报的常常是同一句话，而用户手上只有一个刚写入注册表、谁也没连上的条目。现在宿主把**这次安装的条目事实 + 原始错误**交给用户自己的模型解释，然后连同原始错误一起显示：
+
+- **静默**：直接调 `ctx.llm.stream`（`temperature: 0`，二十秒超时），不走会话、不在任何对话里留消息、不落盘。先例是 DSH 自带的 `dsh-experimental-auto-review`，它也用这条路而不是把消息塞进用户的对话
+- **不泄漏**：送给模型的是名称 / 来源 / 传输 / 命令 / 参数（最多 8 条，其余只报数量）/ 地址 / 仓库 / 主页 / 版本 / 分类 + 原始错误。条目的 `env` 与 `headers` **一个字都不发**——它们装的正是凭据。命令行与地址先过 `redactSecrets` / `redactUrl`：`--api-key=…`、`--token …`、`?sig=…` 这类带标签的凭据，以及 `sk-`、`ghp_`、`xoxb-`、`AKIA`、JWT 形状的串，都替换成 `<redacted>`。这是**尽力而为**的遮蔽而不是保证：真正的防线是压根不发 `env`/`headers`，不认识的裸口令只能靠这一层
+- **指令是硬约束**：系统提示要求最多三行（原因 / 下一步 / 只有错误不足以判断时才写的第三行），并明令不许编造 URL、参数、版本号或配置键，不许声称自己运行过命令，不许建议关沙箱、以管理员运行或跳过安全检查，不许建议把口令写进别处
+- **任何一种「没有解释」都说明原因**，不装作什么都没发生：本机没有模型服务 → `diagnosisSkipped: "no-llm"`；默认模型的 provider/model 没配全 → `"no-route"`（这两种情况**不会**发起请求，面板各显示一行说明）；调用失败/被取消/没有输出文本 → `diagnosisError: "<原因>"`。能问到时回复里是 `diagnosis: { text, route, cached? }`（`route` 是 `provider/model`，面板在其下用小字注明「由 … 诊断」）
+- **失败不再被说成成功**：这条路径的响应是 `200` + `connect.ok === false`，而面板此前无论 `connect` 是什么都答「已安装并连接」。现在它渲染一块 `white-space: pre-wrap` 的失败块：宿主的原始错误（第一行，唯一确定真实的一句）→ 模型的解释（能问到时）→ 「没有计入本市场安装数，修好后可用「更新」或重新启用来重试」。三行各有其位，折叠换行会把三件事实挤成一句
+- **同一处失败只问一次**：`(条目名, 原始错误)` 相同的诊断在内存里复用十分钟（上限 32 条，最快淘汰最旧），免得连点几次重试反复烧 token；复用到的回复带 `cached: true`
+- 没配模型的宿主**完全不受影响**：`llm` 服务是通过可选注入拿到的（写进 `inject` 会让这个插件在没有模型的宿主上整个加载失败），拿不到就只在失败块里多一行「这次没有自动诊断」
+- 代码：`lib/install-diagnosis.js`（纯文本部分——系统提示、事实抽取、遮蔽、读回答；单测 `test/install-diagnosis.test.mjs`）、`index.js` 的 `diagnoseFailure`（服务与路由接线，连同契约测试 `test/index.test.mjs` 的四条用例：问到、问不到、没有路由、没有模型）、`client/client.js` 的 `installFailureText` 与失败块（探针 `tools/render-market-tab.mjs` 的 `failed install` 段）
 
 ### 投稿到社区清单（GitHub 上行）
 
@@ -261,6 +274,8 @@ Invalid schema for function 'mcp__rea-om__analyze_javascript_application':
 
 `POST /api/overall-mcp/install` 的 body 是 `{ item, overwrite? }`；`/update`、`/remove`、`/set-enabled` 是 `{ name, slot?, from? }`（同名多条目时不带 `slot`/`from` 返回 409）；`POST /api/overall-mcp/sources` 是 `{ url, label? }`（`label` 省略时由地址推断）；`POST /api/overall-mcp/sources/remove` 是 `{ id }`。
 
+`POST /api/overall-mcp/install` 的回复把两层结果分开：`connect` 是挂载结果（`{ok:false, error}` 时条目已写入注册表但**没有连上**，此时 `counted:false` 且 `note` 说明没有计入本市场安装数），后面可能跟着 `diagnosis: {text, route, cached?}`（模型给的解释）、`diagnosisSkipped: "no-llm"|"no-route"`（解释不了的原因）或 `diagnosisError`（调用失败的原因）——三者的取舍见「MCP 市场」一节的「安装失败时的自动诊断」。
+
 `GET|POST /api/overall-mcp/sources` 与 `POST /api/overall-mcp/sources/remove` 是「自定义目录源」的读写面（`lib/custom-sources.js`，单测 `test/custom-sources.test.mjs`）：GET 回 `{sources:[{id,label,url,submission}], max:8, error}`（`error` 是 `sources.json` 读不出来的原因，此时 `sources` 为空**但仍然可用内置五源**），POST 添加一个。`submission` 由宿主从地址推出（`lib/submission.js` 的 `githubRepoOfSourceUrl`）：住在 GitHub 仓库里的清单得到 `{repo, url}`（`url` 就是预填好的 `issues/new` 地址），别处托管的清单得到 `null`、面板于是不画那个链接。校验在 `normalizeSourceUrl`（只放行 `https:`、必须带主机、拒掉带用户名口令的地址、长度上限 600）与 `validateSourceInput`（地址重复 → 409，含与自己的对比；标签上限 40 字符），落盘前还兜一层 `addSourceTo` 的上限检查（第 9 个 → 409 `too-many-sources`）。id 由 `sourceIdFor` 从 `host + pathname` 生成 `custom:<slug>`（≤48 字符，小写、非字母数字折成 `-`、去重尾），所以「同一个地址」永远是同一个 id；标签由 `defaultLabelFor` 推出 `owner/repo`（GitHub raw、jsDelivr 的 `gh/owner/repo@ref`）或主机名。`normalizeSourcesDocument` 在**读取时**重跑地址校验：手改文件塞进来的 `http://` / 带口令 / 超长的行会被丢掉而不是带着进市场。删除成功会调 `catalogCache.forgetSourceId(id)`，否则被删源的行还能从来源层缓存里活 60 秒。
 
 `/catalog` 的缓存分两层（都在 `lib/catalog-cache.js` 里，单测 `test/catalog-cache.test.mjs`）：
@@ -333,7 +348,7 @@ key 就是市场卡片的 React key，因为官方 Registry 的 id 随版本变�
 ```sh
 node --test test/*.mjs                                     # 纯逻辑测试（lib/ 零依赖）
 node --test test/index.test.mjs                            # 宿主契约测试：真跑 apply(ctx)，假宿主 + 临时 DSH_HOME（见下）
-#   两个宿主 peer 依赖本仓库不安装，由 test/hooks.mjs 映射到 test/stubs/；npm test 的脚本是显式文件列表，新增测试要加进去
+#   三个宿主 peer 依赖本仓库不安装，由 test/hooks.mjs 映射到 test/stubs/；npm test 的脚本是显式文件列表，新增测试要加进去
 node tools/client-smoke.mjs                               # 客户端注册契约 smoke（模拟前端 module loader；并断言客户端版本号 == package.json）
 node tools/render-detail.mjs                              # 渲染详情页：事实表有值、链接齐全、命令可见、复制按钮真的把命令交给剪贴板（打桩 navigator.clipboard 后驱动真实按钮）
 node tools/render-card.mjs                                # 渲染卡片：标题是链接、正文不是 button、无嵌套交互元素、GitHub 标记/版本在位、命令行只在详情面板
@@ -365,7 +380,11 @@ node tools/fixture-bad-schema-mcp.mjs                     # 故意带 `^[^\0]*$`
 | 文件 | 职责 |
 |---|---|
 | `lib/scanner.js` | 宿主机 MCP 配置扫描与规范化（纯函数） |
-| `lib/catalog.js` | 5 个远程开放目录的拉取、归一化、跨目录合并、排序与 GitHub 补充（纯 fetch） |
+| `lib/catalog.js` | 5 个远程开放目录的拉取、归一化、跨目录合并、排序与 GitHub 补充；自定义目录源的解析（`mapCustomEntries`）与 `runSource` 的分支也在这里（纯 fetch） |
+| `lib/catalog-cache.js` | 两级缓存：URL 层的 ETag/304 复用（LRU 64 个 URL / 8MB）与来源层的 60 秒 TTL；`forgetSourceId` 用于删源后清账 |
+| `lib/custom-sources.js` | 自定义目录源的文档形状：地址校验（只收 https、拒凭据）、id 派生、标签推断、增删与读写容错 |
+| `lib/submission.js` | 投稿上行：从 issue 正文解析一条 listings 条目、校验规则、去重键，以及面板用的预填 `issues/new` 地址（`buildIssueUrl`） |
+| `lib/install-diagnosis.js` | 安装失败时的诊断文本：系统提示、条目事实抽取（不发 `env`/`headers`）、凭据遮蔽、读取模型回答（纯函数，便于单测） |
 | `lib/about.js` | 「这个 MCP 是干什么的」：从服务器 `instructions` / 已注册工具 / 启动命令中取一句人话，含 markdown 剥离、截断与证据标签；以及判断何时需要重读 system prompt 的 `needsInstructionsRead()` |
 | `lib/http-status.js` | 把宿主内部的错误映射成 HTTP 状态码（`unknown server|source`→404、缺参数/不可安装传输→400、上游版本查询失败→502、其余 500），供 `index.js` 的 `guard` 使用 |
 | `index.js` | cordis 宿主插件（`inject:['tools']`）：注册表、每服务器 `ctx.plugin(mcpClient)` 桥接、`defineTool` 管理工具、HTTP 路由 |

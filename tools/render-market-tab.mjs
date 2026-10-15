@@ -118,6 +118,21 @@ const CUSTOM_SOURCE = {
 // would put the row back and hide the empty state the page really shows.
 let liveSources = [CUSTOM_SOURCE];
 
+// What the host answers when the entry was written and nothing mounted: its own
+// error, the explanation the user's model produced, and the note about the
+// install counter. All three are rendered together (the panel used to answer
+// 「已安装并连接」 for exactly this reply).
+const INSTALL_FAILURE = {
+  installed: '3dtexel-mcp',
+  connect: { ok: false, error: 'spawn npx ENOENT' },
+  counted: false,
+  note: '3dtexel-mcp 已写入注册表，但挂载没有成功，因此没有计入本市场安装数；修好后可用「更新」或重新启用来重试。',
+  diagnosis: {
+    text: 'npx 不在 PATH 里。\n先运行 where npx（Windows）确认 Node 已安装并在 PATH 中。',
+    route: 'deepseek/deepseek-chat',
+  },
+};
+
 let captured = null;
 const calls = [];
 const styleElements = [];
@@ -158,6 +173,12 @@ globalThis.fetch = async (url, init) => {
     }
     calls.push('GET /sources');
     return ok({ sources: liveSources, max: 8, error: '' });
+  }
+  // The install that reached the registry and did not mount — the reply the
+  // panel must not summarise as success.
+  if (path.startsWith('/install')) {
+    calls.push('POST /install');
+    return ok(INSTALL_FAILURE);
   }
   if (path.startsWith('/servers')) return ok({ servers: [{ name: 'codegraph', source: 'claude-code', enabled: true }] });
   if (path.startsWith('/repo-stats')) return ok({ stats: {} });
@@ -460,6 +481,39 @@ assert.ok(search, 'market search input present');
 // provenance: 「搜索 MCP 来源」 reads as a filter over sources.
 assert.equal(search.props.placeholder, '搜索 MCP', 'market search placeholder must be 搜索 MCP');
 assert.ok(String(search.props.title ?? '').length > 0, 'the long hint survives as a title');
+
+// --- 3e. an install that did not mount says so, and adds what it can -------
+// The reply carries `connect.ok === false` plus whatever the host could add.
+// Rendering it as a success was the panel's own lie about its own work; the
+// interesting part now is that all three layers survive to the screen.
+{
+  const tree = walk(await render());
+  const install = buttonByText(tree, '安装');
+  assert.ok(install, 'the installable card offers 安装');
+  const beforeInstall = calls.length;
+  // The CTA stops the click from reaching the card body (which opens 详情), so
+  // the handler expects the event it always gets in a browser.
+  install.props.onClick({ stopPropagation() {} });
+  // Two awaits before the message appears (the host's answer, then the refresh
+  // of both the registry and the listing).
+  await settle();
+  await settle();
+  const after = walk(await render());
+  assert.ok(calls.slice(beforeInstall).join(' ').includes('POST /install'), 'the click posts an install');
+
+  const block = findByKey(after, 'installfail');
+  assert.equal(block.length, 1, 'the failed install gets its own block, not a success line');
+  assert.equal(block[0].props.style?.whiteSpace, 'pre-wrap', 'three facts on three lines need pre-wrap');
+  const failureText = textOf(block[0]);
+  assert.ok(failureText.includes('3dtexel-mcp 已写入注册表，但挂载没有成功：spawn npx ENOENT'),
+    `the host's own error leads and is quoted verbatim (got: ${failureText})`);
+  assert.ok(failureText.includes('npx 不在 PATH 里。'), 'the model explanation is shown');
+  assert.ok(failureText.includes('先运行 where npx'), 'and its next step too');
+  assert.ok(failureText.includes('（由 deepseek/deepseek-chat 诊断）'), 'the explanation names the route that made it');
+  assert.ok(failureText.includes('没有计入本市场安装数'), 'and the note about the install counter survives');
+  assert.equal(textOf(after).includes('已安装并连接'), false, 'a failed mount is never reported as a success');
+  console.log('failed install: raw error + model explanation + retry note ✓');
+}
 
 // --- 4. the masonry wrapper holds one rendered card per entry --------------
 const grids = findByKey(loadedNodes, 'grid');

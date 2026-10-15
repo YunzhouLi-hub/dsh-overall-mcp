@@ -13,6 +13,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as mcpClient from '@deepseek-ai/dsh-mcp-client';
+import { BlockAssembler } from '@deepseek-ai/dsh-llm';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { describeAbout, toolNamesFor, aboutSourceLabel, needsInstructionsRead } from './lib/about.js';
 import { scanHost, mergeIntoRegistry, scannedSources, findOrphans, setMountHolder, clearMountHolder } from './lib/scanner.js';
@@ -26,6 +27,9 @@ import {
   readInstalls, writeInstalls, recordInstallIn, installKeyOf,
   localInstallsOf, localLastInstallOf,
 } from './lib/installs.js';
+import {
+  DIAGNOSIS_SYSTEM, buildDiagnosisPrompt, capText, diagnosisFactsOf, diagnosisTextOf,
+} from './lib/install-diagnosis.js';
 import { collectRepoMedia } from './lib/media.js';
 import { httpStatusFor } from './lib/http-status.js';
 import { sanitizeToolDefinition } from './lib/schema-guard.js';
@@ -39,6 +43,12 @@ const REGISTRY_VERSION = 1;
 const SERVER_NAME_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
 /** Bounded readiness wait for one mcp-client mount (see connect()). */
 const CONNECT_WAIT_MS = 8000;
+/** How long a failed-mount diagnosis may take before the install reply wins. */
+const DIAGNOSIS_TIMEOUT_MS = 20000;
+/** Diagnoses kept in memory: retrying the same broken entry must not re-ask. */
+const DIAGNOSIS_CACHE_MAX = 32;
+/** How long one (entry, error) diagnosis is reused. */
+const DIAGNOSIS_TTL_MS = 10 * 60 * 1000;
 
 function dataDir() {
   const home = process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
@@ -621,6 +631,82 @@ export async function apply(ctx) {
     };
   }
 
+  // ---- install-failure diagnosis (optional) ---------------------------------
+  // A failed mount leaves one raw line — `spawn npx ENOENT`, `MCP error -32000:
+  // Connection closed` — that says nothing about what to do next. When the host
+  // has both a model route and the `llm` service, that line is sent to the
+  // user's own model, silently: no session, no message in any conversation, and
+  // nothing written to disk. Without either piece the install reply is exactly
+  // what it was before this existed.
+  //
+  // `llm` is captured through optional injection rather than declared in the
+  // plugin's `inject`, because a host with no model configured must still load
+  // this plugin — declaring it would make the whole market disappear instead of
+  // one extra paragraph.
+  let llmService = null;
+  ctx.inject(['llm'], (llmCtx) => {
+    llmService = llmCtx?.llm ?? null;
+    return () => { llmService = null; };
+  });
+
+  /** `${name}|${error}` -> { at, value }. Retrying a broken row must not re-ask. */
+  const diagnosisCache = new Map();
+
+  /** The user's configured default route, or null when it is incomplete. */
+  function diagnosisRoute() {
+    const selection = typeof ctx.get === 'function' ? ctx.get('agentDefaultModel')?.currentSelection?.() : null;
+    const provider = selection?.provider;
+    const model = selection?.model;
+    if (typeof provider !== 'string' || typeof model !== 'string' || provider === '' || model === '') return null;
+    return { provider, model };
+  }
+
+  /**
+   * Ask the user's own model to explain one failed mount.
+   *
+   * @param entry - the registry entry that was written.
+   * @param item - the catalogue item it came from (for repository/version facts).
+   * @param errorText - exactly what the mount reported.
+   * @returns `{ ok: true, text, route, cached? }`, or `{ ok: false, reason }`
+   *   when this host cannot ask (`no-llm` / `no-route`) — the caller reports the
+   *   reason, because "no explanation" and "explaining is not configured here"
+   *   are different facts for the user.
+   * @throws when the model was reachable but the call or its output failed.
+   */
+  async function diagnoseFailure(entry, item, errorText) {
+    if (!llmService) return { ok: false, reason: 'no-llm' };
+    const route = diagnosisRoute();
+    if (!route) return { ok: false, reason: 'no-route' };
+    const key = `${entry.name}|${errorText}`;
+    const now = Date.now();
+    const hit = diagnosisCache.get(key);
+    if (hit && now - hit.at < DIAGNOSIS_TTL_MS) return { ok: true, ...hit.value, cached: true };
+
+    const facts = diagnosisFactsOf({ item, entry, error: errorText });
+    const assembler = new BlockAssembler();
+    const options = {
+      provider: route.provider,
+      model: route.model,
+      system: DIAGNOSIS_SYSTEM,
+      messages: [{ role: 'user', content: [{ type: 'text', text: buildDiagnosisPrompt(facts) }] }],
+      temperature: 0,
+      signal: AbortSignal.timeout(DIAGNOSIS_TIMEOUT_MS),
+    };
+    for await (const chunk of llmService.stream(options)) {
+      assembler.push(chunk);
+      if (chunk?.type === 'finish' && (chunk.reason?.kind === 'error' || chunk.reason?.kind === 'aborted')) {
+        const failure = chunk.reason.failure ?? {};
+        throw new Error(`诊断模型以 ${chunk.reason.kind} 结束：${failure.message ?? failure.code ?? '未知原因'}`);
+      }
+    }
+    const text = diagnosisTextOf(assembler.blocks());
+    if (text === '') throw new Error('诊断模型没有输出文本');
+    const value = { text, route: `${route.provider}/${route.model}` };
+    diagnosisCache.set(key, { at: now, value });
+    evictOldest(diagnosisCache, DIAGNOSIS_CACHE_MAX);
+    return { ok: true, ...value };
+  }
+
   async function doInstallImpl(item, { overwrite = false } = {}) {
     const entry = catalogItemToEntry(item);
     if (!entry) throw new Error('item has no installable transport (stdio command or http url)');
@@ -650,6 +736,23 @@ export async function apply(ctx) {
     } else {
       log?.warn?.(`overall-mcp: ${entry.name} was added to the registry but did not mount, so it is not counted as an install`);
     }
+    // The failed-mount path is the one users actually hit, and the raw error is
+    // rarely actionable on its own. The diagnosis is additive: the host's own
+    // error stays the source of truth, and a model that cannot be reached, is
+    // not configured, or answers with nothing adds nothing but a reason.
+    let diagnosis = null;
+    let diagnosisSkipped = null;
+    let diagnosisError = null;
+    if (conn.ok === false) {
+      try {
+        const outcome = await diagnoseFailure(entry, item, String(conn.error ?? 'mount failed'));
+        if (outcome.ok) diagnosis = { text: outcome.text, route: outcome.route, ...(outcome.cached ? { cached: true } : {}) };
+        else diagnosisSkipped = outcome.reason;
+      } catch (err) {
+        diagnosisError = capText(String(err?.message ?? err), 200);
+        log?.warn?.(`overall-mcp: could not explain the failed install of ${entry.name}: ${diagnosisError}`);
+      }
+    }
     return {
       installed: entry.name,
       localInstalls: record?.count ?? localInstallsOf(installs, item, entry.name),
@@ -659,6 +762,9 @@ export async function apply(ctx) {
         counted: false,
         note: `${entry.name} 已写入注册表，但挂载没有成功，因此没有计入本市场安装数；修好后可用「更新」或重新启用来重试。`,
       } : {}),
+      ...(diagnosis ? { diagnosis } : {}),
+      ...(diagnosisSkipped ? { diagnosisSkipped } : {}),
+      ...(diagnosisError ? { diagnosisError } : {}),
     };
   }
 

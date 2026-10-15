@@ -32,7 +32,27 @@ const FIXTURE = {
   ],
 };
 
-async function withHost(registry, run) {
+/**
+ * Drive the plugin through a fake host.
+ *
+ * @param registry - registry document, JSON text, or undefined for a first run.
+ * @param run - receives the fake host's handles.
+ * @param options - `{ llm }`: when given, the fake host provides an `llm`
+ *   service (`stream`) and an `agentDefaultModel` route (`selection`, defaulting
+ *   to `fake-provider/fake-model`; pass `null` for a host with no route). Without
+ *   it the plugin must behave exactly as it did before the diagnosis existed.
+ */
+/**
+ * A catalogue item whose mount always fails in this file: the fake host's
+ * `ctx.plugin` throws `no mcp mount in this test`. Shared by the failure, the
+ * explanation, and the "no model configured" cases so they cannot drift apart.
+ */
+const GHOST_ITEM = {
+  id: 'catalog:ghost', source: 'official', title: 'ghost-mcp',
+  install: { transport: 'stdio', command: 'npx', args: ['-y', 'ghost-mcp'] },
+};
+
+async function withHost(registry, run, { llm } = {}) {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), 'overall-mcp-contract-'));
   const dir = path.join(home, 'overall-mcp');
   await fs.mkdir(dir, { recursive: true });
@@ -59,10 +79,19 @@ async function withHost(registry, run) {
       inject(keys, callback) {
         if (keys.includes('connection')) {
           callback({ connection: { fetch: { register(config) { routes.set(config.path, config); } } } });
+        } else if (keys.includes('llm') && llm) {
+          callback({ llm: { stream: llm.stream } });
         } else {
           callback({});
         }
         return () => {};
+      },
+      // The plugin asks this for the default model route; a host without one
+      // answers undefined, which is the "explain it yourself" path.
+      get(name) {
+        if (name !== 'agentDefaultModel' || !llm) return undefined;
+        const selection = 'selection' in llm ? llm.selection : { provider: 'fake-provider', model: 'fake-model' };
+        return { currentSelection: () => selection };
       },
     };
     await apply(ctx);
@@ -241,12 +270,8 @@ test('a market install refuses to replace a hand-added row unless overwrite is a
 });
 
 test('an install whose mount fails is kept but not counted', async () => {
-  const item = {
-    id: 'catalog:ghost', source: 'official', title: 'ghost-mcp',
-    install: { transport: 'stdio', command: 'npx', args: ['-y', 'ghost-mcp'] },
-  };
   await withHost(FIXTURE, async ({ call, readRegistry, readInstalls }) => {
-    const result = await call('/api/overall-mcp/install', { body: { item } });
+    const result = await call('/api/overall-mcp/install', { body: { item: GHOST_ITEM } });
     assert.equal(result.status, 200);
     assert.equal(result.body.installed, 'ghost-mcp');
     assert.equal(result.body.connect.ok, false, 'the mount is the failure under test');
@@ -258,7 +283,88 @@ test('an install whose mount fails is kept but not counted', async () => {
     assert.match(result.body.note, /没有计入本市场安装数/);
     assert.equal(result.body.localInstalls, 0);
     assert.deepEqual(Object.keys((await readInstalls()).entries), []);
+    // No model configured: the reply is exactly what it was before the
+    // diagnosis existed, apart from the one field that says why nothing was
+    // attempted — silence would read as "no explanation exists".
+    assert.equal('diagnosis' in result.body, false);
+    assert.equal('diagnosisError' in result.body, false);
+    assert.equal(result.body.diagnosisSkipped, 'no-llm');
   });
+});
+
+/** The chunk sequence a model stream yields for a plain text answer. */
+function textStream(text) {
+  return [
+    { type: 'block-start', index: 0, block: { type: 'text' } },
+    { type: 'text-delta', index: 0, text },
+    { type: 'block-end', index: 0 },
+    { type: 'finish', reason: { kind: 'stop' } },
+  ];
+}
+
+test('a failed mount is explained by the configured model, silently', async () => {
+  const seen = [];
+  const answer = '这个包名在 npm 上不存在。\n先运行 npm view ghost-mcp version 确认名称。';
+  const stream = (options) => {
+    seen.push(options);
+    return (async function* chunks() { for (const chunk of textStream(answer)) yield chunk; })();
+  };
+  await withHost(FIXTURE, async ({ call }) => {
+    const result = await call('/api/overall-mcp/install', { body: { item: GHOST_ITEM } });
+    assert.equal(result.body.connect.ok, false);
+    assert.deepEqual(result.body.diagnosis, { text: answer, route: 'fake-provider/fake-model' });
+    assert.equal('diagnosisError' in result.body, false);
+
+    // One call, to the user's own default route, with the facts it needs and no
+    // session of any kind involved.
+    assert.equal(seen.length, 1);
+    const [options] = seen;
+    assert.equal(options.provider, 'fake-provider');
+    assert.equal(options.model, 'fake-model');
+    assert.equal(options.temperature, 0);
+    assert.ok(options.signal, 'the call is bounded by a signal');
+    const prompt = options.messages[0].content[0].text;
+    assert.ok(prompt.includes('- 名称：ghost-mcp'));
+    assert.ok(prompt.includes('- 命令：npx'));
+    assert.ok(prompt.includes('- 参数 2：ghost-mcp'));
+    assert.ok(prompt.includes('no mcp mount in this test'), 'the raw error is quoted');
+    assert.ok(options.system.includes('禁止'), 'the instruction travels with the request');
+  }, { llm: { stream } });
+});
+
+test('a model that cannot answer leaves the raw error as the whole story', async () => {
+  const seen = [];
+  const stream = (options) => {
+    seen.push(options);
+    return (async function* chunks() {
+      yield { type: 'finish', reason: { kind: 'error', failure: { code: 'rate_limited', message: 'HTTP 429' } } };
+    })();
+  };
+  await withHost(FIXTURE, async ({ call }) => {
+    const result = await call('/api/overall-mcp/install', { body: { item: GHOST_ITEM } });
+    assert.equal(result.status, 200, 'a failed explanation is not a failed install');
+    assert.equal(result.body.connect.ok, false);
+    assert.equal('diagnosis' in result.body, false);
+    assert.match(result.body.diagnosisError, /诊断模型以 error 结束/);
+    assert.match(result.body.diagnosisError, /HTTP 429/);
+    assert.equal(seen.length, 1);
+  }, { llm: { stream } });
+});
+
+test('a host with a model but no default route is never asked to explain', async () => {
+  let calls = 0;
+  const stream = () => {
+    calls += 1;
+    return (async function* chunks() { for (const chunk of textStream('不该被调用')) yield chunk; })();
+  };
+  await withHost(FIXTURE, async ({ call }) => {
+    const result = await call('/api/overall-mcp/install', { body: { item: GHOST_ITEM } });
+    assert.equal(result.body.connect.ok, false);
+    assert.equal('diagnosis' in result.body, false);
+    assert.equal('diagnosisError' in result.body, false);
+    assert.equal(result.body.diagnosisSkipped, 'no-route');
+    assert.equal(calls, 0, 'no route means no request');
+  }, { llm: { selection: null, stream } });
 });
 
 test('a damaged registry file is quarantined and reported, never silently replaced', async () => {

@@ -621,6 +621,15 @@ window.__ModuleLoader__.load({
 				padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.line}`,
 				background: T.soft2, color: "#f53f3f", fontSize: 12.5, lineHeight: 1.7,
 			},
+			// An install that reached the registry but did not mount. Needs
+			// `pre-wrap`: this block is the host's raw error, the model's
+			// explanation, and the next step on separate lines, and collapsed
+			// newlines would turn three facts into one unreadable sentence.
+			installFailure: {
+				padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.line}`,
+				background: T.soft2, color: T.text2, fontSize: 12.5, lineHeight: 1.7,
+				whiteSpace: "pre-wrap",
+			},
 			groupBody: { display: "grid", gap: 1, padding: "6px 8px 10px" },
 			row: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "7px 10px", borderRadius: 8 },
 			// The row's left half: the name, then the sentence explaining what
@@ -1805,6 +1814,36 @@ window.__ModuleLoader__.load({
 		}
 
 		/**
+		 * What to show after an install whose mount failed.
+		 *
+		 * The host's own error comes first: it is the only text here that is
+		 * certainly true, and it is what the user can search for. Everything below
+		 * it is additive and labelled as such — an explanation from the user's own
+		 * model when the host could ask one, the reason no explanation was
+		 * attempted when it could not, or the failure of that attempt. None of
+		 * those three may be silently skipped: a blank space reads as "there is no
+		 * explanation", which is exactly the state this exists to end.
+		 */
+		function installFailureText(result, item) {
+			const name = result?.installed || item?.title || "这个条目";
+			const lines = [`${name} 已写入注册表，但挂载没有成功：${result?.connect?.error || "宿主没有给出原因"}`];
+			if (result?.diagnosis?.text) {
+				lines.push("", result.diagnosis.text);
+				const route = result.diagnosis.route ? `由 ${result.diagnosis.route}` : "";
+				const cached = result.diagnosis.cached ? "，缓存结果" : "";
+				if (route) lines.push(`（${route} 诊断${cached}）`);
+			} else if (result?.diagnosisError) {
+				lines.push("", `自动诊断没有完成：${result.diagnosisError}`);
+			} else if (result?.diagnosisSkipped === "no-llm") {
+				lines.push("", "这次没有自动诊断（本机没有可用的模型服务）。");
+			} else if (result?.diagnosisSkipped === "no-route") {
+				lines.push("", "这次没有自动诊断（默认模型的 provider/model 没有配全）。");
+			}
+			if (result?.note) lines.push("", result.note);
+			return lines.join("\n");
+		}
+
+		/**
 		 * Icon with a coloured initial fallback when there is no avatar URL.
 		 *
 		 * The fallback hue is derived from the title, so the same entry keeps
@@ -2230,6 +2269,11 @@ window.__ModuleLoader__.load({
 			const [busy, setBusy] = useState(false);
 			const [error, setError] = useState("");
 			const [message, setMessage] = useState("");
+			// A mount failure is its own block, not a one-line error: it carries
+			// the host's raw reason, the model's explanation (when the host could
+			// ask one), and what to do next — text that needs to survive the next
+			// render without being overwritten by the next success message.
+			const [installFailure, setInstallFailure] = useState("");
 			const [sourceFilter, setSourceFilter] = useState("");
 			const [stateFilter, setStateFilter] = useState("");
 			const [nameFilter, setNameFilter] = useState("");
@@ -2892,13 +2936,17 @@ window.__ModuleLoader__.load({
 			};
 
 			const doInstall = async (item) => {
-				setError(""); setMessage("");
+				setError(""); setMessage(""); setInstallFailure("");
 				setBusy(true);
 				try {
 					const result = await api("/install", { method: "POST", timeoutMs: 300000, body: JSON.stringify({ item }) });
 					await refresh();
 					await loadMarket({});
-					setMessage(`${result.installed} 已安装并连接`);
+					// A 200 with `connect.ok === false` means the row was written and
+					// nothing mounted. Reporting 「已安装并连接」 for it was the one
+					// lie this panel told about its own work.
+					if (result?.connect?.ok === false) setInstallFailure(installFailureText(result, item));
+					else setMessage(`${result.installed} 已安装并连接`);
 				} catch (err) {
 					setError(String(err.message || err));
 				} finally {
@@ -3185,6 +3233,7 @@ window.__ModuleLoader__.load({
 				]),
 
 				error ? createElement("div", { key: "error", style: styles.error }, error) : null,
+				installFailure ? createElement("div", { key: "installfail", style: styles.installFailure }, installFailure) : null,
 				message ? createElement("div", { key: "message", style: styles.message }, message) : null,
 				registryError ? createElement("div", { key: "regwarn", style: styles.registryWarn }, `⚠ ${registryError}`) : null,
 
