@@ -22,6 +22,10 @@ import {
   localInstallsOf, localLastInstallOf,
 } from './lib/installs.js';
 import { collectRepoMedia } from './lib/media.js';
+import {
+  MAX_UPLOAD_BYTES, readSubmissions, writeSubmissions, submissionProblem, newSubmission,
+  newSubmissionId, reviewSubmissionIn, submissionsPayload, submissionEntry, findSubmission, safeFileName,
+} from './lib/submissions.js';
 import { httpStatusFor } from './lib/http-status.js';
 import { sanitizeToolDefinition } from './lib/schema-guard.js';
 import { checkAllUpdates, checkDescribesEntry, checkEntryUpdate, parsePackageInvocation, pinArgs } from './lib/updates.js';
@@ -172,6 +176,11 @@ export async function apply(ctx) {
   // the user asked for them (「下载量以后从我们市场下载的也要统计一下」).
   const installsFile = path.join(dir, 'installs.json');
   let installs = await readInstalls(installsFile);
+  // Submissions of 「申请收录 MCP 服务」, reviewed on this machine
+  // (lib/submissions.js). Uploaded files live beside it, under submissions/<id>/.
+  const submissionsFile = path.join(dir, 'submissions.json');
+  const uploadsDir = path.join(dir, 'submissions');
+  let submissions = await readSubmissions(submissionsFile);
 
   const loaded = await readRegistryDocument(registryFile);
   let registry = loaded.registry;
@@ -382,6 +391,14 @@ export async function apply(ctx) {
         about: s.about ?? null,
         aboutAt: s.aboutAt,
         aboutLabel: s.about ? aboutSourceLabel(s.about.source) : '',
+        // 「个人贡献」 rows (lib/submissions.js). `displayOnly` marks one that was
+        // approved with no mountable information: it exists so the name and the
+        // link are visible, and it must never be mounted — toMcpConfig() would
+        // read its missing command as a stdio launch.
+        contributor: s.contributor ?? null,
+        note: s.note ?? null,
+        link: s.link ?? null,
+        displayOnly: s.displayOnly === true,
       };
     });
   }
@@ -539,7 +556,14 @@ export async function apply(ctx) {
   async function serversPayload() {
     await refreshAbout();
     const servers = publicList();
-    return { servers, ...(registryLoadError ? { registryError: registryLoadError } : {}) };
+    return {
+      servers,
+      // The 「投稿」 queue rides along so the panel can render the review list
+      // from the same fetch that renders the registry — a second request would
+      // be a second thing to keep in sync after every review.
+      submissions: submissionsPayload(submissions),
+      ...(registryLoadError ? { registryError: registryLoadError } : {}),
+    };
   }
 
   // First install: scan well-known host MCP configs and import them.
@@ -639,6 +663,142 @@ export async function apply(ctx) {
     };
   }
 
+  // ---- contributions (「申请收录 MCP 服务」) ----------------------------------
+  //
+  // See lib/submissions.js: the queue is local, the review is a decision made on
+  // this machine, and an approved submission becomes a registry row with the
+  // source `contribution`. Nothing here talks to the network — the panel's old
+  // behaviour (open the awesome-list page so the user files a pull request) is
+  // still reachable from the submit dialog as a link, but it is no longer the
+  // only way in.
+
+  /** Persist the queue through a temp file + rename, like the registry. */
+  async function saveSubmissions() {
+    await writeSubmissions(submissionsFile, submissions);
+  }
+
+  /**
+   * Decode one uploaded file and write it under `submissions/<id>/`.
+   *
+   * Bounded on purpose: the bytes travel inside a JSON body, so the cap is what
+   * keeps a submission from becoming an upload endpoint. The name is sanitized
+   * (`safeFileName`) because it comes from the submitter and is being used as a
+   * path component here.
+   */
+  async function storeUpload(id, file) {
+    if (!file || typeof file !== 'object') return null;
+    const data = typeof file.data === 'string' ? file.data : '';
+    if (!data) return null;
+    const bytes = Buffer.from(data, 'base64');
+    if (bytes.length === 0) return null;
+    if (bytes.length > MAX_UPLOAD_BYTES) {
+      throw new Error(`invalid submission: file is larger than ${Math.floor(MAX_UPLOAD_BYTES / 1024)} KB`);
+    }
+    const fileName = safeFileName(file.name);
+    const targetDir = path.join(uploadsDir, id);
+    await fs.mkdir(targetDir, { recursive: true });
+    await fs.writeFile(path.join(targetDir, fileName), bytes);
+    return {
+      name: fileName,
+      bytes: bytes.length,
+      // Relative to the data directory: an absolute path would bind the queue to
+      // this machine's home directory.
+      path: path.posix.join('submissions', id, fileName),
+      ...(typeof file.type === 'string' && file.type ? { type: file.type } : {}),
+    };
+  }
+
+  /** Record one submission from the panel form (or the MCP tool). */
+  async function doSubmitContributionImpl(input = {}) {
+    const problem = submissionProblem(input);
+    if (problem) throw new Error(`invalid submission: ${problem}`);
+    const id = newSubmissionId();
+    const file = await storeUpload(id, input.file);
+    const item = newSubmission({ ...input, ...(file ? { file } : {}) }, { id });
+    submissions.items.push(item);
+    await saveSubmissions();
+    return {
+      submitted: item.id,
+      name: item.name,
+      status: item.status,
+      file: item.file ?? null,
+      submissions: submissionsPayload(submissions),
+      note: '已记录到本机待审队列。审核通过后才会写进注册表。',
+    };
+  }
+
+  function doListSubmissionsImpl({ status = null } = {}) {
+    const wanted = typeof status === 'string' && status ? status : null;
+    const payload = submissionsPayload(submissions, { limit: 500 });
+    return {
+      ...payload,
+      items: wanted ? payload.items.filter((item) => item.status === wanted) : payload.items,
+      pending: payload.pending,
+    };
+  }
+
+  /**
+   * Approve or reject one submission.
+   *
+   * Approving writes the registry row itself, so the entry name has to be free:
+   * a second row under a name that is already taken would make every later
+   * name-keyed action ambiguous. With mountable information the row is mounted
+   * immediately (an approved contribution that cannot be reached is not much of
+   * a collection); without it the row is display-only.
+   */
+  async function doReviewSubmissionImpl({ id = null, decision = null, reason = '', install = null, name = null, overwrite = false } = {}) {
+    const item = findSubmission(submissions, id);
+    if (!item) throw new Error(`unknown submission: ${id ?? '(none)'}`);
+    if (decision !== 'approve' && decision !== 'reject') {
+      throw new Error(`invalid submission decision: ${decision ?? '(none)'}（要 approve 或 reject）`);
+    }
+    if (decision === 'reject') {
+      const reviewed = reviewSubmissionIn(submissions, { id: item.id, decision, reason });
+      await saveSubmissions();
+      return {
+        reviewed: item.id,
+        status: reviewed.status,
+        reason: reviewed.reason ?? null,
+        servers: (await serversPayload()).servers,
+        submissions: submissionsPayload(submissions),
+      };
+    }
+    const entryName = (typeof name === 'string' && name.trim() ? name.trim() : item.name).slice(0, 80);
+    const entry = submissionEntry(item, { install, name: entryName });
+    // A mountable row needs an ASCII name: `toServerName()` slugifies, and the
+    // tool prefix (`mcp__<serverName>__…`) cannot be built from a Chinese name.
+    // A display-only row never mounts, so its name is free to stay as submitted.
+    if (entry.enabled !== false && !SERVER_NAME_PATTERN.test(toServerName(entryName) ?? '')) {
+      throw new Error(`invalid submission: name ${entryName} cannot become a server name（挂载需要 ASCII 名：字母、数字、下划线或连字符；只有链接的条目不受此限）`);
+    }
+    const taken = registry.servers.find((s) => s.name === entryName);
+    if (taken && !overwrite) {
+      throw new Error(`duplicate contribution name: ${entryName}（注册表里已有同名记录）；请改名，或带 overwrite=true 明确替换`);
+    }
+    if (taken) {
+      await disconnect(entry.name);
+      registry.servers[registry.servers.indexOf(taken)] = entry;
+    } else {
+      registry.servers.push(entry);
+    }
+    reviewSubmissionIn(submissions, { id: item.id, decision, install, entry: entry.name });
+    await save();
+    await saveSubmissions();
+    const conn = entry.enabled === false ? { ok: true, deferred: true } : await connect(entry);
+    return {
+      reviewed: item.id,
+      status: 'approved',
+      entry: entry.name,
+      displayOnly: entry.displayOnly === true,
+      connect: conn,
+      servers: (await serversPayload()).servers,
+      submissions: submissionsPayload(submissions),
+      ...(entry.displayOnly ? {
+        note: `${entry.name} 只有链接、没有挂载信息，已登记为「仅展示」条目：它显示在列表里，但不会挂载。之后有 command 或 endpoint 时，可以移除它再通过一次投稿补齐。`,
+      } : {}),
+    };
+  }
+
   // ---- mutations ------------------------------------------------------------
   // A `providedExternally` entry is one that another mcp-client mount already
   // serves under the same DSH server name (see `connect`): this plugin skipped
@@ -697,6 +857,12 @@ export async function apply(ctx) {
 
   async function doSetEnabledImpl(name, enabled, { slot = null, from = null } = {}) {
     const entry = resolveEntry(name, { slot, from });
+    // A display-only contribution has no command and no url: `toMcpConfig()`
+    // would read the missing command as a stdio launch and spawn `undefined`.
+    // Enabling it is refused with the reason instead of failing at mount time.
+    if (enabled && entry.displayOnly === true) {
+      throw new Error(`display-only entry ${name}: 这条「个人贡献」只有链接、没有挂载信息，无法挂载；请移除它并重新通过一次带 command 或 endpoint 的审核`);
+    }
     entry.enabled = enabled;
     await save();
     await syncFiber(name);
@@ -1141,6 +1307,8 @@ export async function apply(ctx) {
   const doCheckUpdates = serialized(doCheckUpdatesImpl);
   const doUpdate = serialized(doUpdateImpl);
   const doToggleFavorite = serialized(doToggleFavoriteImpl);
+  const doSubmitContribution = serialized(doSubmitContributionImpl);
+  const doReviewSubmission = serialized(doReviewSubmissionImpl);
 
   // ---- management tools ----------------------------------------------------
   const jsonOut = { schema: { type: 'json' }, render: renderJson };
@@ -1276,6 +1444,32 @@ export async function apply(ctx) {
       output: jsonOut,
       execute: () => doForgetOrphans(),
     }),
+    defineTool({
+      name: 'overall_mcp_submissions',
+      description: 'The 「申请收录 MCP 服务」 queue: submissions someone made from the panel (a name, a link and optionally an attached file), reviewed on this machine. action "list" returns them (status filter: pending, approved or rejected); "submit" records one (name and link required, note/contributor optional, file optional as { name, data } with base64 data up to 512 KB); "approve" writes the approved entry into the registry with source "contribution" — pass install { transport: "stdio", command, args } or { transport: "streamable-http", url } to make it mountable, or omit it to register a display-only row that carries the link but never mounts; "reject" records a reason. Nothing is sent anywhere: the queue and any uploaded file stay in $DSH_HOME/overall-mcp.',
+      parameters: {
+        action: { type: 'string', required: true, description: 'One of: list, submit, approve, reject.' },
+        id: { type: 'string', description: 'Submission id (required for approve and reject; returned by list and submit).' },
+        name: { type: 'string', description: 'For submit: the server name the submitter gave. For approve: the registry name to use instead of it.' },
+        link: { type: 'string', description: 'For submit: an http(s) link to the server (repository page, documentation or npm page).' },
+        note: { type: 'string', description: 'For submit: a one-line description of what the server does.' },
+        contributor: { type: 'string', description: 'For submit: the name the submitter wants credited; the panel then shows it as 「<name>贡献」.' },
+        file: { type: 'object', description: 'For submit: an optional attachment { name, data (base64), type? }, at most 512 KB decoded.' },
+        reason: { type: 'string', description: 'For reject: why it was not accepted (stored with the submission).' },
+        install: { type: 'object', description: 'For approve: the mountable information — { transport: "stdio", command, args } or { transport: "streamable-http", url }. Omit it for a display-only row.' },
+        overwrite: { type: 'boolean', description: 'For approve: replace an existing registry row of the same name instead of failing.' },
+        status: { type: 'string', description: 'For list: return only submissions in this state (pending, approved or rejected).' },
+      },
+      output: jsonOut,
+      async execute({ action, id, name, link, note, contributor, file, reason, install, overwrite, status }) {
+        if (action === 'list') return doListSubmissionsImpl({ status });
+        if (action === 'submit') return await doSubmitContribution({ name, link, note, contributor, file });
+        if (action === 'approve' || action === 'reject') {
+          return await doReviewSubmission({ id, decision: action, reason, install, name, overwrite: overwrite === true });
+        }
+        throw new Error(`invalid submission decision: ${action ?? '(none)'}（action 要是 list、submit、approve 或 reject）`);
+      },
+    }),
   ];
 
   const disposers = defs.map((d) => ctx.tools.register(d));
@@ -1403,6 +1597,25 @@ export async function apply(ctx) {
       // for the whole set: they are all the same kind of leftover, and removing
       // them one row at a time is what a name-keyed 移除 was doing wrong.
       ['/api/overall-mcp/forget-orphans', ['POST'], guard(async () => json(await doForgetOrphans()))],
+      // 「申请收录 MCP 服务」: the pending queue, one new submission, and the
+      // reviewer's decision. A submission body carries the form fields and
+      // (optionally) the file as base64; see lib/submissions.js for the caps.
+      ['/api/overall-mcp/submissions', ['GET', 'POST'], guard(async (req) => {
+        if (req.method === 'POST') return json(await doSubmitContribution(await readBody(req)));
+        const { status } = await readBody(req);
+        return json(doListSubmissionsImpl({ status }));
+      })],
+      ['/api/overall-mcp/submission-review', ['POST'], guard(async (req) => {
+        const body = await readBody(req);
+        return json(await doReviewSubmission({
+          id: typeof body.id === 'string' ? body.id : null,
+          decision: typeof body.decision === 'string' ? body.decision : null,
+          reason: typeof body.reason === 'string' ? body.reason : '',
+          install: body.install && typeof body.install === 'object' ? body.install : null,
+          name: typeof body.name === 'string' ? body.name : null,
+          overwrite: body.overwrite === true,
+        }));
+      })],
       // Diagnostic: the schemas actually registered for mcp__* tools. Lets the
       // settings page (or a maintainer) confirm a provider-hostile pattern was
       // repaired rather than shipped to the model API.

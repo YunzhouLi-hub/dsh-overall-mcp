@@ -186,6 +186,7 @@ window.__ModuleLoader__.load({
 			"codex-cli": "Codex CLI",
 			"gemini-cli": "Gemini CLI",
 			"manual": "手动添加",
+			"contribution": "个人贡献",
 			"catalog:official-registry": "官方 Registry",
 			"catalog:smithery": "Smithery",
 			"catalog:docker-catalog": "Docker MCP Catalog",
@@ -193,8 +194,16 @@ window.__ModuleLoader__.load({
 			"catalog:awesome-list": "Awesome 清单",
 		};
 
-		function sourceLabel(source) {
+		/**
+		 * `contributor` is only passed for a row someone submitted: the source is
+		 * 「个人贡献」 on its own, 「<名字>贡献」 when the submitter asked to be
+		 * credited. A group header has no single contributor, so it passes only
+		 * the source and reads 「个人贡献」.
+		 */
+		function sourceLabel(source, contributor) {
 			const key = source || "manual";
+			const name = typeof contributor === "string" ? contributor.trim() : "";
+			if (key === "contribution") return name ? `${name}贡献` : SOURCE_LABELS.contribution;
 			if (SOURCE_LABELS[key]) return SOURCE_LABELS[key];
 			if (key.startsWith("catalog:")) return `目录 · ${key.slice("catalog:".length)}`;
 			return key;
@@ -597,6 +606,59 @@ window.__ModuleLoader__.load({
 				padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.line}`,
 				background: T.soft2, color: "#f53f3f", fontSize: 12.5, lineHeight: 1.7,
 			},
+			// ---- 投稿（申请收录）: the queue, the dialog, its fields ----
+			// The pending queue sits at the top of the registry tab, above the
+			// orphan bar: a row waiting for a decision is the one thing here that
+			// blocks on the user rather than on the host.
+			queueBox: {
+				display: "grid", gap: 8, padding: "12px 14px", marginBottom: 16,
+				borderRadius: 12, border: `1px solid ${T.line}`, background: T.soft2,
+			},
+			queueHead: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" },
+			queueTitle: { fontWeight: 700, fontSize: 13.5, color: T.text },
+			queueRow: {
+				display: "grid", gap: 6, padding: "10px 12px", borderRadius: 10,
+				border: `1px solid ${T.line}`, background: T.cardBg,
+			},
+			queueIdentity: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", minWidth: 0 },
+			queueName: { fontWeight: 600, fontSize: 13.5, color: T.text, minWidth: 0 },
+			queueMeta: { fontSize: 12, color: T.text3, lineHeight: 1.6, overflowWrap: "anywhere" },
+			queueNote: {
+				fontSize: 12.5, color: T.text2, lineHeight: 1.65, margin: 0,
+				whiteSpace: "pre-wrap", overflowWrap: "anywhere",
+			},
+			queueActs: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" },
+			pendingBadge: {
+				padding: "1px 7px", borderRadius: 999, fontSize: 11.5, fontWeight: 600,
+				color: T.amber, background: T.cardBg, whiteSpace: "nowrap", flexShrink: 0,
+			},
+			// 「仅展示」: a contribution that was approved with a link but no
+			// command or endpoint. It is a real registry row that deliberately
+			// never mounts, so the row has to say so instead of showing a
+			// disabled-looking 启用 button the user keeps pressing.
+			displayBadge: {
+				padding: "1px 7px", borderRadius: 999, fontSize: 11.5, fontWeight: 600,
+				color: T.text2, background: T.soft2, whiteSpace: "nowrap", flexShrink: 0,
+			},
+			formGrid: { display: "grid", gap: 12 },
+			formRow: { display: "grid", gap: 5 },
+			formLabel: { fontSize: 12.5, color: T.text2, fontWeight: 600 },
+			formInput: {
+				width: "100%", boxSizing: "border-box", padding: "9px 12px", borderRadius: 9,
+				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text,
+				fontSize: 13.5, fontFamily: "inherit",
+			},
+			formTextarea: {
+				width: "100%", boxSizing: "border-box", padding: "9px 12px", borderRadius: 9,
+				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text,
+				fontSize: 13.5, fontFamily: "inherit", minHeight: 62, resize: "vertical",
+			},
+			formHint: { fontSize: 12, color: T.text3, lineHeight: 1.6 },
+			formError: {
+				padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.line}`,
+				background: T.soft2, color: T.red, fontSize: 12.5, lineHeight: 1.6,
+			},
+			formActions: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" },
 			groupBody: { display: "grid", gap: 1, padding: "6px 8px 10px" },
 			row: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "7px 10px", borderRadius: 8 },
 			// The row's left half: the name, then the sentence explaining what
@@ -892,13 +954,20 @@ window.__ModuleLoader__.load({
 			}));
 		}
 
-		function ServerRow({ server, busy, job, onToggle, onRemove, onUpdate }) {
+		function ServerRow({ server, busy, job, onToggle, onRemove, onUpdate, onOpenLink }) {
 			const enabled = server.enabled !== false;
 			const provided = server.providedExternally === true;
-			const state = provided ? "external" : enabled ? (server.connected ? "on" : "idle") : "off";
+			// An approved submission with no command and no endpoint (「个人贡献」):
+			// it is in the registry so the name and the link are visible, but there
+			// is nothing to mount. It is always `enabled: false`, and the host
+			// refuses to switch it on (lib/submissions.js submissionEntry).
+			const displayOnly = server.displayOnly === true;
+			const contributor = typeof server.contributor === "string" ? server.contributor : "";
+			const state = displayOnly ? "off" : provided ? "external" : enabled ? (server.connected ? "on" : "idle") : "off";
 			const status = server.error ? `连接失败：${server.error}`
-				: provided ? "已由其他插件提供（跳过重复挂载）"
-					: enabled ? (server.connected ? "已连接" : "未连接") : "已停用";
+				: displayOnly ? "仅展示（只有链接，没有挂载信息）"
+					: provided ? "已由其他插件提供（跳过重复挂载）"
+						: enabled ? (server.connected ? "已连接" : "未连接") : "已停用";
 			const prefix = server.serverName ? `工具前缀 mcp__${server.serverName}__` : "";
 			const pkg = server.package ? `${server.package.name}@${server.package.version ?? "latest"}` : "";
 			const update = server.update;
@@ -946,12 +1015,24 @@ window.__ModuleLoader__.load({
 								}, about.text)
 							: null,
 						createElement("div", { key: "meta", className: "omkt-smeta", style: styles.meta },
-							[server.transport, status, toolCount, prefix, pkg].filter(Boolean).join(" · ")),
+							[
+								displayOnly ? "仅展示" : server.transport,
+								status,
+								contributor ? `由 ${contributor} 提交` : "",
+								server.note || "",
+								toolCount, prefix, pkg,
+							].filter(Boolean).join(" · ")),
 					]),
 				]),
 				badge
 					? createElement("span", { key: "newv", style: styles.updateBadge }, `可更新 → ${badge}`)
-					: orphan
+					: displayOnly
+						? createElement("span", {
+								key: "displayonly",
+								style: styles.badge,
+								title: "这条「个人贡献」审核通过时没有拿到 command 或 endpoint，所以只登记名字和链接：不会挂载，也无法启用。",
+							}, "仅展示")
+						: orphan
 						? createElement("span", {
 								key: "orphan",
 								style: styles.orphanBadge,
@@ -967,6 +1048,13 @@ window.__ModuleLoader__.load({
 							? createElement("span", { key: "newv", style: styles.jobOutcome }, `✓ 已更新到 ${didUpdate}`)
 							: null,
 				createElement("span", { key: "actions", style: { display: "flex", gap: 6, alignItems: "center", ...styles.spacer } }, [
+					server.link && typeof onOpenLink === "function"
+						? createElement("button", {
+								key: "link", type: "button", style: styles.button,
+								title: `打开投稿里给的链接：${server.link}`,
+								onClick: (e) => onOpenLink(e, server.link),
+							}, "来源")
+						: null,
 					newVersion && !settled
 						? createElement("button", {
 								key: "update", type: "button",
@@ -981,11 +1069,16 @@ window.__ModuleLoader__.load({
 							}, rowStatus === "running" ? "更新中…" : rowStatus === "pending" ? "等待中" : "更新")
 						: null,
 					createElement("button", {
-						key: "toggle", type: "button", style: styles.button, disabled: busy,
+						key: "toggle", type: "button",
+						style: displayOnly ? { ...styles.button, ...styles.buttonBusy } : styles.button,
+						disabled: busy || displayOnly,
 						// A row another mount already provides owns no fiber here, so
 						// 「停用」 cannot stop its tools — say that on the button itself
-						// rather than only in the toast after the click.
-						title: provided ? "这条记录由另一个插件挂载提供，本插件的停用不会让它的工具消失" : undefined,
+						// rather than only in the toast after the click. A display-only
+						// contribution is the other dead control: there is nothing to
+						// launch, so the host refuses the switch (409).
+						title: provided ? "这条记录由另一个插件挂载提供，本插件的停用不会让它的工具消失"
+							: displayOnly ? "只有链接、没有 command 或 endpoint，无法挂载" : undefined,
 						onClick: () => onToggle(server, !enabled),
 					}, enabled ? "停用" : "启用"),
 					createElement("button", {
@@ -998,7 +1091,7 @@ window.__ModuleLoader__.load({
 			]);
 		}
 
-		function SourceGroup({ source, servers, busy, jobOf, collapsed, onToggleCollapsed, onToggleSource, onToggleServer, onRemove, onUpdate }) {
+		function SourceGroup({ source, servers, busy, jobOf, collapsed, onToggleCollapsed, onToggleSource, onToggleServer, onRemove, onUpdate, onOpenLink }) {
 			const enabledCount = servers.filter((s) => s.enabled !== false).length;
 			const allOn = enabledCount === servers.length && servers.length > 0;
 			return createElement("div", { style: styles.group }, [
@@ -1023,7 +1116,7 @@ window.__ModuleLoader__.load({
 					servers.map((server) => createElement(ServerRow, {
 						key: rowKey(server), server, busy,
 						job: jobOf(server),
-						onToggle: onToggleServer, onRemove, onUpdate,
+						onToggle: onToggleServer, onRemove, onUpdate, onOpenLink,
 					}))),
 			]);
 		}
@@ -1769,6 +1862,27 @@ window.__ModuleLoader__.load({
 		}
 
 		/**
+		 * An upload's size, for the review row. The queue stores exact bytes, and
+		 * the reviewer is deciding whether to keep someone else's file: 「12 KB」
+		 * is the number that matters, not 12288.
+		 */
+		function formatBytes(n) {
+			const bytes = Number(n);
+			if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+			if (bytes < 1024) return `${bytes} B`;
+			if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+			return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+		}
+
+		/** An ISO timestamp as a local 「2026-10-16 09:31」, or the raw string. */
+		function formatStamp(iso) {
+			const date = new Date(iso);
+			if (!iso || Number.isNaN(date.getTime())) return String(iso ?? "");
+			const pad = (v) => String(v).padStart(2, "0");
+			return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+		}
+
+		/**
 		 * Icon with a coloured initial fallback when there is no avatar URL.
 		 *
 		 * The fallback hue is derived from the title, so the same entry keeps
@@ -2199,6 +2313,27 @@ window.__ModuleLoader__.load({
 			const [nameFilter, setNameFilter] = useState("");
 			const [collapsed, setCollapsed] = useState(() => new Set());
 
+			// ---- 「申请收录 MCP 服务」 state ----
+			// The queue the host keeps in $DSH_HOME/overall-mcp/submissions.json.
+			// `submissions` rides along with /servers (see serversPayload), so the
+			// registry tab and the review list cannot disagree about what is waiting.
+			const [submissions, setSubmissions] = useState([]);
+			const [pendingSubmissions, setPendingSubmissions] = useState(0);
+			const [submitOpen, setSubmitOpen] = useState(false);
+			// The form the submitter is filling in. Kept whole (including the chosen
+			// File) so a failed POST does not throw away what they typed.
+			const [submitForm, setSubmitForm] = useState({ name: "", link: "", note: "", contributor: "" });
+			const [submitFile, setSubmitFile] = useState(null);
+			const [submitBusy, setSubmitBusy] = useState(false);
+			const [submitError, setSubmitError] = useState("");
+			// The reviewer's open decision: { id, mode: 'approve'|'reject', transport,
+			// command, args, url, reason }. One at a time — a queue is reviewed row
+			// by row, and an inline form per row would let two decisions be half-made
+			// at once.
+			const [review, setReview] = useState(null);
+			const [reviewBusy, setReviewBusy] = useState(false);
+			const [reviewError, setReviewError] = useState("");
+
 			// ---- market tab state ----
 			const [market, setMarket] = useState(null);
 			const [marketBusy, setMarketBusy] = useState(false);
@@ -2305,6 +2440,10 @@ window.__ModuleLoader__.load({
 				const body = await api("/servers");
 				setServers(body.servers);
 				setRegistryError(typeof body.registryError === "string" ? body.registryError : "");
+				// The submission queue comes back with the server list: one fetch
+				// renders both, and a review cannot leave the list stale.
+				setSubmissions(Array.isArray(body.submissions?.items) ? body.submissions.items : []);
+				setPendingSubmissions(Number(body.submissions?.pending) || 0);
 				return body.servers;
 			}
 
@@ -2530,6 +2669,386 @@ window.__ModuleLoader__.load({
 					return tail || "插件自更新未执行";
 				},
 			);
+
+			// ---- 「申请收录 MCP 服务」 ------------------------------------------
+			//
+			// The panel's old behaviour was a link out to the awesome-list: the only
+			// way into a catalogue was a pull request upstream. Now the form records
+			// the submission in the host's local queue (lib/submissions.js), and the
+			// 投稿 section below is the review: 通过 writes the entry into the
+			// registry with the source 「个人贡献」, 驳回 records why.
+			const SUBMIT_FILE_MAX = 512 * 1024;
+
+			/** The chosen file as base64, without the data-URL prefix. */
+			function readFileBase64(file) {
+				return new Promise((resolve, reject) => {
+					if (typeof FileReader !== "function") {
+						reject(new Error("这个窗口读不了本地文件（没有 FileReader）"));
+						return;
+					}
+					const reader = new FileReader();
+					reader.onerror = () => reject(new Error(`读取 ${file.name} 失败`));
+					reader.onload = () => {
+						const text = String(reader.result || "");
+						const comma = text.indexOf(",");
+						resolve(comma >= 0 ? text.slice(comma + 1) : text);
+					};
+					reader.readAsDataURL(file);
+				});
+			}
+
+			function openSubmit() {
+				setSubmitError("");
+				setSubmitOpen(true);
+			}
+
+			async function doSubmit() {
+				const name = submitForm.name.trim();
+				const link = submitForm.link.trim();
+				if (!name) { setSubmitError("请填写服务名"); return; }
+				if (!/^https?:\/\/\S+$/i.test(link)) { setSubmitError("请填写 http(s) 链接，例如 https://github.com/…"); return; }
+				if (submitFile && submitFile.size > SUBMIT_FILE_MAX) {
+					setSubmitError(`文件 ${Math.round(submitFile.size / 1024)} KB 超过上限 ${SUBMIT_FILE_MAX / 1024} KB`);
+					return;
+				}
+				setSubmitBusy(true); setSubmitError("");
+				try {
+					const file = submitFile
+						? {
+							name: submitFile.name,
+							...(submitFile.type ? { type: submitFile.type } : {}),
+							data: await readFileBase64(submitFile),
+						}
+						: null;
+					const body = await api("/submissions", {
+						method: "POST",
+						timeoutMs: 120000,
+						body: JSON.stringify({
+							name, link,
+							note: submitForm.note,
+							contributor: submitForm.contributor,
+							...(file ? { file } : {}),
+						}),
+					});
+					setSubmitOpen(false);
+					setSubmitForm({ name: "", link: "", note: "", contributor: "" });
+					setSubmitFile(null);
+					setMessage(`已提交「${body.name}」，等待审核（待审 ${body.submissions?.pending ?? 0} 条）`);
+					await refresh();
+				} catch (err) {
+					// The form stays open with its fields: a failed upload or a host
+					// that is not running the new plugin yet must not lose the text.
+					setSubmitError(String(err.message || err));
+				} finally {
+					setSubmitBusy(false);
+				}
+			}
+
+			function openReview(item, mode) {
+				setReviewError("");
+				setReview({
+					id: item.id,
+					item,
+					mode,
+					name: item.name,
+					transport: "stdio",
+					command: "",
+					args: "",
+					url: "",
+					reason: "",
+				});
+			}
+
+			/**
+			 * The mountable information the reviewer typed, or null for a
+			 * display-only approval (both fields empty is a legitimate answer: the
+			 * row is then registered with its link and never mounted).
+			 */
+			function installFromDraft(draft) {
+				if (draft.transport === "stdio") {
+					const command = draft.command.trim();
+					if (!command) return null;
+					const args = draft.args.trim() ? draft.args.trim().split(/\s+/) : [];
+					return { transport: "stdio", command, args };
+				}
+				const url = draft.url.trim();
+				return url ? { transport: "streamable-http", url } : null;
+			}
+
+			async function doReview() {
+				if (!review) return;
+				setReviewBusy(true); setReviewError("");
+				try {
+					const body = await api("/submission-review", {
+						method: "POST",
+						timeoutMs: 300000,
+						body: JSON.stringify({
+							id: review.id,
+							decision: review.mode,
+							...(review.mode === "reject"
+								? { reason: review.reason }
+								: { install: installFromDraft(review), name: review.name.trim() || review.item.name }),
+						}),
+					});
+					const item = review.item;
+					setReview(null);
+					if (review.mode === "reject") {
+						setMessage(`已驳回「${item.name}」`);
+					} else if (body.connect?.ok === false) {
+						// The row is in the registry but serves nothing; saying 「已通过」
+						// alone would claim a mount that did not happen.
+						setMessage(`${body.entry} 已写入注册表，但挂载失败：${body.connect.error ?? "原因未知"}（可在列表里重试或移除）`);
+					} else {
+						setMessage(body.note ?? `${body.entry} 已写入注册表，来源标记为「${sourceLabel("contribution", item.contributor)}」`);
+					}
+					await refresh();
+				} catch (err) {
+					setReviewError(String(err.message || err));
+				} finally {
+					setReviewBusy(false);
+				}
+			}
+
+			/**
+			 * The 投稿 section: what is waiting for a decision, and the last few
+			 * decisions already made.
+			 *
+			 * Rendered inside 已注册 rather than behind a third tab: the queue
+			 * exists to become registry rows, and the row it becomes appears a few
+			 * lines below. A rejected submission keeps its reason visible (three
+			 * most recent) — otherwise a 「已驳回」 with no explanation is
+			 * indistinguishable from a submission that vanished.
+			 */
+			function submissionQueue() {
+				const waiting = submissions.filter((s) => s.status === "pending");
+				const decided = submissions.filter((s) => s.status !== "pending").slice(0, 3);
+				if (!waiting.length && !decided.length) return null;
+				return createElement("div", { key: "queue", style: styles.queueBox }, [
+					createElement("div", { key: "head", style: styles.queueHead }, [
+						createElement("span", { key: "t", style: styles.queueTitle },
+							waiting.length ? `投稿待审 ${waiting.length} 条` : "投稿"),
+						createElement("span", { key: "hint", style: styles.queueMeta },
+							"「申请收录」的投稿只在本机排队；审核通过才写进注册表，来源记为「个人贡献」。"),
+						createElement("span", { key: "spacer", style: styles.spacer }),
+						createElement("button", {
+							key: "new", type: "button", className: "omkt-btn", style: styles.button,
+							disabled: submitBusy, onClick: openSubmit,
+						}, "再投一个"),
+					]),
+					...waiting.map(submissionRow),
+					decided.length
+						? createElement("div", { key: "decided", style: styles.queueMeta },
+							`已审：${decided.map((s) => `${s.name} ${s.status === "approved" ? "已通过" : "已驳回"}${s.reason ? `（${s.reason}）` : ""}`).join(" · ")}`)
+						: null,
+				]);
+			}
+
+			function submissionRow(item) {
+				const editing = review && review.id === item.id;
+				return createElement("div", { key: item.id, style: styles.queueRow }, [
+					createElement("div", { key: "id", style: styles.queueIdentity }, [
+						createElement("span", { key: "n", style: styles.queueName }, item.name),
+						createElement("span", { key: "p", style: styles.pendingBadge }, "待审"),
+						item.link
+							? createElement("button", {
+								key: "l", type: "button", className: "omkt-btn omkt-btn-text", style: styles.textBtn,
+								title: `在右侧栏打开：${item.link}`,
+								onClick: (e) => openExternal(e, item.link),
+							}, "来源链接 ↗")
+							: null,
+						createElement("span", { key: "spacer", style: styles.spacer }),
+						createElement("span", { key: "m", style: styles.queueMeta },
+							`${item.contributor ? `${item.contributor} 投稿` : "未署名"}${item.at ? ` · ${formatStamp(item.at)}` : ""}`),
+					]),
+					item.note ? createElement("p", { key: "note", style: styles.queueNote }, item.note) : null,
+					item.file
+						? createElement("div", { key: "file", style: styles.queueMeta },
+							`附件：${item.file.name}（${formatBytes(item.file.bytes)}；只原样保存在 $DSH_HOME/overall-mcp/submissions/，审核时不会被打开或执行）`)
+						: null,
+					editing
+						? reviewForm()
+						: createElement("div", { key: "acts", style: styles.queueActs }, [
+							createElement("button", {
+								key: "ok", type: "button", className: "omkt-btn omkt-btn-primary",
+								style: { ...styles.button, ...styles.primary }, disabled: reviewBusy,
+								title: "通过：填上启动命令或 endpoint 才会挂载；两样都留空就登记为仅展示",
+								onClick: () => openReview(item, "approve"),
+							}, "通过…"),
+							createElement("button", {
+								key: "no", type: "button", className: "omkt-btn", style: styles.button,
+								disabled: reviewBusy, onClick: () => openReview(item, "reject"),
+							}, "驳回…"),
+						]),
+				]);
+			}
+
+			/**
+			 * The reviewer's decision, inline under the row it decides.
+			 *
+			 * 通过 asks for the mountable information because a submission only
+			 * has a name and a link, and a registry row with neither a command
+			 * nor an endpoint would try to spawn `undefined`. Leaving both empty
+			 * is a real answer (仅展示), so it is offered rather than hidden.
+			 */
+			function reviewForm() {
+				if (!review) return null;
+				const approve = review.mode === "approve";
+				const set = (patch) => setReview((prev) => (prev ? { ...prev, ...patch } : prev));
+				return createElement("div", { key: "review", style: styles.formGrid }, [
+					approve
+						? createElement("div", { key: "name", style: styles.formRow }, [
+							createElement("label", { key: "l", style: styles.formLabel }, "写进注册表的名字"),
+							createElement("input", {
+								key: "i", type: "text", value: review.name, style: styles.formInput,
+								onChange: (e) => set({ name: e.target.value }),
+							}),
+						])
+						: null,
+					approve
+						? createElement("div", { key: "transport", style: styles.formRow }, [
+							createElement("label", { key: "l", style: styles.formLabel }, "它怎么启动"),
+							createElement("select", {
+								key: "s", value: review.transport, style: styles.groupSelect,
+								onChange: (e) => set({ transport: e.target.value }),
+							}, [
+								createElement("option", { key: "stdio", value: "stdio" }, "本地命令（stdio）"),
+								createElement("option", { key: "http", value: "streamable-http" }, "远端 endpoint（streamable-http）"),
+							]),
+						])
+						: null,
+					approve && review.transport === "stdio"
+						? createElement("div", { key: "cmd", style: styles.formRow }, [
+							createElement("label", { key: "l", style: styles.formLabel }, "启动命令"),
+							createElement("input", {
+								key: "i", type: "text", value: review.command, style: styles.formInput,
+								placeholder: "npx", onChange: (e) => set({ command: e.target.value }),
+							}),
+							createElement("input", {
+								key: "a", type: "text", value: review.args, style: styles.formInput,
+								placeholder: "-y @acme/mcp-server", onChange: (e) => set({ args: e.target.value }),
+							}),
+							createElement("div", { key: "h", style: styles.formHint },
+								"第一行是可执行文件，第二行按空格拆成参数。留空＝登记为「仅展示」，永远不会被挂载。"),
+						])
+						: null,
+					approve && review.transport === "streamable-http"
+						? createElement("div", { key: "url", style: styles.formRow }, [
+							createElement("label", { key: "l", style: styles.formLabel }, "endpoint URL"),
+							createElement("input", {
+								key: "i", type: "text", value: review.url, style: styles.formInput,
+								placeholder: "https://example.com/mcp", onChange: (e) => set({ url: e.target.value }),
+							}),
+							createElement("div", { key: "h", style: styles.formHint },
+								"留空＝登记为「仅展示」，永远不会被挂载。"),
+						])
+						: null,
+					approve
+						? null
+						: createElement("div", { key: "reason", style: styles.formRow }, [
+							createElement("label", { key: "l", style: styles.formLabel }, "驳回理由（会留在这条投稿上）"),
+							createElement("textarea", {
+								key: "t", value: review.reason, style: styles.formTextarea,
+								placeholder: "例如：链接打不开，或它不是 MCP 服务",
+								onChange: (e) => set({ reason: e.target.value }),
+							}),
+						]),
+					reviewError ? createElement("div", { key: "err", style: styles.formError }, reviewError) : null,
+					createElement("div", { key: "acts", style: styles.formActions }, [
+						createElement("button", {
+							key: "cancel", type: "button", className: "omkt-btn", style: styles.button,
+							disabled: reviewBusy, onClick: () => { setReview(null); setReviewError(""); },
+						}, "取消"),
+						createElement("button", {
+							key: "go", type: "button",
+							className: approve ? "omkt-btn omkt-btn-primary" : "omkt-btn",
+							style: { ...styles.button, ...(approve ? styles.primary : {}) },
+							disabled: reviewBusy, onClick: doReview,
+						}, reviewBusy ? "处理中…" : approve ? "通过并写入注册表" : "驳回"),
+					]),
+				]);
+			}
+
+			/** The submission form itself, as an overlay sheet. */
+			function submissionDialog() {
+				const set = (patch) => setSubmitForm((prev) => ({ ...prev, ...patch }));
+				return createElement("div", {
+					key: "submit", style: styles.overlay, role: "dialog", "aria-modal": "true",
+					// Clicking the backdrop closes; clicking inside the sheet must not.
+					onClick: (e) => { if (e.target === e.currentTarget && !submitBusy) setSubmitOpen(false); },
+				}, [
+					createElement("div", { key: "sheet", style: styles.detailPanel }, [
+						createElement("div", { key: "head", style: styles.detailHead }, [
+							createElement("div", { key: "t", style: styles.detailTitle }, "申请收录 MCP 服务"),
+							createElement("div", { key: "s", style: styles.detailSub },
+								"填写服务名和来源链接，也可以附上文件。投稿只保存在本机，审核通过后会以「个人贡献」的来源写进注册表。"),
+						]),
+						createElement("div", { key: "form", style: styles.formGrid }, [
+							createElement("div", { key: "name", style: styles.formRow }, [
+								createElement("label", { key: "l", style: styles.formLabel }, "服务名 *"),
+								createElement("input", {
+									key: "i", type: "text", value: submitForm.name, style: styles.formInput,
+									placeholder: "例如 acme-mcp", "data-omkt": "submit-name",
+									onChange: (e) => set({ name: e.target.value }),
+								}),
+							]),
+							createElement("div", { key: "link", style: styles.formRow }, [
+								createElement("label", { key: "l", style: styles.formLabel }, "链接 *"),
+								createElement("input", {
+									key: "i", type: "text", value: submitForm.link, style: styles.formInput,
+									placeholder: "https://github.com/acme/mcp-server", "data-omkt": "submit-link",
+									onChange: (e) => set({ link: e.target.value }),
+								}),
+								createElement("div", { key: "h", style: styles.formHint },
+									"GitHub / 官网 / npm 页面都行——审核时用它确认这确实是 MCP 服务。"),
+							]),
+							createElement("div", { key: "note", style: styles.formRow }, [
+								createElement("label", { key: "l", style: styles.formLabel }, "一句话说明（可选）"),
+								createElement("textarea", {
+									key: "t", value: submitForm.note, style: styles.formTextarea,
+									placeholder: "它提供什么工具、需要什么凭据",
+									onChange: (e) => set({ note: e.target.value }),
+								}),
+							]),
+							createElement("div", { key: "who", style: styles.formRow }, [
+								createElement("label", { key: "l", style: styles.formLabel }, "提交者名字（可选）"),
+								createElement("input", {
+									key: "i", type: "text", value: submitForm.contributor, style: styles.formInput,
+									placeholder: "留空就记作「个人贡献」",
+									onChange: (e) => set({ contributor: e.target.value }),
+								}),
+							]),
+							createElement("div", { key: "file", style: styles.formRow }, [
+								createElement("label", { key: "l", style: styles.formLabel }, "附件（可选）"),
+								createElement("input", {
+									key: "i", type: "file", style: styles.formInput,
+									"data-omkt": "submit-file",
+									onChange: (e) => setSubmitFile(e.target.files?.[0] ?? null),
+								}),
+								createElement("div", { key: "h", style: styles.formHint },
+									`≤ ${SUBMIT_FILE_MAX / 1024} KB，原样保存供审核，不会被执行或解析。`),
+							]),
+							submitError ? createElement("div", { key: "err", style: styles.formError }, submitError) : null,
+							createElement("div", { key: "acts", style: styles.formActions }, [
+								createElement("button", {
+									key: "guide", type: "button", className: "omkt-btn omkt-btn-text", style: styles.textBtn,
+									title: "也想投到上游市场？这是 awesome-mcp-servers 的贡献指南",
+									onClick: (e) => openExternal(e, "https://github.com/punkpeye/awesome-mcp-servers#contributing"),
+								}, "上游市场投稿指南 ↗"),
+								createElement("span", { key: "spacer", style: styles.spacer }),
+								createElement("button", {
+									key: "cancel", type: "button", className: "omkt-btn", style: styles.button,
+									disabled: submitBusy, onClick: () => setSubmitOpen(false),
+								}, "取消"),
+								createElement("button", {
+									key: "go", type: "button", className: "omkt-btn omkt-btn-primary",
+									style: { ...styles.button, ...styles.primary }, disabled: submitBusy,
+									onClick: doSubmit,
+								}, submitBusy ? "提交中…" : "提交审核"),
+							]),
+						]),
+					]),
+				]);
+			}
 
 			/**
 			 * Write everything this page knows to a file the user owns.
@@ -3037,13 +3556,18 @@ window.__ModuleLoader__.load({
 					createElement("div", { key: "hd-row2", style: styles.headSubRow }, [
 						createElement("div", { key: "hd-sub", style: styles.pageSub }, [
 							"宿主机扫描 · 市场发现 · 一键接入 · ",
-							createElement("a", {
-								key: "a", className: "omkt-link", style: styles.pageSubLink,
-								href: "https://github.com/punkpeye/awesome-mcp-servers#contributing",
-								target: "_blank", rel: "noreferrer",
-								title: "收录标准与提交方式（awesome-mcp-servers 贡献指南）",
-								onClick: (e) => openExternal(e, "https://github.com/punkpeye/awesome-mcp-servers#contributing"),
-							}, "申请收录 MCP 服务 ↗"),
+							// Was an external link to the awesome-list contribution
+							// guide: the only way into a catalogue used to be a pull
+							// request upstream. Now it opens the submission form and the
+							// submission lands in the local queue for review. The guide
+							// is still reachable from inside the dialog.
+							createElement("button", {
+								key: "contribute", type: "button", className: "omkt-link omkt-btn-text",
+								style: styles.pageSubLink,
+								disabled: submitBusy,
+								title: "填写服务名和链接（可选附文件）投稿，审核通过后写进本机注册表，来源记为「个人贡献」",
+								onClick: openSubmit,
+							}, pendingSubmissions > 0 ? `申请收录 MCP 服务 · 待审 ${pendingSubmissions}` : "申请收录 MCP 服务"),
 						]),
 						logButton,
 					]),
@@ -3085,6 +3609,9 @@ window.__ModuleLoader__.load({
 						stats.failed ? createElement("span", { key: "f", style: styles.error }, `${stats.failed} 连接异常`) : null,
 					]),
 					!error && servers === null ? createElement("div", { key: "loading", style: styles.message }, "加载中…") : null,
+					// 投稿待审 — above 来源已删除, because a submission blocks on
+					// the user, while an orphan only waits to be cleaned up.
+					submissionQueue(),
 					// 来源已删除 — records the last scan proved no config file on
 					// this machine still defines. They are one kind of leftover (the
 					// old `name-<source>` rename left four of them), so they get one
@@ -3229,6 +3756,10 @@ window.__ModuleLoader__.load({
 						onToggleServer: doToggle,
 						onRemove: doRemove,
 						onUpdate: doUpdate,
+						// A contribution's only fact is its link, so the row can
+						// open it — in the right sidebar, like every other link
+						// this page renders.
+						onOpenLink: openExternal,
 					})),
 				]) : null,
 
@@ -3519,6 +4050,10 @@ window.__ModuleLoader__.load({
 							onToggleFavorite: doToggleFavorite,
 						})
 					: null,
+
+				// The submission form, like the detail overlay: a sibling of the
+				// page content, so it survives a tab switch and closes cleanly.
+				submitOpen ? submissionDialog() : null,
 
 				// Fixed, and only while there is something to scroll back from.
 				showTop

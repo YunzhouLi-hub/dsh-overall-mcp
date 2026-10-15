@@ -11,6 +11,9 @@ import { httpStatusFor } from '../lib/http-status.js';
 test('httpStatusFor maps lookups to 404', () => {
   assert.equal(httpStatusFor(new Error('unknown server: rea')), 404);
   assert.equal(httpStatusFor(new Error('unknown source: cursor')), 404);
+  // A submission id the queue no longer has: reviewed in this panel's other
+  // window, or in the MCP tool, between the render and the click.
+  assert.equal(httpStatusFor(new Error('unknown submission: s1abc2')), 404);
 });
 
 test('httpStatusFor maps caller-side payload problems to 400', () => {
@@ -20,6 +23,14 @@ test('httpStatusFor maps caller-side payload problems to 400', () => {
   assert.equal(httpStatusFor(new Error('name (string) and enabled (boolean) required')), 400);
   assert.equal(httpStatusFor(new Error('item has no installable transport (stdio command or http url)')), 400);
   assert.equal(httpStatusFor(new Error('fs is not launched through a package runner; update it manually')), 400);
+  // A submission the reviewer cannot act on: the form was incomplete (or the
+  // upload was over the cap), so the panel must show the reason as a form error
+  // rather than as a plugin fault.
+  assert.equal(httpStatusFor(new Error('invalid submission: link must be an http(s) URL')), 400);
+  assert.equal(httpStatusFor(new Error('invalid submission: file is larger than 512 KB')), 400);
+  // The review form itself was wrong (neither approve nor reject), which is the
+  // panel's bug to show as a form error, not a plugin fault.
+  assert.equal(httpStatusFor(new Error('invalid submission decision: maybe（要 approve 或 reject）')), 400);
 });
 
 test('httpStatusFor maps an upstream registry failure to 502', () => {
@@ -39,6 +50,11 @@ test('httpStatusFor maps a row that moved under the caller to 409', () => {
 // would blame the caller's payload; 500 would send a maintainer after a bug.
 test('httpStatusFor maps a manual-entry collision to 409', () => {
   assert.equal(httpStatusFor(new Error('manual entry fs: 这是手工添加的记录，安装不会覆盖它；请先移除它，或带 overwrite=true 明确替换')), 409);
+  // Approving a submission under a name the registry already uses, and
+  // switching on a row that has nothing to mount: both are "this conflicts with
+  // state you did not see", not plugin faults.
+  assert.equal(httpStatusFor(new Error('duplicate contribution name: acme（注册表里已有同名记录）；请改名，或带 overwrite=true 明确替换')), 409);
+  assert.equal(httpStatusFor(new Error('display-only entry link-only: 这条「个人贡献」只有链接、没有挂载信息，无法挂载')), 409);
 });
 
 test('httpStatusFor falls back to 500 for anything unrecognised', () => {
