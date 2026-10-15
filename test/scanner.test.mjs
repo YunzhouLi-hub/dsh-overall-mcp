@@ -64,7 +64,7 @@ test('scanHost merges multiple apps and reports missing files', async () => {
   assert.ok(report.every((r) => Array.isArray(r.serverNames)));
 });
 
-test('mergeIntoRegistry dedups and renames conflicts', () => {
+test('mergeIntoRegistry keeps a hand-added entry and never duplicates the name', () => {
   const registry = { version: 1, servers: [{ name: 'fs', source: 'manual', transport: 'stdio', command: 'other' }] };
   const found = [
     { name: 'fs', source: 'cursor', transport: 'stdio', command: 'npx', args: [] },
@@ -72,6 +72,28 @@ test('mergeIntoRegistry dedups and renames conflicts', () => {
   ];
   const r = mergeIntoRegistry(registry, found);
   assert.ok(r.added.includes('new'));
-  assert.ok(r.added.includes('fs-cursor')); // conflict renamed
-  assert.equal(r.registry.servers.length, 3);
+  assert.deepEqual(r.updated, []);
+  assert.ok(r.skipped.includes('fs'), 'a manual entry owns its name');
+  assert.equal(r.registry.servers.length, 2);
+  assert.equal(r.registry.servers[0].command, 'other', 'manual command untouched');
+});
+
+test('mergeIntoRegistry updates an imported entry in place and keeps local state', () => {
+  const registry = {
+    version: 1,
+    servers: [{ name: 'cur', source: 'cursor', enabled: false, transport: 'stdio', command: 'old', args: [] }],
+  };
+  const found = [{ name: 'cur', source: 'cursor', enabled: true, transport: 'stdio', command: 'new', args: ['--x'] }];
+  const r = mergeIntoRegistry(registry, found);
+  assert.deepEqual(r.added, []);
+  assert.deepEqual(r.updated, ['cur']);
+  assert.equal(r.registry.servers.length, 1, 'no name-cursor duplicate row');
+  assert.equal(r.registry.servers[0].name, 'cur');
+  assert.equal(r.registry.servers[0].command, 'new');
+  assert.deepEqual(r.registry.servers[0].args, ['--x']);
+  assert.equal(r.registry.servers[0].enabled, false, 'a local 停用 outranks the config file');
+
+  const same = mergeIntoRegistry(registry, [{ ...found[0], command: 'old', args: [] }]);
+  assert.deepEqual(same.updated, []);
+  assert.ok(same.skipped.includes('cur'), 'an identical re-scan is a no-op');
 });

@@ -16,7 +16,7 @@ import * as mcpClient from '@deepseek-ai/dsh-mcp-client';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { describeAbout, toolNamesFor, aboutSourceLabel, needsInstructionsRead } from './lib/about.js';
 import { scanHost, mergeIntoRegistry } from './lib/scanner.js';
-import { searchOpenCatalogs, browseCatalog, catalogItemToEntry, fetchRepoStats } from './lib/catalog.js';
+import { browseCatalog, catalogItemToEntry, fetchRepoStats } from './lib/catalog.js';
 import {
   readInstalls, writeInstalls, recordInstallIn, installKeyOf,
   localInstallsOf, localLastInstallOf,
@@ -178,7 +178,7 @@ export async function apply(ctx) {
    *      for that long. A fiber still starting after the deadline is kept and
    *      reported as `starting`.
    */
-  async function connect(entry, { waitMs = CONNECT_WAIT_MS } = {}) {
+  async function connect(entry) {
     if (fibers.has(entry.name)) return { ok: true, already: true };
     const serverName = toServerName(entry.name);
     if (!serverName) return { ok: false, error: `invalid server name: ${entry.name}` };
@@ -204,7 +204,7 @@ export async function apply(ctx) {
     let timedOut = false;
     await Promise.race([
       fiber.await().catch((err) => { failure = err; }),
-      new Promise((resolve) => { setTimeout(() => { timedOut = true; resolve(); }, waitMs); }),
+      new Promise((resolve) => { setTimeout(() => { timedOut = true; resolve(); }, CONNECT_WAIT_MS); }),
     ]);
 
     if (failure) {
@@ -538,7 +538,11 @@ export async function apply(ctx) {
   // keeps 检查更新 from hitting the npm registry on every click.
   const selfUpdateCache = {};
 
-  const doCheckSelfUpdate = (opts = {}) => checkSelfUpdate({ moduleUrl: import.meta.url, cache: selfUpdateCache, ...opts });
+  // No option pass-through here on purpose: `/self` and the `self` field of
+  // `/updates` are documented as memoized for 10 minutes (README.zh-CN.md), and
+  // the only caller that must bypass the memo is `updateSelf()`, which passes
+  // `force: true` itself.
+  const doCheckSelfUpdate = () => checkSelfUpdate({ moduleUrl: import.meta.url, cache: selfUpdateCache });
 
   const doSelfUpdate = () => updateSelf({ moduleUrl: import.meta.url });
 
@@ -787,13 +791,15 @@ export async function apply(ctx) {
     }),
     defineTool({
       name: 'overall_mcp_search',
-      description: 'Search public open MCP server catalogs (official modelcontextprotocol registry, Smithery, Docker MCP Catalog, awesome-remote-mcp-servers, awesome-mcp-servers) by keyword and return installable candidates.',
+      description: 'Search public open MCP server catalogs (official modelcontextprotocol registry, Smithery, Docker MCP Catalog, awesome-remote-mcp-servers, awesome-mcp-servers) by keyword and return up to 50 installable candidates.',
       parameters: {
         query: { type: 'string', required: true, description: 'Search keywords, e.g. "github" or "postgres".' },
       },
       output: jsonOut,
       async execute({ query }) {
-        return await searchOpenCatalogs(query);
+        // Same all-source query the settings page uses, so the agent and the UI
+        // rank and dedupe identically; the cap keeps the reply inside a context.
+        return await browseCatalog({ query, limit: 50 });
       },
     }),
     defineTool({
@@ -897,11 +903,6 @@ export async function apply(ctx) {
     const routes = [
       ['/api/overall-mcp/servers', ['GET'], guard(async () => json(await serversPayload()))],
       ['/api/overall-mcp/scan', ['GET', 'POST'], guard(async () => json(await doScan()))],
-      ['/api/overall-mcp/search', ['POST'], guard(async (req) => {
-        const { query } = await readBody(req);
-        if (typeof query !== 'string' || !query.trim()) return json({ error: 'query required' }, 400);
-        return json(await searchOpenCatalogs(query));
-      })],
       ['/api/overall-mcp/catalog', ['GET', 'POST'], guard(async (req) => {
         let body = {};
         if (req.method === 'POST') body = await readBody(req);

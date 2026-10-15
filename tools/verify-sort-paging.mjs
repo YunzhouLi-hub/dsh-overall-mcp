@@ -51,6 +51,9 @@ function compareMarket(a, b, sort, stats) {
       return (tb - ta) || qb - qa;
     }
     case 'name': return a.title.localeCompare(b.title) || qb - qa;
+    // The dropdown lists 「质量最高」 as its own choice; it is the same weighted
+    // score the default order uses, and this tool's copy must match the bundle.
+    case 'quality': return qb - qa;
     default: return qb - qa;
   }
 }
@@ -83,6 +86,13 @@ const byQuality = items.slice().sort((a, b) => compareMarket(a, b, 'default', st
 // pulls — provenance over raw popularity, which is the point of the default order.
 assert.equal(byQuality[0].id, 'a', 'verified + installable leads the default order');
 assert.equal(byQuality.at(-1).id, 'e', 'a deprecated entry sinks to the bottom of the default order');
+
+// The dropdown offers 「质量最高」 as a separate choice, so it must actually
+// apply the score rather than fall through to nothing (it used to sort by the
+// same default and merely look selected).
+const byExplicitQuality = items.slice().sort((a, b) => compareMarket(a, b, 'quality', starStats));
+assert.deepEqual(byExplicitQuality.map((i) => i.id), byQuality.map((i) => i.id),
+  'the explicit 质量最高 choice orders exactly like the default score order');
 
 const byInstalls = items.slice().sort((a, b) => compareMarket(a, b, 'installs', starStats));
 assert.equal(byInstalls[0].id, 'b', 'installs desc: 1.9M pulls first');
@@ -130,4 +140,4 @@ assert.equal(compactCount(9999), '9.9k');
 assert.equal(compactCount(1200000), '1.2M');
 assert.equal(compactCount(5364000), '5.3M');
 
-console.log('sort + paging logic verified: 5 orderings, 3 page sizes, clamping, compact counts');
+console.log('sort + paging logic verified: 6 orderings, 3 page sizes, clamping, compact counts');

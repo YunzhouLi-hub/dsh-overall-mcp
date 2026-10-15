@@ -179,17 +179,20 @@ Invalid schema for function 'mcp__rea-om__analyze_javascript_application':
 `GET /api/overall-mcp/servers`、`GET /api/overall-mcp/tools`（schema 取证）、
 `GET|POST /api/overall-mcp/updates`（版本检查）、`POST /api/overall-mcp/update`（更新并重连）、
 `GET|POST /api/overall-mcp/catalog?query=&source=&limit=&refresh=`、
-`POST /api/overall-mcp/scan`、`POST /api/overall-mcp/search`、
+`POST /api/overall-mcp/scan`、
 `POST /api/overall-mcp/install`、`POST /api/overall-mcp/set-enabled`、
 `POST /api/overall-mcp/set-source-enabled`、`POST /api/overall-mcp/remove`、
 `POST /api/overall-mcp/favorite`（收藏，见下）、
 `GET /api/overall-mcp/repo-stats?repos=owner/name,...`
 
+模型工具 `overall_mcp_search` 与市场页共用同一条聚合查询（`lib/catalog.js` 的 `browseCatalog`）：同一套去重、分组与排序，只是服务端把结果截到 50 条。
+
 ### 收藏（favorite）
 
-`POST /api/overall-mcp/favorite`，body `{"key":"<source>:<id|title>","on":true|false}`（缺省 `on` 时按当前状态取反）。
+`POST /api/overall-mcp/favorite`，body `{"key":"<source>:<id|title>"}`：**切换**该条目的收藏状态（不带 `on` 字段——宿主目前只认 `key`，见 `index.js` 的 `doToggleFavorite`）。
 key 就是市场卡片的 React key，因为官方 Registry 的 id 随版本变化，所以用「来源 + 标题」做稳定身份。
 收藏集存在 `registry.favorites`，随注册表一起持久化；`/catalog` 每条都会标注 `favorite`。
+已知缺口：面板只能写入收藏，没有任何读取面（没有 `/favorites` 路由，也没有「仅看收藏」的筛选或排序），见 `INTEGRATION-TODO.md`。
 实测：`{"key":"official-registry:official:ai.0si/disclosures","favorite":true,"favorites":[...]}`，再次浏览同一条目即返回 `favorite: true`。
 
 ## 扫描的宿主机位置

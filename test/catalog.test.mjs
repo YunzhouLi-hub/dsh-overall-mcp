@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  searchOpenCatalogs, browseCatalog, catalogItemToEntry, fetchAwesomeList,
+  browseCatalog, catalogItemToEntry, fetchAwesomeList,
   fetchAwesomeRemote, fetchDockerCatalog, githubReposOf, fetchRepoStats,
   functionalGroupOf, inferGroupOf, groupSourceOf,
 } from '../lib/catalog.js';
@@ -92,16 +92,16 @@ const okFetch = async (url) => {
   };
 };
 
-test('searchOpenCatalogs merges and matches query', async () => {
-  const { items, errors } = await searchOpenCatalogs('search', { fetchImpl: okFetch });
+test('browseCatalog merges and matches a query', async () => {
+  const { items, errors } = await browseCatalog({ query: 'search', fetchImpl: okFetch });
   assert.equal(errors.length, 0);
   assert.ok(items.length >= 1);
   assert.ok(items.every((i) => /search/i.test(i.title + i.description + (i.author ?? ''))));
 });
 
-test('searchOpenCatalogs degrades on source failure', async () => {
+test('browseCatalog degrades on source failure', async () => {
   const failing = async () => { throw new Error('boom'); };
-  const { items, errors } = await searchOpenCatalogs('', { fetchImpl: failing });
+  const { items, errors } = await browseCatalog({ fetchImpl: failing });
   assert.equal(items.length, 0);
   // One error per configured source — a dead catalog never hides the others.
   assert.equal(errors.length, 5);

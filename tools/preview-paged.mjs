@@ -60,6 +60,7 @@ function compareMarket(a, b, sortKey, stats) {
     case 'stars': return desc(starCountOf(a, stats), starCountOf(b, stats)) || qb - qa;
     case 'updated': return (Date.parse(b.updatedAt ?? '') || 0) - (Date.parse(a.updatedAt ?? '') || 0) || qb - qa;
     case 'name': return a.title.localeCompare(b.title) || qb - qa;
+    case 'quality': return qb - qa;   // the dropdown's 质量最高 choice
     default: return qb - qa;
   }
 }

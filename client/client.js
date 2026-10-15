@@ -16,15 +16,25 @@
 // Two tabs:
 //   「已注册」 — servers grouped by import source (collapsible, per-group switch)
 //   「MCP 市场」— live discovery of available MCP servers from the public
-//                 catalogs (official registry / Smithery / PulseMCP)
+//                 catalogs (official registry / Smithery / Docker Hub /
+//                 awesome-remote-mcp-servers / awesome-mcp-servers)
 //
-// Host API (Connection-authenticated same-origin fetch routes, index.js):
+// Host API (Connection-authenticated same-origin fetch routes, index.js). The
+// list below is what this page actually calls; the host also serves /self and
+// /tools as documented read-only diagnostics (README.zh-CN.md) that the page
+// never touches:
 //   GET  /api/overall-mcp/servers
 //   GET  /api/overall-mcp/scan
 //   GET/POST /api/overall-mcp/catalog           { query?, source?, limit?, refresh? }
+//   GET/POST /api/overall-mcp/repo-stats        { refresh? }
+//   GET/POST /api/overall-mcp/repo-media        { repo }
 //   POST /api/overall-mcp/install               { item }
+//   POST /api/overall-mcp/favorite              { key }
 //   POST /api/overall-mcp/set-enabled           { name, enabled }
 //   POST /api/overall-mcp/set-source-enabled    { source, enabled }
+//   GET  /api/overall-mcp/updates
+//   POST /api/overall-mcp/self-update
+//   POST /api/overall-mcp/update                { name }
 //   POST /api/overall-mcp/remove                { name }
 
 window.__ModuleLoader__.load({
@@ -84,7 +94,6 @@ window.__ModuleLoader__.load({
 			"catalog:docker-catalog": "Docker MCP Catalog",
 			"catalog:awesome-remote": "Awesome 远程",
 			"catalog:awesome-list": "Awesome 清单",
-			"catalog:pulsemcp": "PulseMCP",
 		};
 
 		function sourceLabel(source) {
@@ -1429,10 +1438,10 @@ window.__ModuleLoader__.load({
 		/**
 		 * Compare two market entries under a user-chosen sort.
 		 *
-		 * `default` is quality (above). The others each key on ONE field so the
-		 * order is explainable, and every field falls back to quality rather than
-		 * to 0 — an entry the source published no number for is not thereby the
-		 * least popular one.
+		 * `default` and the explicit `quality` choice are the same weighted score
+		 * (above). The others each key on ONE field so the order is explainable,
+		 * and every field falls back to quality rather than to 0 — an entry the
+		 * source published no number for is not thereby the least popular one.
 		 *
 		 * For a descending sort an entry that HAS the number still outranks one
 		 * that does not, so a missing value sorts last rather than tying with
@@ -1480,6 +1489,11 @@ window.__ModuleLoader__.load({
 				}
 				case "name":
 					return a.title.localeCompare(b.title) || qb - qa;
+				case "quality":
+					// Same weighted score the default order uses (provenance, then
+					// log-scaled popularity). Listed as a choice so the label the
+					// dropdown promises is also the one that gets applied.
+					return qb - qa;
 				default:
 					return qb - qa;
 			}
@@ -1947,12 +1961,15 @@ window.__ModuleLoader__.load({
 			/**
 			 * Star counts are not part of the public catalogs: the cards render
 			 * first without them and a single bounded, cached request fills in the
-			 * visible GitHub repositories afterwards. Never blocks or fails the tab.
+			 * first 30 GitHub repositories of the listing afterwards. Never blocks
+			 * or fails the tab.
 			 *
 			 * The window is wider than the fold because the interleaved market puts
 			 * only one community-index card per round; a first-screen window would
 			 * often contain no GitHub repository at all. Still capped so the
-			 * unauthenticated GitHub budget (60/h) survives repeated page opens.
+			 * unauthenticated GitHub budget (60/h) survives repeated page opens —
+			 * which also means the Star sort only discriminates among those 30
+			 * repositories until the rest are enriched.
 			 */
 			function enrichStars(items, refresh) {
 				const repos = [];
@@ -1971,7 +1988,11 @@ window.__ModuleLoader__.load({
 				api("/repo-stats", { method: "POST", body: JSON.stringify({ repos, refresh }) })
 					.then((body) => {
 						setRepoStats((prev) => ({ ...prev, ...(body.stats ?? {}) }));
-						if (body.rateLimited) setStarNote("GitHub 未认证接口每小时仅 60 次，已达上限；Star 将在下个整点后补齐");
+						// GitHub's unauthenticated window is a rolling 60 minutes from
+						// the first request, not a wall-clock hour, and the host
+						// re-probes on a TTL — so promise "after the quota comes
+						// back", never "after the next hour".
+						if (body.rateLimited) setStarNote("GitHub 未认证接口每小时仅 60 次，本轮额度已用完；额度恢复后会自动补齐");
 					})
 					.catch(() => {});
 			}
@@ -2241,6 +2262,18 @@ window.__ModuleLoader__.load({
 
 			const groups = useMemo(() => {
 				const needle = nameFilter.trim().toLowerCase();
+				// The field advertises 「名称、来源或命令」, so all three (plus the URL
+				// a streamable-http entry has instead of a command) are searched —
+				// otherwise the box silently refuses to find what its own title
+				// says it can.
+				const matches = (server) => {
+					if (!needle) return true;
+					const hay = [server.name, server.source, server.command, server.url]
+						.filter((v) => typeof v === "string" && v)
+						.join(" ")
+						.toLowerCase();
+					return hay.includes(needle);
+				};
 				const bySource = new Map();
 				for (const server of all) {
 					const source = server.source || "manual";
@@ -2249,7 +2282,7 @@ window.__ModuleLoader__.load({
 					if (stateFilter === "disabled" && server.enabled !== false) continue;
 					if (stateFilter === "connected" && !server.connected) continue;
 					if (stateFilter === "failed" && !server.error) continue;
-					if (needle && !server.name.toLowerCase().includes(needle)) continue;
+					if (!matches(server)) continue;
 					if (!bySource.has(source)) bySource.set(source, []);
 					bySource.get(source).push(server);
 				}
@@ -2301,12 +2334,6 @@ window.__ModuleLoader__.load({
 			const pageItems = sortedItems
 				? sortedItems.slice(safePage * pageSize, safePage * pageSize + pageSize)
 				: null;
-			// Star enrichment is scoped to what the current page actually shows, so
-			// paging does not burn the GitHub budget on entries nobody is looking at.
-			const visibleRepos = (pageItems ?? [])
-				.map((i) => repoKeyOf(i))
-				.filter((k) => k && !(repoStats[k]?.stars !== undefined && repoStats[k]))
-				.slice(0, 30);
 
 			// The one outlined control that belongs beside the sub-line rather
 			// than in the run of text buttons on the first row.
