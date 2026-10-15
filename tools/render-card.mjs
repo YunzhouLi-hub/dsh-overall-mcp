@@ -92,6 +92,25 @@ const samples = [
     chips: ['游戏娱乐', '需手动配置'],
   },
   {
+    // The GitHub search source: discovery only (no install), but the row already
+    // carries stars/forks/language, so the GitHub block must render them even
+    // though no /repos enrichment ran for it.
+    name: 'github search row: repository facts without an enrichment pass',
+    item: {
+      id: 'github:github/github-mcp-server', title: 'github-mcp-server', source: 'github-mcp', author: 'github',
+      description: "GitHub's official MCP Server", transport: 'unknown', install: null,
+      group: '开发工具', repository: 'https://github.com/github/github-mcp-server',
+      tags: ['mcp', 'github'], stars: 33637, forks: 2100, openIssues: 143,
+      language: 'Go', updatedAt: '2026-10-01T00:00:00Z',
+      installable: false, installed: false,
+    },
+    titleHref: 'https://github.com/github/github-mcp-server', installable: false,
+    chips: ['开发工具', '需手动配置'],
+    // Rendered from the row itself: no `stats` entry exists for this repo.
+    // (The language row lives in the detail panel — see render-detail.mjs.)
+    expectText: ['33.6k', '⑂2.1k'],
+  },
+  {
     name: 'smithery (no repo): title links the registry listing',
     item: {
       id: 'smithery:brave', title: 'Brave Search', source: 'smithery', author: 'brave',
@@ -133,7 +152,7 @@ const samples = [
   },
 ];
 
-for (const { name, item, titleHref, installable, chips, groupTitlePrefix, localInstalls } of samples) {
+for (const { name, item, titleHref, installable, chips, groupTitlePrefix, localInstalls, expectText } of samples) {
   const tree = __test.MarketCard({
     item, stats: {}, media: {}, busy: false, onInstall: () => {}, onOpen: () => {},
     onToggleFavorite: () => {},
@@ -149,6 +168,12 @@ for (const { name, item, titleHref, installable, chips, groupTitlePrefix, localI
   assert.equal(title.props.rel, 'noreferrer', `${name}: title link missing rel`);
   // The anchor must not fall through to the card's open handler.
   assert.equal(typeof title.props.onClick, 'function', `${name}: title link does not stop propagation`);
+
+  // 1b. Facts the row carries itself must render without an enrichment entry.
+  const cardText = textOf(tree);
+  for (const want of expectText ?? []) {
+    assert.ok(cardText.includes(want), `${name}: the card states ${want} (got ${cardText.slice(0, 200)})`);
+  }
 
   // 2. No interactive element ever nests inside another. A link inside a
   //    button is the "链接不可直达" bug: the click races the navigation.

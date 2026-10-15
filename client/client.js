@@ -206,6 +206,7 @@ window.__ModuleLoader__.load({
 			["official-registry", "官方 Registry"],
 			["smithery", "Smithery"],
 			["docker-catalog", "Docker MCP Catalog"],
+			["github-mcp", "GitHub MCP"],
 			["awesome-remote", "Awesome 远程"],
 			["awesome-list", "Awesome 清单"],
 		];
@@ -228,6 +229,7 @@ window.__ModuleLoader__.load({
 			"official-registry": "官方",
 			smithery: "Smithery",
 			"docker-catalog": "Docker",
+			"github-mcp": "GitHub",
 			"awesome-remote": "远程",
 			"awesome-list": "Awesome",
 		};
@@ -1556,10 +1558,13 @@ window.__ModuleLoader__.load({
 								createElement("b", { key: "n", style: styles.statB }, compact(stars)),
 							])
 							: null,
-						typeof enriched?.forks === "number"
+						// Fork / issue / language come from the enrichment pass when it
+						// ran; the GitHub search source already carries them on the row
+						// itself, so fall back to those instead of showing nothing.
+						typeof (enriched?.forks ?? item.forks) === "number"
 							? createElement("span", { key: "fk", style: styles.stat, title: "GitHub Fork" }, [
 								createElement("span", { key: "g" }, "⑂"),
-								createElement("b", { key: "n", style: styles.statB }, compact(enriched.forks)),
+								createElement("b", { key: "n", style: styles.statB }, compact(enriched?.forks ?? item.forks)),
 							])
 							: null,
 						enriched?.license
@@ -1693,8 +1698,9 @@ window.__ModuleLoader__.load({
 		 * three different sources with three different units, so they can break a
 		 * tie but must never outrank a verified entry.
 		 *
-		 * @param stats the GitHub enrichment map — no catalog publishes stars, so
-		 *   `item.stars` alone would make this term dead code.
+		 * @param stats the GitHub enrichment map — most catalogs publish no star
+		 *   count, so a row's own `item.stars` (which only the GitHub source
+		 *   carries) would otherwise almost never be seen.
 		 */
 		function qualityOf(item, stats) {
 			let score = 0;
@@ -2104,33 +2110,37 @@ window.__ModuleLoader__.load({
 							target: "_blank", rel: "noreferrer", style: styles.ghRepo,
 							onClick: (e) => openExternal(e, item.repository),
 						}, repo),
-						enriched
+						// A row that already carries GitHub facts (the search source does)
+						// must render them even when the enrichment pass never ran — the
+						// fallback is the row's own numbers, and only a row with nothing
+						// at all gets the "unavailable" line.
+						enriched || typeof (item.stars ?? item.forks) === "number"
 							? [
 								createElement("div", { key: "s", style: styles.ghStats }, [
-									typeof enriched.stars === "number" ? ghStat("Star", enriched.stars) : null,
-									typeof enriched.forks === "number" ? ghStat("Fork", enriched.forks) : null,
+									typeof (enriched?.stars ?? item.stars) === "number" ? ghStat("Star", enriched?.stars ?? item.stars) : null,
+									typeof (enriched?.forks ?? item.forks) === "number" ? ghStat("Fork", enriched?.forks ?? item.forks) : null,
 									// GitHub's `open_issues_count` counts pull requests
 									// too, and `subscribers_count` is the watch count —
 									// neither is the number the bare words promise, so
 									// each label carries its field name.
-									typeof enriched.openIssues === "number"
-										? ghStat("Issue（含 PR）", enriched.openIssues, false,
+									typeof (enriched?.openIssues ?? item.openIssues) === "number"
+										? ghStat("Issue（含 PR）", enriched?.openIssues ?? item.openIssues, false,
 											"GitHub 的 open_issues_count：Pull Request 也算在内")
 										: null,
-									typeof enriched.watchers === "number"
+									typeof enriched?.watchers === "number"
 										? ghStat("Watch（订阅）", enriched.watchers, false,
 											"GitHub 的 subscribers_count：订阅（watch）该仓库的人数，不是 Star 数")
 										: null,
-									enriched.license ? ghStat("许可证", enriched.license, true) : null,
+									enriched?.license ? ghStat("许可证", enriched.license, true) : null,
 								].filter(Boolean)),
-								...(enriched.archived
+								...(enriched?.archived
 									? [createElement("div", { key: "arc", style: styles.warnLine }, "该仓库已被作者归档（Archived）")]
 									: []),
-								...(enriched.language || enriched.pushedAt || enriched.createdAt
+								...((enriched?.language ?? item.language) || enriched?.pushedAt || enriched?.createdAt
 									? [
-										enriched.language ? DetailRow("语言", enriched.language) : null,
-										enriched.pushedAt ? DetailRow("最近推送", enriched.pushedAt.slice(0, 10)) : null,
-										enriched.createdAt ? DetailRow("创建于", enriched.createdAt.slice(0, 10)) : null,
+										(enriched?.language ?? item.language) ? DetailRow("语言", enriched?.language ?? item.language) : null,
+										enriched?.pushedAt ? DetailRow("最近推送", enriched.pushedAt.slice(0, 10)) : null,
+										enriched?.createdAt ? DetailRow("创建于", enriched.createdAt.slice(0, 10)) : null,
 									].filter(Boolean)
 									: []),
 							]
@@ -2146,7 +2156,10 @@ window.__ModuleLoader__.load({
 						DetailRow("作者", author ? `@${author}` : "—"),
 						DetailRow("版本", item.version ?? "—"),
 						DetailRow("传输", item.transport && item.transport !== "unknown" ? item.transport : "—"),
-						repo && enriched ? null
+						// The GitHub block above already states the star count when
+						// enrichment ran OR the row shipped its own numbers (the search
+						// source does); only a row with neither falls through to here.
+						repo && (enriched || typeof item.stars === "number") ? null
 							: DetailRow("Star", typeof enriched?.stars === "number" ? String(enriched.stars)
 								: typeof item.stars === "number" ? String(item.stars) : "目录未提供"),
 						enriched?.pushedAt ? null
@@ -3617,8 +3630,12 @@ window.__ModuleLoader__.load({
 										`内置：${MARKET_SOURCES.slice(1).map(([id, label]) => {
 											const st = market?.sources?.[id];
 											if (market?.sources && !st) return `${label} 未参与`;
+											// A source that answered nothing shows why, in the
+											// same words the custom rows use — a bare `0` would
+											// read as "this catalog is empty".
+											if (st?.error) return `${label} 不可用：${st.error}`;
 											const at = sourceClock(st?.at);
-											return `${label} ${market?.counts?.[id] ?? 0}${at ? `（${at}）` : ""}`;
+											return `${label} ${market?.counts?.[id] ?? 0}${st?.stale ? "（旧）" : ""}${at ? `（${at}）` : ""}`;
 										}).join(" · ")}`),
 									...customSourceRows.map((s) => {
 										const st = market?.sources?.[s.id];

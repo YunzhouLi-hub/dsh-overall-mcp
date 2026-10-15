@@ -109,6 +109,19 @@ const samples = [
     },
     expect: { links: ['主页', 'Smithery 页面'], cmd: 'npx -y @smithery/cli run brave' },
   },
+  {
+    // The GitHub search source: no installer, no `/repos` enrichment entry, but
+    // the row itself carries the repository facts — they must still be stated.
+    name: 'github search row (facts live on the row, no enrichment)',
+    item: {
+      id: 'github:github/github-mcp-server', title: 'github-mcp-server', source: 'github-mcp', author: 'github',
+      description: "GitHub's official MCP Server", transport: 'unknown', install: null,
+      repository: 'https://github.com/github/github-mcp-server', tags: ['mcp', 'github'],
+      stars: 33637, forks: 2100, openIssues: 143, language: 'Go', updatedAt: '2026-10-01T00:00:00Z',
+      installable: false, installed: false,
+    },
+    expect: { links: ['GitHub 仓库'], text: ['Go', '33.6k', '2.1k'] },
+  },
 ];
 
 for (const { name, item, expect } of samples) {
@@ -140,6 +153,12 @@ for (const { name, item, expect } of samples) {
   // 4. The exact install command, or its documented absence.
   if (expect.cmd) {
     assert.ok(all.includes(expect.cmd), `${name}: install command "${expect.cmd}" missing`);
+  }
+
+  // 4b. Facts the row carries must be stated even with no enrichment entry
+  //     (the GitHub search source is the only one that ships them).
+  for (const want of expect.text ?? []) {
+    assert.ok(all.includes(want), `${name}: "${want}" missing from the panel (got ${all.slice(0, 240)})`);
   }
 
   // 5. No anchor ever points at the raw.githubusercontent mirror chain — links

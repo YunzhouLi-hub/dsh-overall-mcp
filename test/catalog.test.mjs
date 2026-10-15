@@ -3,9 +3,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   browseCatalog, catalogItemToEntry, fetchAwesomeList,
-  fetchAwesomeRemote, fetchDockerCatalog, githubReposOf, fetchRepoStats,
+  fetchAwesomeRemote, fetchDockerCatalog, fetchGithubMcp, githubReposOf, fetchRepoStats,
   functionalGroupOf, inferGroupOf, groupSourceOf,
 } from '../lib/catalog.js';
+import { CATALOG_SOURCES } from '../lib/catalog.js';
 import { createCatalogCache } from '../lib/catalog-cache.js';
 
 // The companion list of *hosted* endpoints: `- [Title](home) \`url\`` with an
@@ -57,6 +58,38 @@ const AWESOME_MD = [
 
 // The live sources all answer through the same fetchImpl: official registry and
 // Smithery are JSON, the two awesome-lists are markdown, Docker is JSON.
+// GitHub search answers. `acme/shared-mcp` is in both answers on purpose: the
+// merge must key it by `github:acme/shared-mcp` and keep one row.
+const ghRepo = (full, stars, topics, extra = {}) => ({
+  full_name: full,
+  name: full.split('/')[1],
+  owner: { login: full.split('/')[0] },
+  description: `${full} is an MCP server`,
+  homepage: `https://${full.split('/')[1]}.example`,
+  html_url: `https://github.com/${full}`,
+  topics,
+  language: 'TypeScript',
+  stargazers_count: stars,
+  forks_count: 7,
+  open_issues_count: 3,
+  archived: false,
+  pushed_at: '2026-10-01T00:00:00Z',
+  ...extra,
+});
+const GH_SEARCH_BY_NAME = {
+  total_count: 2,
+  items: [ghRepo('acme/github-mcp-server', 33637, ['mcp', 'mcp-server']), ghRepo('acme/shared-mcp', 120, ['mcp'])],
+};
+const GH_SEARCH_BY_TOPIC = {
+  total_count: 2,
+  items: [
+    ghRepo('acme/shared-mcp', 120, ['mcp', 'postgres']),
+    // Not something the query should return (`archived:false`), but if the
+    // upstream ever does answer with it, it must not be advertised as active.
+    ghRepo('acme/dead-mcp', 900, ['mcp-server'], { archived: true }),
+  ],
+};
+
 const okFetch = async (url) => {
   const href = String(url);
   if (href.includes('awesome-remote-mcp-servers')) {
@@ -78,6 +111,17 @@ const okFetch = async (url) => {
           homepage: 'https://github.com/acme/pg-mcp',
         }],
       }),
+    };
+  }
+  if (href.includes('api.github.com/search/repositories')) {
+    // The two configured queries answer with overlapping rows on purpose: the
+    // shared repository must appear once after the merge, not twice.
+    const byName = new URL(href).searchParams.get('q')?.includes('in:name');
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => undefined },
+      json: async () => (byName ? GH_SEARCH_BY_NAME : GH_SEARCH_BY_TOPIC),
     };
   }
   return {
@@ -105,7 +149,9 @@ test('browseCatalog degrades on source failure', async () => {
   const { items, errors } = await browseCatalog({ fetchImpl: failing });
   assert.equal(items.length, 0);
   // One error per configured source — a dead catalog never hides the others.
-  assert.equal(errors.length, 5);
+  // Read from the registry rather than a literal: adding a source must not need
+  // this test edited (it was "5" until GitHub search became the sixth).
+  assert.equal(errors.length, CATALOG_SOURCES.length);
   assert.equal(errors[0].message, 'boom');
 });
 
@@ -913,7 +959,7 @@ test('a custom id that is no longer configured answers unknown, not a crash', as
   assert.deepEqual(result.sources['custom:removed'], { error: 'unknown catalog source: custom:removed' });
 });
 
-test('custom sources join a full browse after the built-in five', async () => {
+test('custom sources join a full browse after the built-in sources', async () => {
   const fetchImpl = async (url) => {
     if (String(url) === CUSTOM_URL) return { ok: true, json: async () => CUSTOM_DOC };
     return okFetch(url);
@@ -923,9 +969,123 @@ test('custom sources join a full browse after the built-in five', async () => {
   assert.equal(result.counts[CUSTOM_DEF.id], 3);
   assert.equal(result.sources[CUSTOM_DEF.id].cached, false);
   // Every built-in still answered; the custom rows are merged in, not replacing.
-  for (const id of ['official-registry', 'smithery', 'docker-catalog', 'awesome-remote', 'awesome-list']) {
+  for (const id of CATALOG_SOURCES) {
     assert.ok(result.sources[id], `${id} still browsed`);
   }
   assert.ok(result.items.some((i) => i.source === CUSTOM_DEF.id));
+});
+
+test('GitHub search is read as discovery rows, deduped across its two queries', async () => {
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(new URL(String(url)).searchParams.get('q'));
+    return okFetch(url);
+  };
+  const { items } = await fetchGithubMcp({ fetchImpl, limit: 100, pages: 2 });
+
+  // Two requests — one per query — against a 10-per-minute anonymous budget.
+  // The tag query requires MCP in the description: the bare topic's star-sorted
+  // head is platforms (n8n, gemini-cli), not servers.
+  assert.deepEqual(calls, ['mcp-server in:name archived:false', 'topic:mcp-server mcp in:description archived:false']);
+
+  // The repository in both answers appears once (dedupe by full_name).
+  const shared = items.filter((i) => i.id === 'github:acme/shared-mcp');
+  assert.equal(shared.length, 1);
+
+  const server = items.find((i) => i.id === 'github:acme/github-mcp-server');
+  assert.equal(server.title, 'github-mcp-server');
+  assert.equal(server.author, 'acme');
+  assert.equal(server.source, 'github-mcp');
+  assert.equal(server.repository, 'https://github.com/acme/github-mcp-server');
+  assert.equal(server.stars, 33637);
+  // Facts the search response already carries: the card renders them even when
+  // the /repos enrichment pass never ran (its budget is 60 requests per hour).
+  assert.equal(server.language, 'TypeScript');
+  assert.equal(server.forks, 7);
+  assert.equal(server.openIssues, 3);
+  assert.deepEqual(server.tags, ['mcp', 'mcp-server']);
+  assert.equal(server.updatedAt, '2026-10-01T00:00:00Z');
+  assert.equal(server.status, 'active');
+  // A repository listing never says how to run the thing: no installer.
+  assert.equal(server.install, null);
+  assert.equal(server.transport, 'unknown');
+  assert.equal(server.verified, undefined);
+
+  // An archived answer is not advertised as active work.
+  const dead = items.find((i) => i.id === 'github:acme/dead-mcp');
+  assert.equal(dead.status, 'archived');
+  assert.equal(dead.deprecated, true);
+});
+
+test('GitHub search obeys the request budget it is given', async () => {
+  const calls = [];
+  const fetchImpl = async (url) => { calls.push(String(url)); return okFetch(url); };
+  // One request: the second query is simply not asked.
+  const { items } = await fetchGithubMcp({ fetchImpl, limit: 1, pages: 1 });
+  assert.equal(calls.length, 1);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].id, 'github:acme/github-mcp-server');
+});
+
+test('every upstream request identifies the client', async () => {
+  // Measured here: api.github.com/search/repositories answers 403 "API rate
+  // limit exceeded" with only an `accept` header, and 200 with a user-agent.
+  // GitHub documents the requirement; the regression is invisible until the
+  // GitHub source silently stops contributing rows.
+  const headers = [];
+  const fetchImpl = async (url, init) => {
+    headers.push({ url: String(url), ...(init?.headers ?? {}) });
+    return okFetch(url);
+  };
+  await browseCatalog({ fetchImpl });
+  assert.ok(headers.length > 0);
+  for (const h of headers) {
+    assert.equal(h['user-agent'], 'dsh-overall-mcp (DeepSeek Harness plugin)', `request to ${h.url} says who it is`);
+  }
+  // …while the per-request headers still do their own job.
+  assert.ok(headers.every((h) => typeof h.accept === 'string' && h.accept.length > 0));
+});
+
+test('a rate-limited upstream is retried once instead of failing the source', async () => {
+  // docker-catalog answers through the same fetchJson: first call 403 (what
+  // hub.docker.com really does in bursts), second call the listing.
+  let seen = 0;
+  const fetchImpl = async () => {
+    seen += 1;
+    if (seen === 1) return { ok: false, status: 403, headers: { get: () => undefined }, json: async () => ({}) };
+    return okFetch('https://hub.docker.com/v2/repositories/mcp/');
+  };
+  const result = await browseCatalog({ source: 'docker-catalog', fetchImpl });
+  assert.equal(seen, 2);
+  assert.equal(result.errors.length, 0);
+  // The fixture's own two repositories, i.e. the second attempt's body was used.
+  assert.equal(result.sources['docker-catalog'].items, 2);
+});
+
+test('a 404 is not retried, and a 403 that never lifts still reports its status', async () => {
+  // A missing mirror file is permanent: retrying it would only add 2.5s.
+  let missing = 0;
+  await browseCatalog({
+    source: 'docker-catalog',
+    fetchImpl: async () => {
+      missing += 1;
+      return { ok: false, status: 404, headers: { get: () => undefined }, json: async () => ({}) };
+    },
+  }).catch(() => {});
+  assert.equal(missing, 1);
+
+  // Rate limiting that outlives the retry is still an error the caller sees,
+  // quoting the status rather than a generic failure.
+  let limited = 0;
+  const result = await browseCatalog({
+    source: 'docker-catalog',
+    fetchImpl: async () => {
+      limited += 1;
+      return { ok: false, status: 403, headers: { get: () => undefined }, json: async () => ({}) };
+    },
+  });
+  assert.equal(limited, 2);
+  assert.equal(result.errors.length, 1);
+  assert.equal(result.errors[0].message, 'HTTP 403');
 });
 

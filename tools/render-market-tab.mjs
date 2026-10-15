@@ -85,15 +85,19 @@ const MARKET = {
       installs: 90000, installsLabel: '次启动',
     },
   ],
-  counts: { 'official-registry': 1, 'awesome-list': 1, 'awesome-remote': 1 },
+  counts: { 'official-registry': 1, 'awesome-list': 1, 'awesome-remote': 1, 'github-mcp': 2 },
   total: 3, cached: true, fetchedAt: Date.now(),
-  // Two of the five sources answered 304 on the last walk, so the freshness
-  // line has something honest to say beyond the timestamp.
+  // Two of the sources answered 304 on the last walk, so the freshness line has
+  // something honest to say beyond the timestamp.
   notModified: 2,
   sources: {
     'official-registry': { at: new Date().toISOString(), cached: true, stale: false, notModified: 1, items: 1 },
     'awesome-list': { at: new Date().toISOString(), cached: true, stale: false, notModified: 1, items: 1 },
     'awesome-remote': { at: new Date().toISOString(), cached: false, stale: false, notModified: 0, items: 1 },
+    // The GitHub search source contributed rows, and Docker answered nothing:
+    // a rate limit has to be visible as a reason, not as a bare zero.
+    'github-mcp': { at: new Date().toISOString(), cached: false, stale: false, notModified: 0, items: 2 },
+    'docker-catalog': { error: 'HTTP 403' },
   },
 };
 
@@ -415,7 +419,12 @@ assert.ok(sourceText.includes('其中 1 个已安装'), 'per-source line names t
   assert.ok(rowText.includes('acme/mcp-registry'), 'the row names the source');
   assert.ok(rowText.includes(CUSTOM_SOURCE.url), 'and shows the address it reads');
   assert.ok(/0 条/.test(rowText), `a source that contributed nothing says so instead of vanishing (got ${rowText})`);
-  assert.ok(rowText.includes('内置：'), 'the built-in five are listed beside the user\'s own');
+  assert.ok(rowText.includes('内置：'), 'the built-in sources are listed beside the user\'s own');
+  // The GitHub search source is one of them now, and a source that answered
+  // nothing shows the reason — a bare `0` would read as "this catalog is empty".
+  assert.ok(rowText.includes('GitHub MCP 2'), `the GitHub source and its row count are on the line (got ${rowText})`);
+  assert.ok(rowText.includes('Docker MCP Catalog 不可用：HTTP 403'), `a failed source shows why (got ${rowText})`);
+  assert.ok(textOf(srcSelect).includes('GitHub MCP'), 'and the new source is offered as a filter');
   assert.ok(rowText.includes('最多 8 个'), 'the cap and the https rule are stated where the URL is typed');
 
   // Where the list accepts entries, the row offers the uplink — and it opens the
