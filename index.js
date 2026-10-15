@@ -696,11 +696,21 @@ export async function apply(ctx) {
     };
   }
 
-  /** Toggle one market entry's favourite, persisted with the registry. */
-  async function doToggleFavorite({ key } = {}) {
+  /**
+   * Toggle one market entry's favourite, or set it when the caller says which.
+   *
+   * `key` alone toggles — the panel's star has no other way to express "flip
+   * what you have". An optional boolean `on` makes the same route idempotent
+   * for callers that do know the state they want (a script, the probe, a future
+   * multi-select), which is what a POST to a named resource normally means.
+   */
+  async function doToggleFavorite({ key, on } = {}) {
     if (typeof key !== 'string' || !key.trim()) throw new Error('key required');
+    if (on !== undefined && typeof on !== 'boolean') throw new Error('on must be a boolean when given');
     const normalized = key.trim().slice(0, 200);
-    if (favorites.has(normalized)) favorites.delete(normalized);
+    if (on === true) favorites.add(normalized);
+    else if (on === false) favorites.delete(normalized);
+    else if (favorites.has(normalized)) favorites.delete(normalized);
     else favorites.add(normalized);
     registry.favorites = [...favorites].sort();
     await save();
@@ -1043,9 +1053,17 @@ export async function apply(ctx) {
       // next browse reflects the new state; the page also patches its own copy
       // so the star flips without a 2 MB re-fetch.
       ['/api/overall-mcp/favorite', ['POST'], guard(async (req) => {
-        const { key } = await readBody(req);
-        return json(await doToggleFavorite({ key }));
+        const { key, on } = await readBody(req);
+        return json(await doToggleFavorite({ key, on }));
       })],
+      // The read side of the same set. `/catalog` marks each entry it returns,
+      // but the marks only exist for entries the current query happens to
+      // include — a source filter or a search would hide the rest, so "what have
+      // I starred" needs an answer that does not depend on the listing on screen.
+      ['/api/overall-mcp/favorites', ['GET'], guard(async () => json({
+        favorites: [...favorites].sort(),
+        count: favorites.size,
+      }))],
       ['/api/overall-mcp/set-enabled', ['POST'], guard(async (req) => {
         const { name, enabled } = await readBody(req);
         if (typeof name !== 'string' || typeof enabled !== 'boolean') return json({ error: 'name (string) and enabled (boolean) required' }, 400);

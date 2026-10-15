@@ -70,14 +70,15 @@ dsh plugin --profile web add ./dsh-overall-mcp
 - **搜索框**：真正的搜索框是那一圈圆角胶囊（`width:100%` + 内边距 + 1px 边框），**必须写 `boxSizing: border-box`**——content-box 下它会比父容器宽出「内边距 + 边框」，而市场页现在是 `overflow:hidden` 的滚动宿主，于是胶囊右端连同里面的「搜索」按钮被裁掉（真机截图上按钮只剩 38px、文字被切一半）。同时所有按钮都带 `whiteSpace: nowrap` + `flexShrink: 0`：CJK 标签可以在字间换行，一个被压缩的 flex 按钮的 min-content 只有**一个字**宽，按钮会缩到比文字窄并把第二行裁掉。`tools/shot.mjs` 的框架探针为此加了三条断言——没有任何按钮裁切/换行自己的标签、没有任何控件越过市场页内容框、市场页自身 `scrollWidth == clientWidth`（`OMKT_RED_FRAME=1` 注入一个 2000px 宽的假行时立刻失败）
 - **预览位放仓库自己的图**：v4 原型卡片中部是 3 张彩色预览图。没有任何 MCP 目录发布产品截图，编造占位图等于用装饰冒充信息，因此同一位置改放**该仓库自己的图**：优先 README 里引用的截图（按文档出现顺序，最多 8 张，`images.weserv.nl` 代理缩放并统一高度），一张都没有时退回 GitHub 的社交卡片（`opengraph.githubassets.com`，它就是这张卡在社交平台上的样子）；两者皆无就不渲染这一格（不硬凑装饰）。滚动条隐藏、`scroll-snap` 对齐，左右圆钮手动翻页、**永不自动播放**——阅读时图片自己走位是干扰。图片按仓库缓存到 `$DSH_HOME/overall-mcp/media.json`（TTL 7 天，最多 300 个仓库）
 - **事实静态印在卡片上**（用户要求）：Star · 使用量 · 更新时间这些数字直接在卡片正面，不藏在轮播里——要等的数字就是没法比较的数字。来源名（官方 Registry / Awesome 清单 / Smithery）**排在数字行末尾的灰字**里，不占名行——名行只放标题、GitHub 标记和最多两枚徽标
-- **收藏**：卡片页脚与详情面板都可收藏；宿主持久化到 `registry.favorites`，界面只本地改自己那份列表（为了一颗星重新拉 ~3MB 市场列表不值当下次浏览/安装/开会话会与宿主对齐）
+- **收藏**：卡片页脚与详情面板都可收藏；宿主持久化到 `registry.favorites`，界面只本地改自己那份列表（为了一颗星重新拉 ~3MB 市场列表不值当下次浏览/安装/开会话会与宿主对齐）。市场筛选行有**仅看收藏 (N)**：对已加载列表做视图过滤，并在 `GET /api/overall-mcp/favorites` 报告的宿主总数大于可见数时说明差了多少（见「收藏」一节）
 - **页面头**（按 v4 原型，两行）：第一行 = 星座图标（一个品牌蓝中枢 + 五个 `currentColor` 卫星，深色主题自动反色）+「全局 MCP」+ 版本号（与 `package.json` 一致，`tools/client-smoke.mjs` 断言两者相等——会撒谎的版本号比不显示更糟）｜右侧主操作；第二行 = 副标题「宿主机扫描 · 市场发现 · 一键接入 · 申请收录 MCP 服务 ↗」（链 awesome-mcp-servers 的贡献指南）｜右侧「⤓ 导出日志」。主按钮是**墨色**（`T.text` 铺底 + `T.cardBg` 作字色，深浅色主题自动翻转）而不是品牌蓝：品牌蓝留给链接、页签下划线、徽标和 gh 仓库名
 - **每个标签页最多一个主操作**：注册表页主按钮是「重新扫描宿主机」；市场页**没有常驻主按钮**——重拉目录是「分类」那一行里 `刷新` 的活，一个常驻的填充按钮会和小按钮重复。只有当「检查更新」报出**本插件**（`dsh-overall-mcp`）有更新时，市场页主按钮才出现，文案是「更新 overall-mcp」，点了走 `POST /self-update`（宿主执行 `dsh plugin --profile <p> add dsh-overall-mcp@<v>`，装完提示重启 DSH 生效）。另一页的主操作以无边框文字按钮留在同一行（「打开 MCP 市场」/「重新扫描宿主机」），两个主按钮等于没有主按钮——插件自身的版本判定见 `lib/self-update.js`：`link:`/本地检出（正是本仓库的开发形态）**不提供**自更新，因为那份代码就是版本来源，`npm` 上的新版本与它无关
 - **⤓ 导出日志**：把这一页知道的东西写成 JSON 文件（插件版本、注册表全量、市场各源条数/缓存时间/返回条数、当前筛选与页码、两处错误）——排查问题时缺的正是这些。客户端本地拼装并下载，不新增宿主路由：宿主自己的日志不归这个插件导出
 - **只有卡片区滚动**：这一页是**固定外壳**（`height:100%` + `overflow:hidden`，自己不滚），滚动属于内部两个盒子——「已注册」的标签页主体整段可滚；「MCP 市场」里只有**卡片区**（`data-omkt="scroller"`，`flex:1 1 auto` + `min-height:0` + `overflow-y:auto`）可滚，搜索框、分类下拉、筛选行与 meta 行都是钉住的 chrome，翻页条留在滚动区下方。`tools/shot.mjs` 的框架探针把这条契约量出来：把卡片区往下拖 240px 后，页签行与搜索框的 `top` 位移必须为 0，页面外壳的 `scrollTop` 必须为 0（四种窗口宽度下实测 0/0/0）。注意 flex 的自动最小尺寸在**滚动容器**里会失效（这正是当初页签行被压成 1px 的原因），所以 chrome 行统一 `.omkt-page > *,.omkt-tabbody > *{flex-shrink:0}`，而「该让出高度」的两个盒子用内联 `flex:1 1 auto` 明确覆盖
 - **回到顶部**：监听挂在「本页内部第一个 `[data-omkt="scroller"]`，否则本页或它之上的第一个可滚动元素」（退化为 window），只在滚动超过 400px 后才出现，短页面不留一个死按钮。市场页签的滚动盒是卡片墙本身，**已注册页签的滚动盒是它的页体**（两者都带该 hook）——早先只有卡片墙带 hook，而页体是它的祖先，向上查找找不到，于是已注册页签上这个按钮从不出现。重新绑定的时机是「页签、市场列表、服务器列表任一变化」，因为卡片墙要等列表到达才存在（首次打开时若只按页签绑定，会绑到 window 且之后不再重绑）
 - 操作：可安装的显示「安装」，已注册的显示「已安装」，只有仓库链接的显示「需手动配置」+「仓库」/「主页」
-- **详情页**：点卡片主体或「详情」按钮弹出完整面板（按 v4 原型：680px、圆角 16、**一整张白纸**——页头不再是灰底带、底部只有一条分隔线），含：页头（头像 + 标题 + 贴着标题的徽标，关闭按钮在右上角）、完整描述（卡片只显示 3 行）、全部标签、**GitHub 仓库区块**（浅灰底卡片、owner/repo 锚点用品牌蓝、★ Star · Fork · Issue · Watch 竖排大数字带小标签、语言/许可证/最近推送/创建于事实行、归档警示；缺失数字保持缺失——没有任何目录发布 GitHub 数据，缺数字不等于 0，也不等于排最后）、逐项标注的**无底色事实表**（来源/作者/版本/传输/Star/使用量口径/更新时间（优先 GitHub pushed_at）/安装方式）、**将执行的确切命令**（stdio 为完整命令行，http 为端点 URL）、按 URL 去重的链接组（官网 / GitHub 仓库 / **GitHub 镜像** / MCP 端点 / Smithery 页面）、底部「安装 + ♡ 收藏」。Smithery 的 `repository` 指向它自己的列表页而非上游项目，因此额外提供其目录页链接（实测 `smithery.ai/server/<name>` 308 到 `/servers/<name>`，直接用后者）
+- **站外链接**：卡片标题/GitHub 标、详情页标题与仓库链接、「申请收录 MCP 服务」等外链默认**在右侧栏的浏览器标签页里打开**（`ctx.sidebarRight.openTab("browser", { params: { url } })`，与 DSH 自家 markdown 链接同一入口）；侧栏浏览器没注册时不动手，让 `<a target="_blank">` 继续走 Electron 的「交给系统浏览器」。带修饰键（⌘/Ctrl/Shift/Alt）或中键的点击一律不拦，属平台原生行为（新窗口/后台标签）。这些锚点仍保留 `target="_blank" rel="noreferrer"` 作为无 JS 回落
+- **详情页**：点卡片主体或「详情」按钮弹出完整面板（按 v4 原型：680px、圆角 16、**一整张白纸**——页头不再是灰底带、底部只有一条分隔线），含：页头（头像 + 标题 + 贴着标题的徽标，关闭按钮在右上角）、完整描述（卡片只显示 3 行）、全部标签、**GitHub 仓库区块**（浅灰底卡片、owner/repo 锚点用品牌蓝、★ Star · Fork · Issue（含 PR）· Watch（订阅）竖排大数字带小标签、语言/许可证/最近推送/创建于事实行、归档警示；缺失数字保持缺失——没有任何目录发布 GitHub 数据，缺数字不等于 0，也不等于排最后）、逐项标注的**无底色事实表**（来源/作者/版本/传输/Star/使用量口径/更新时间（优先 GitHub pushed_at）/安装方式）、**将执行的确切命令**（stdio 为完整命令行，http 为端点 URL；标题右侧有**复制**按钮，成功显示「已复制」、两条复制路径都失败时显示「复制失败，请手动选中」而不是谎报成功）、按 URL 去重的链接组（官网 / GitHub 仓库 / **GitHub 镜像** / MCP 端点 / Smithery 页面）、底部「安装 + ♡ 收藏」。Smithery 的 `repository` 指向它自己的列表页而非上游项目，因此额外提供其目录页链接（实测 `smithery.ai/server/<name>` 308 到 `/servers/<name>`，直接用后者）
 - **GitHub 镜像链接**：GitHub 在本网络环境下时通时断（实测连续数小时 TCP 超时后恢复 200）。实测（2026-10-12）`gh-proxy.com` 现已代理 github.com 仓库页面（200/640ms）——与 dshmarket 2026-09 实测的 403 相反，其注释明确要求"重新测量而非推断"。因此有仓库的条目同时提供直连与镜像两个链接，由用户择一
 - **废弃标记**：上游标记为 deprecated 的条目不隐藏、仍可安装（有人可能需要旧版），但降到最后、显示橙色「已废弃」徽标、按钮改为「仍要安装」，并附上上游自己的 `statusMessage` 说明。目前仅官方 Registry（`_meta…official.status`）与 Smithery（`inactive`）发布该信号；两个 Awesome 清单没有生命周期字段，因此这些条目的 `status` 为**缺省**而非 `active`——界面不会把"没人扫过"显示成"正常"
 
@@ -188,7 +189,7 @@ Invalid schema for function 'mcp__rea-om__analyze_javascript_application':
 `POST /api/overall-mcp/scan`、
 `POST /api/overall-mcp/install`、`POST /api/overall-mcp/set-enabled`、
 `POST /api/overall-mcp/set-source-enabled`、`POST /api/overall-mcp/remove`、
-`POST /api/overall-mcp/favorite`（收藏，见下）、
+`POST /api/overall-mcp/favorite`（收藏，见下）、`GET /api/overall-mcp/favorites`（列出收藏）、
 `GET /api/overall-mcp/repo-stats?repos=owner/name,...`
 
 错误码分层（`lib/http-status.js`，单测 `test/http-status.test.mjs`）：`unknown server`/`unknown source` → **404**；缺参数（`item/key/name/source/enabled ... required`）、`no installable transport`、`is not launched through a package runner` → **400**；上游版本查询失败（`version lookup failed`）→ **502**；其余一律 **500** 并由宿主 `log.warn` 记一行（含方法、URL 与消息）——500 的含义就是「这条路径我们没预料到」，早先它和「你参数写错了」共用 400，真正的事故看起来像用户的错。
@@ -199,10 +200,11 @@ Invalid schema for function 'mcp__rea-om__analyze_javascript_application':
 
 ### 收藏（favorite）
 
-`POST /api/overall-mcp/favorite`，body `{"key":"<source>:<id|title>"}`：**切换**该条目的收藏状态（不带 `on` 字段——宿主目前只认 `key`，见 `index.js` 的 `doToggleFavorite`）。
+`POST /api/overall-mcp/favorite`，body `{"key":"<source>:<id|title>","on":true|false}`：写入想要的**终态**（`on: true` 必加、`false` 必删）；不带 `on` 时退化成**切换**（宿主旧行为，见 `index.js` 的 `doToggleFavorite`；`on` 给了但不是布尔会报错，而不是当成切换）。
 key 就是市场卡片的 React key，因为官方 Registry 的 id 随版本变化，所以用「来源 + 标题」做稳定身份。
 收藏集存在 `registry.favorites`，随注册表一起持久化；`/catalog` 每条都会标注 `favorite`。
-已知缺口：面板只能写入收藏，没有任何读取面（没有 `/favorites` 路由，也没有「仅看收藏」的筛选或排序），见 `INTEGRATION-TODO.md`。
+`GET /api/overall-mcp/favorites` → `{"favorites":["<source>:<id|title>",...],"count":N}`：**读取面**。需要它是因为 `/catalog` 只标注本次查询命中的条目：来源筛选或搜索词会把其余的藏起来，于是「我到底收藏了什么」需要独立答案。
+面板上对应的是市场页筛选行里的**仅看收藏 (N)** 按钮：它是对当前列表的视图过滤（不是重新查询），并在宿主总数多于当前可见数时明说「共 N 条收藏；当前来源与搜索下能看到 M 条」，免得筛出来的空列表看起来像「一条都没收藏」。
 实测：`{"key":"official-registry:official:ai.0si/disclosures","favorite":true,"favorites":[...]}`，再次浏览同一条目即返回 `favorite: true`。
 
 ## 扫描的宿主机位置
@@ -255,9 +257,9 @@ key 就是市场卡片的 React key，因为官方 Registry 的 id 随版本变�
 ```sh
 node --test test/*.mjs                                    # 纯逻辑测试（lib/ 零依赖）
 node tools/client-smoke.mjs                               # 客户端注册契约 smoke（模拟前端 module loader；并断言客户端版本号 == package.json）
-node tools/render-detail.mjs                              # 渲染详情页：事实表有值、链接齐全、命令可见
+node tools/render-detail.mjs                              # 渲染详情页：事实表有值、链接齐全、命令可见、复制按钮真的把命令交给剪贴板（打桩 navigator.clipboard 后驱动真实按钮）
 node tools/render-card.mjs                                # 渲染卡片：标题是链接、正文不是 button、无嵌套交互元素、GitHub 标记/版本在位、命令行只在详情面板
-node tools/render-market-tab.mjs                          # 渲染整个市场页 chrome：页头两行、页签计数、搜索行、筛选行、元信息行、卡片流、页脚分工
+node tools/render-market-tab.mjs                          # 渲染整个市场页 chrome：页头两行、页签计数、搜索行、筛选行、元信息行、卡片流、页脚分工，以及「仅看收藏」过滤后如实说明藏了多少条
 node tools/probe-server-about.mjs                          # 渲染「已注册」行：用途行在事实行之前、被 clamp 成两行、title 与证据来源一致、无证据时不留空元素
 node tools/verify-css.mjs                                 # 校验所有 className 在注入的样式表里都有对应规则（探针选择器除外，见文件内 HOOKS）
 node tools/layout-probe.mjs                               # 真实 Chrome 量卡片几何：长名称必须省略号、CTA 必须在卡内（npm run test:layout）
@@ -268,7 +270,7 @@ node tools/verify-sort-paging.mjs                         # 校验 6 种排序�
 node tools/verify-detail-links.mjs                        # 校验详情页链接：逐源覆盖、零死链、零重复 URL
 node tools/probe-real-cards.mjs                           # 拉真实市场条目逐条渲染卡片+详情（活实例）
 node tools/probe-media.mjs <token>                        # 实测 /repo-media：五个真实仓库的图片数/尺寸/缓存命中耗时
-node tools/probe-favorites.mjs <token>                    # 收藏闭环实测（活实例：POST /favorite → /catalog 回读）
+node tools/probe-favorites.mjs <token>                    # 收藏闭环实测（活实例：POST /favorite on/off → GET /favorites 计数 → /catalog 回读）
 node tools/measure-awesome.mjs                           # 测量两个 Awesome 清单的真实深度（4224 + 928）
 node tools/measure-sources.mjs                           # 逐源测上游返回条数（分页与截断的真相）
 node tools/inspect-dsh-catalog.mjs [pkg]                 # 剖析 dshmarket 的 dsh-plugin-catalog 包结构

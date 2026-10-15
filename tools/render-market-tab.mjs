@@ -111,6 +111,12 @@ globalThis.fetch = async (url, init) => {
   if (path.startsWith('/servers')) return ok({ servers: [{ name: 'codegraph', source: 'claude-code', enabled: true }] });
   if (path.startsWith('/repo-stats')) return ok({ stats: {} });
   if (path.startsWith('/repo-media')) return ok({ media: {} });
+  // The favourites filter asks the host for the whole set, because /catalog
+  // only marks the entries the current query returned.
+  if (path.startsWith('/favorites')) {
+    calls.push('GET /favorites');
+    return ok({ favorites: ['official-registry:official:ac.snag/snag', 'smithery:brave-search'], count: 2 });
+  }
   // 「检查更新」 answers for both the mounted servers and this plugin: the head
   // only grows an update button when `self.updateAvailable` is true.
   if (path.startsWith('/updates')) {
@@ -460,6 +466,38 @@ function containsNode(root, target) {
   groupSelect.props.onChange({ target: { value: '' } });
   srcSelect.props.onChange({ target: { value: '' } });
   await render();
+}
+
+// --- 4e. 仅看收藏 narrows in place and admits what it is hiding -------------
+// The whole point of asking the host for a count is that the filter is a view
+// over the loaded listing: a bookmark kept under another source (or hidden by
+// the search box) must not look like an empty set, and an active control must
+// not look like the inactive one — that was true of the two selects above.
+{
+  const market = walk(await render());
+  const off = buttonByText(market, '仅看收藏 (1)');
+  assert.ok(off, 'the favourites filter is in the filter row');
+  assert.ok(!String(off.props.className).includes('omkt-icon-on'),
+    'it must not look active before it is chosen');
+
+  off.props.onClick();
+  const filtered = walk(await render());
+  assert.ok(calls.includes('GET /favorites'), 'turning it on asks the host for the total');
+  const on = buttonByText(filtered, '仅看收藏 (1)');
+  assert.ok(String(on.props.className).includes('omkt-icon-on'), 'the active filter is marked');
+  const cards = walk(findByKey(filtered, 'grid')[0]).filter((n) => n.type === 'article');
+  assert.deepEqual(cards.map((n) => String(n.props.title ?? '').split(' · ')[0]), ['snag'],
+    `only the starred entry survives the filter (got ${cards.length} cards)`);
+  const note = textOf(findByKey(filtered, 'favnote')[0] ?? { props: {} });
+  assert.ok(note.includes('共 2 条收藏'),
+    `the filter states how many favourites it is hiding (got ${note})`);
+
+  buttonByText(filtered, '仅看收藏 (1)').props.onClick();
+  const restored = walk(await render());
+  assert.equal(findByKey(restored, 'favnote').length, 0, 'turning it off drops the note');
+  assert.equal(walk(findByKey(restored, 'grid')[0]).filter((n) => n.type === 'article').length, 3,
+    'and the whole listing is back');
+  console.log('favourites: 仅看收藏 filters the listing and admits the hidden ones ✓');
 }
 
 // The page is a fixed shell now: scrolling belongs to the card box alone, so

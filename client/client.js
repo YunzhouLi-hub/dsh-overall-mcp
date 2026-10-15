@@ -29,7 +29,8 @@
 //   GET/POST /api/overall-mcp/repo-stats        { refresh? }
 //   GET/POST /api/overall-mcp/repo-media        { repo }
 //   POST /api/overall-mcp/install               { item }
-//   POST /api/overall-mcp/favorite              { key }
+//   POST /api/overall-mcp/favorite              { key, on? }
+//   GET  /api/overall-mcp/favorites
 //   POST /api/overall-mcp/set-enabled           { name, enabled }
 //   POST /api/overall-mcp/set-source-enabled    { source, enabled }
 //   GET  /api/overall-mcp/updates
@@ -76,6 +77,81 @@ window.__ModuleLoader__.load({
 			const body = await res.json().catch(() => ({}));
 			if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
 			return body;
+		}
+
+		// The client container's context, captured by `apply(ctx)` below. Link
+		// handling needs two services (`sidebarRight`, `sidebarRightTabs`) that
+		// this bundle does not own; reading them through `ctx.get` keeps the
+		// dependency soft — a shell without them keeps working through the plain
+		// `target="_blank"` fallback instead of failing to load the page.
+		let hostCtx = null;
+
+		/**
+		 * Open an http(s) link the way the rest of the client does.
+		 *
+		 * The right Sidebar's Browser tab is the app's own surface for an
+		 * external page (`ctx.sidebarRight.openTab("browser", { params: { url } })`,
+		 * the documented call for client plugins), and the chat's markdown links
+		 * default to it — a market card that instead threw the address at the
+		 * system browser was the odd one out. It is used only when the Browser
+		 * type is actually registered, because `openTab` throws for a kind
+		 * nothing registered ("a wiring mistake, not a user error"), and a
+		 * modified click is left completely alone: ⌘/Ctrl/Shift/Alt and the
+		 * middle button are how a user asks for the platform's own behaviour.
+		 *
+		 * Returns nothing: the anchor keeps `target="_blank"`, so every path
+		 * where this function does not act still ends in a working link.
+		 */
+		function openExternal(event, url) {
+			if (typeof url !== "string" || !/^https?:/i.test(url)) return;
+			if (event.defaultPrevented || event.button !== 0) return;
+			if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+			const tabs = hostCtx?.get?.("sidebarRightTabs");
+			const sidebarRight = hostCtx?.get?.("sidebarRight");
+			if (!sidebarRight || typeof sidebarRight.openTab !== "function") return;
+			if (tabs?.get?.("browser") === undefined) return;
+			try {
+				sidebarRight.openTab("browser", { params: { url } });
+			} catch (err) {
+				// The tab did not open, so let the anchor do what it always did.
+				console.warn("overall-mcp: 侧栏浏览器打开失败，改用外部浏览器", err);
+				return;
+			}
+			event.preventDefault();
+		}
+
+		/**
+		 * Put text on the clipboard, the only two ways a page may.
+		 *
+		 * `navigator.clipboard` needs a secure context and can still reject (no
+		 * focus); the old selection trick is the fallback. Both are tried before
+		 * reporting failure, because a「已复制」that copied nothing is the one
+		 * outcome worth avoiding — the caller shows the result verbatim.
+		 */
+		async function copyText(text) {
+			try {
+				if (navigator.clipboard?.writeText) {
+					await navigator.clipboard.writeText(text);
+					return true;
+				}
+			} catch {
+				// Fall through to the selection trick.
+			}
+			try {
+				const ta = document.createElement("textarea");
+				ta.value = text;
+				ta.setAttribute("readonly", "");
+				ta.style.position = "fixed";
+				ta.style.top = "-1000px";
+				ta.style.opacity = "0";
+				document.body.appendChild(ta);
+				ta.select();
+				const ok = document.execCommand?.("copy");
+				document.body.removeChild(ta);
+				return ok === true;
+			} catch {
+				return false;
+			}
 		}
 
 		/** Friendly titles for the known import sources. */
@@ -666,6 +742,9 @@ window.__ModuleLoader__.load({
 				display: "grid", gap: 4, padding: "10px 12px", borderRadius: 8,
 				border: `1px solid ${T.line}`, background: T.soft,
 			},
+			// The box's label row: the caption on the left, the copy button
+			// pushed to the right edge of the same line.
+			cmdHead: { display: "flex", alignItems: "center", gap: 8 },
 			cmd: {
 				fontSize: 12, color: T.text2, userSelect: "all",
 				fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
@@ -927,9 +1006,11 @@ window.__ModuleLoader__.load({
 		 *
 		 * `raw` renders the value verbatim — the licence is a word, and
 		 * "MIT → 1" out of `compact()` would be a lie about a legal term.
+		 * `title` carries the caveat a two-word label cannot: GitHub's own
+		 * field names are not what the words "Issue" and "Watch" suggest.
 		 */
-		function ghStat(label, value, raw) {
-			return createElement("span", { style: styles.ghStat }, [
+		function ghStat(label, value, raw, title) {
+			return createElement("span", { style: styles.ghStat, title }, [
 				createElement("b", { key: "n", style: styles.ghStatNum }, raw ? String(value) : compact(value)),
 				createElement("span", { key: "l", style: styles.ghStatLab }, label),
 			]);
@@ -1193,7 +1274,7 @@ window.__ModuleLoader__.load({
 							key: "t", className: "omkt-title", href: titleHref,
 							target: "_blank", rel: "noreferrer", title: titleHref,
 							style: styles.cardName,
-							onClick: (e) => e.stopPropagation(),
+							onClick: (e) => { e.stopPropagation(); openExternal(e, titleHref); },
 						}, item.title)
 						: createElement("span", { key: "t", style: styles.cardName, title: item.title }, item.title),
 					// The repository, one click from the card itself. Only for
@@ -1205,7 +1286,7 @@ window.__ModuleLoader__.load({
 							key: "gh", className: "omkt-gh", href: item.repository,
 							target: "_blank", rel: "noreferrer", title: `GitHub 仓库：${repo}`,
 							"aria-label": `GitHub 仓库：${repo}`, style: styles.ghIcon,
-							onClick: (e) => e.stopPropagation(),
+							onClick: (e) => { e.stopPropagation(); openExternal(e, item.repository); },
 						}, githubMark(14))
 						: null,
 					item.verified ? createElement("span", { key: "v", style: styles.verified, title: "上游已认证" }, "✓ 认证") : null,
@@ -1275,7 +1356,7 @@ window.__ModuleLoader__.load({
 							? createElement("a", {
 								key: "st", className: "omkt-link", style: styles.stat, href: item.repository || "#",
 								target: "_blank", rel: "noreferrer", title: "GitHub Star",
-								onClick: (e) => e.stopPropagation(),
+								onClick: (e) => { e.stopPropagation(); openExternal(e, item.repository); },
 							}, [
 								createElement("span", { key: "g" }, "★"),
 								createElement("b", { key: "n", style: styles.statB }, compact(stars)),
@@ -1645,6 +1726,7 @@ window.__ModuleLoader__.load({
 			return createElement("a", {
 				href, target: "_blank", rel: "noreferrer", title: title || href,
 				className: "omkt-link", style: styles.linkChip,
+				onClick: (e) => openExternal(e, href),
 			}, label);
 		}
 
@@ -1657,6 +1739,9 @@ window.__ModuleLoader__.load({
 		 * half the story: the user needs the source of truth before deciding.
 		 */
 		function MarketDetail({ item, stats, media, busy, mediaFailed, onRetryMedia, onClose, onInstall, onToggleFavorite }) {
+			// "" | "ok" | "fail" — the copy button states its own result rather
+			// than flashing a message somewhere else; see `copyText`.
+			const [copyState, setCopyState] = useState("");
 			const repo = repoKeyOf(item);
 			const enriched = repo ? (stats ?? {})[repo] : null;
 			const repoMedia = repo ? (media ?? {})[repo] : null;
@@ -1711,6 +1796,7 @@ window.__ModuleLoader__.load({
 											key: "n", className: "omkt-title", href: titleHref,
 											target: "_blank", rel: "noreferrer", title: titleHref,
 											style: styles.detailTitle,
+											onClick: (e) => openExternal(e, titleHref),
 										}, item.title)
 										: createElement("div", { key: "n", style: styles.detailTitle }, item.title),
 									item.verified ? createElement("span", { key: "v", style: styles.verified }, "✓ 认证") : null,
@@ -1772,14 +1858,25 @@ window.__ModuleLoader__.load({
 						createElement("a", {
 							key: "r", className: "omkt-title", href: item.repository,
 							target: "_blank", rel: "noreferrer", style: styles.ghRepo,
+							onClick: (e) => openExternal(e, item.repository),
 						}, repo),
 						enriched
 							? [
 								createElement("div", { key: "s", style: styles.ghStats }, [
 									typeof enriched.stars === "number" ? ghStat("Star", enriched.stars) : null,
 									typeof enriched.forks === "number" ? ghStat("Fork", enriched.forks) : null,
-									typeof enriched.openIssues === "number" ? ghStat("Issue", enriched.openIssues) : null,
-									typeof enriched.watchers === "number" ? ghStat("Watch", enriched.watchers) : null,
+									// GitHub's `open_issues_count` counts pull requests
+									// too, and `subscribers_count` is the watch count —
+									// neither is the number the bare words promise, so
+									// each label carries its field name.
+									typeof enriched.openIssues === "number"
+										? ghStat("Issue（含 PR）", enriched.openIssues, false,
+											"GitHub 的 open_issues_count：Pull Request 也算在内")
+										: null,
+									typeof enriched.watchers === "number"
+										? ghStat("Watch（订阅）", enriched.watchers, false,
+											"GitHub 的 subscribers_count：订阅（watch）该仓库的人数，不是 Star 数")
+										: null,
 									enriched.license ? ghStat("许可证", enriched.license, true) : null,
 								].filter(Boolean)),
 								...(enriched.archived
@@ -1832,7 +1929,23 @@ window.__ModuleLoader__.load({
 					// the exact command the plugin would run, so nothing is hidden
 					installCmd
 						? createElement("div", { key: "cmd", style: styles.cmdBox }, [
-							createElement("div", { key: "l", style: styles.detailKey }, "将执行的命令"),
+							createElement("div", { key: "l", style: styles.cmdHead }, [
+								createElement("span", { key: "k", style: styles.detailKey }, "将执行的命令"),
+								// The command is meant to be taken elsewhere — into a
+								// terminal, into another client's config — and selecting
+								// it by hand across a wrapped line is exactly the chore
+								// this removes. The label reports what actually happened,
+								// because a 已复制 that copied nothing is worse than none.
+								createElement("button", {
+									key: "cp", type: "button", className: "omkt-btn omkt-btn-outline",
+									style: { ...styles.outlineBtn, marginLeft: "auto", padding: "2px 8px", fontSize: 12 },
+									title: "复制这条命令",
+									onClick: async () => {
+										const ok = await copyText(installCmd);
+										setCopyState(ok ? "ok" : "fail");
+									},
+								}, copyState === "ok" ? "已复制" : copyState === "fail" ? "复制失败，请手动选中" : "复制"),
+							]),
 							createElement("code", { key: "c", style: styles.cmd }, installCmd),
 						])
 						: null,
@@ -1929,6 +2042,12 @@ window.__ModuleLoader__.load({
 			const [starNote, setStarNote] = useState("");
 			const [marketSort, setMarketSort] = useState("default");
 			const [marketGroup, setMarketGroup] = useState("");
+			// 「仅看收藏」: a view filter over the loaded listing, plus the host's
+			// own total so the page can say when the filter is hiding entries
+			// rather than the set being empty. `favTotal` stays null until asked —
+			// one small request, only when the user turns the filter on.
+			const [favOnly, setFavOnly] = useState(false);
+			const [favTotal, setFavTotal] = useState(null);
 			const [marketPage, setMarketPage] = useState(0);
 			const [pageSize, setPageSize] = useState(20);
 			const [detail, setDetail] = useState(null);
@@ -2258,7 +2377,11 @@ window.__ModuleLoader__.load({
 					: prev));
 				setDetail((prev) => (prev === item ? { ...prev, favorite: next } : prev));
 				try {
-					await api("/favorite", { method: "POST", body: JSON.stringify({ key }) });
+					// `on` states the wanted end state instead of asking the host to
+					// flip whatever it has: the star is already flipped here, and the
+					// two would drift apart if the host's copy had moved on.
+					await api("/favorite", { method: "POST", body: JSON.stringify({ key, on: next }) });
+					setFavTotal((prev) => (prev === null ? prev : Math.max(0, prev + (next ? 1 : -1))));
 				} catch (err) {
 					// Roll the optimistic flip back — a bookmark that lies about
 					// being saved is worse than one that never moved.
@@ -2338,6 +2461,27 @@ window.__ModuleLoader__.load({
 
 			const marketItems = market?.items ?? null;
 			const installedCount = marketItems ? marketItems.filter((i) => i.installed).length : 0;
+			// Entries the listing marks as favourites (the host annotates every
+			// item it returns). Only the loaded listing can be counted here; the
+			// set's own size comes from `/favorites`.
+			const favoriteCount = marketItems ? marketItems.filter((i) => i.favorite).length : 0;
+
+			/**
+			 * Read the favourite set itself, for its size.
+			 *
+			 * Failure is not an error state for the page: the filter still works
+			 * off the listing's own marks, it just cannot say how many favourites
+			 * the current view is hiding. So a failure leaves `favTotal` null and
+			 * nothing is reported to the user.
+			 */
+			const loadFavorites = async () => {
+				try {
+					const body = await api("/favorites");
+					setFavTotal(typeof body.count === "number" ? body.count : null);
+				} catch {
+					setFavTotal(null);
+				}
+			};
 
 			// Functional groups present in the CURRENT listing, with counts,
 			// sorted by size — the chip row offers exactly what the filter can
@@ -2366,8 +2510,9 @@ window.__ModuleLoader__.load({
 				? marketItems
 					.filter((i) => !marketGroup
 						|| (marketGroup === "__none__" ? !i.group : i.group === marketGroup))
+					.filter((i) => !favOnly || i.favorite)
 					.slice().sort((a, b) => compareMarket(a, b, marketSort, repoStats))
-				: null), [marketItems, marketGroup, marketSort, repoStats]);
+				: null), [marketItems, marketGroup, marketSort, repoStats, favOnly]);
 			const pageCount = sortedItems ? Math.max(1, Math.ceil(sortedItems.length / pageSize)) : 0;
 			const safePage = Math.min(marketPage, pageCount - 1);
 			const pageItems = sortedItems
@@ -2447,6 +2592,7 @@ window.__ModuleLoader__.load({
 								href: "https://github.com/punkpeye/awesome-mcp-servers#contributing",
 								target: "_blank", rel: "noreferrer",
 								title: "收录标准与提交方式（awesome-mcp-servers 贡献指南）",
+								onClick: (e) => openExternal(e, "https://github.com/punkpeye/awesome-mcp-servers#contributing"),
 							}, "申请收录 MCP 服务 ↗"),
 						]),
 						logButton,
@@ -2633,6 +2779,20 @@ window.__ModuleLoader__.load({
 								onChange: (e) => { setMarketSort(e.target.value); setMarketPage(0); },
 							}, SORT_OPTIONS.map(([value, label]) => createElement("option", { key: value, value }, label))),
 							createElement("button", {
+								key: "fav", type: "button",
+								className: `omkt-btn omkt-btn-outline${favOnly ? " omkt-icon-on" : ""}`,
+								style: favOnly ? { ...styles.filterBtn, ...styles.filterSelectOn } : styles.filterBtn,
+								title: favoriteCount
+									? `只看已收藏的条目（当前列表里有 ${favoriteCount} 条；卡片与详情里的 ♡ 都能收藏）`
+									: "只看已收藏的条目。这张列表里还没有收藏：卡片或详情里的 ♡ 会把它加进来",
+								onClick: async () => {
+									const next = !favOnly;
+									setFavOnly(next);
+									setMarketPage(0);
+									if (next && favTotal === null) await loadFavorites();
+								},
+							}, `仅看收藏${favoriteCount ? ` (${favoriteCount})` : ""}`),
+							createElement("button", {
 								key: "refresh", type: "button", className: "omkt-btn omkt-btn-outline",
 								style: styles.filterBtn, disabled: marketBusy,
 								onClick: () => loadMarket({ refresh: true }),
@@ -2647,6 +2807,14 @@ window.__ModuleLoader__.load({
 					marketSort === "installs"
 						? createElement("div", { key: "installnote", style: styles.hint },
 							"使用量最多：Smithery 的调用次数 + Docker 的拉取次数 + 本面板的安装次数；三者单位不同，仅作热度参考。")
+						: null,
+					// The filter is a view over the loaded listing, so a favourite
+					// kept under another source (or hidden by the search box) is not
+					// on screen. The host's own count is what tells "没有收藏" apart
+					// from "这个筛选下没有" — and it is asked for only when needed.
+					favOnly && favTotal !== null && favTotal > favoriteCount
+						? createElement("div", { key: "favnote", style: styles.hint },
+							`共 ${favTotal} 条收藏；当前来源与搜索下能看到 ${favoriteCount} 条。`)
 						: null,
 					// Row 3 — v4's meta line: the three numbers a reader checks
 					// before paging, with the freshness note pushed to the end.
@@ -2722,7 +2890,8 @@ window.__ModuleLoader__.load({
 						])
 						: null,
 					pageItems && pageItems.length === 0 && !marketBusy
-						? createElement("div", { key: "none", style: styles.message }, "没有匹配的 MCP。")
+						? createElement("div", { key: "none", style: styles.message },
+							favOnly ? "当前筛选下没有收藏的条目。" : "没有匹配的 MCP。")
 						: null,
 					pageItems && pageItems.length
 						// Everything above this box is pinned chrome; from here
@@ -2789,7 +2958,11 @@ window.__ModuleLoader__.load({
 				// of the market tab, so it survives a tab switch and closes cleanly.
 				detail
 					? createElement(MarketDetail, {
-							key: "detail", item: detail, stats: repoStats, media: repoMedia, busy,
+							// Keyed by the entry, not by "the detail panel": the panel
+							// holds per-entry state (the copy button's verdict), and a
+							// second entry opened in the same slot must not inherit it.
+							key: `detail:${detail.source}:${detail.id ?? detail.title}`,
+							item: detail, stats: repoStats, media: repoMedia, busy,
 							mediaFailed: mediaFailures.some((e) => e.repo === repoKeyOf(detail)),
 							onRetryMedia: () => enrichMedia([detail], true),
 							onClose: () => setDetail(null),
@@ -2821,6 +2994,10 @@ window.__ModuleLoader__.load({
 		 * addressed, and `slots.inject` would then simply never fire.
 		 */
 		function apply(ctx) {
+			// Kept for link handling only (see `openExternal`): the registration
+			// below needs `ctx.slots`, and a link click much later needs the two
+			// Sidebar services, read lazily so their absence is a fallback.
+			hostCtx = ctx;
 			ctx.slots.inject("sidebar.panellist", () => {
 				const off = ctx.slots.register({
 					name: "sidebar.panellist",

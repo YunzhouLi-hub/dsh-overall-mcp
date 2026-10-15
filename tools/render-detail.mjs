@@ -151,4 +151,46 @@ for (const { name, item, expect } of samples) {
   console.log(`ok  ${name} — ${rowPairs.length} facts, links: ${labels.join(' / ')}`);
 }
 
+// --- the copy button is wiring, not decoration -----------------------------
+// A copy affordance that copies nothing is worse than no button: it tells the
+// user the command is on their clipboard. The label alone would pass a render
+// test either way, so drive the real button against a stubbed clipboard.
+{
+  const sample = samples.find((s) => s.expect.cmd);
+  const { item } = sample;
+  const expected = sample.expect.cmd;
+  const wrote = [];
+  const before = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  let stubbed = true;
+  try {
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      writable: true,
+      value: { clipboard: { writeText: async (text) => { wrote.push(text); } } },
+    });
+  } catch {
+    // A host that will not let `navigator` be replaced still runs the button;
+    // it just takes the selection fallback, which cannot be observed here.
+    stubbed = false;
+  }
+  try {
+    const tree = __test.MarketDetail({ item, stats: {}, busy: false, onClose: () => {}, onInstall: () => {} });
+    const nodes = walk(tree);
+    assert.ok(nodes.some((n) => textOf(n) === '将执行的命令'),
+      'the command block still states what it is');
+    const buttons = nodes.filter((n) => n.type === 'button' && textOf(n) === '复制');
+    assert.equal(buttons.length, 1, 'the command block offers exactly one copy button');
+    assert.equal(buttons[0].props.title, '复制这条命令', 'the copy button explains itself');
+    await buttons[0].props.onClick();
+    if (stubbed) {
+      assert.deepEqual(wrote, [expected],
+        `the copy button must hand over the command (got ${JSON.stringify(wrote)})`);
+    }
+  } finally {
+    if (before) Object.defineProperty(globalThis, 'navigator', before);
+    else delete globalThis.navigator;
+  }
+  console.log(`ok  copy button hands the command over${stubbed ? '' : ' (clipboard not stubbable on this host)'}`);
+}
+
 console.log('\ndetail panel renders: facts filled, links present, commands shown');
