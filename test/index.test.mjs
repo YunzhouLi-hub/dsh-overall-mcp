@@ -103,7 +103,6 @@ test('the plugin registers the documented route and tool surface', async () => {
       '/api/overall-mcp/set-source-enabled', '/api/overall-mcp/updates', '/api/overall-mcp/self',
       '/api/overall-mcp/self-update', '/api/overall-mcp/update', '/api/overall-mcp/remove',
       '/api/overall-mcp/forget-orphans', '/api/overall-mcp/tools',
-      '/api/overall-mcp/submissions', '/api/overall-mcp/submission-review',
     ]) {
       assert.ok(routes.has(route), `${route} is registered`);
     }
@@ -111,7 +110,7 @@ test('the plugin registers the documented route and tool surface', async () => {
       'overall_mcp_scan', 'overall_mcp_list', 'overall_mcp_search', 'overall_mcp_install',
       'overall_mcp_set_enabled', 'overall_mcp_set_source_enabled', 'overall_mcp_catalog',
       'overall_mcp_check_updates', 'overall_mcp_update', 'overall_mcp_remove',
-      'overall_mcp_forget_orphans', 'overall_mcp_submissions',
+      'overall_mcp_forget_orphans',
     ]) {
       assert.ok(tools.has(tool), `${tool} is registered`);
     }
@@ -207,109 +206,6 @@ test('a damaged registry file is quarantined and reported, never silently replac
   });
 });
 
-test('a submission is queued with its upload, and approving it writes a contribution row', async () => {
-  const file = { name: '../../evil/notes.tgz', type: 'application/gzip', data: Buffer.from('hello').toString('base64') };
-  await withHost(FIXTURE, async ({ dir, call, readRegistry }) => {
-    const submitted = await call('/api/overall-mcp/submissions', {
-      body: { name: 'acme-mcp', link: 'https://example.test/acme', note: 'demo server', contributor: '张三', file },
-    });
-    assert.equal(submitted.status, 200);
-    assert.equal(submitted.body.status, 'pending');
-    assert.equal(submitted.body.submissions.pending, 1);
-    const id = submitted.body.submitted;
-
-    // The queue is readable on its own, and the panel's list rides along with
-    // /servers so one fetch renders both.
-    const listed = await call('/api/overall-mcp/submissions', { method: 'GET' });
-    assert.equal(listed.status, 200);
-    assert.equal(listed.body.items.length, 1);
-    assert.equal(listed.body.items[0].contributor, '张三');
-    assert.equal(listed.body.items[0].file.bytes, 5);
-
-    // The upload keeps its bytes but never its path: a submitted name with `../`
-    // in it is a filename here, not a route out of the data directory.
-    const stored = path.join(dir, 'submissions', id, 'notes.tgz');
-    assert.equal(await fs.readFile(stored, 'utf8'), 'hello');
-    assert.equal(listed.body.items[0].file.name, 'notes.tgz');
-
-    const approved = await call('/api/overall-mcp/submission-review', {
-      body: { id, decision: 'approve', install: { transport: 'stdio', command: 'npx', args: ['-y', 'acme-mcp'] } },
-    });
-    assert.equal(approved.status, 200);
-    assert.equal(approved.body.entry, 'acme-mcp');
-    assert.equal(approved.body.displayOnly, false);
-    const row = (await readRegistry()).servers.find((s) => s.name === 'acme-mcp');
-    assert.equal(row.source, 'contribution');
-    assert.equal(row.contributor, '张三');
-    assert.equal(row.link, 'https://example.test/acme');
-    assert.equal(row.command, 'npx');
-    assert.equal(row.enabled, true, 'an approved contribution with a command is mounted');
-
-    // A second approval under a name the registry already uses would make every
-    // later name-keyed action ambiguous, so it is refused rather than guessed.
-    const again = await call('/api/overall-mcp/submissions', {
-      body: { name: 'acme-mcp', link: 'https://example.test/acme-2' },
-    });
-    const clashing = await call('/api/overall-mcp/submission-review', {
-      body: { id: again.body.submitted, decision: 'approve', install: { transport: 'stdio', command: 'npx', args: ['-y', 'acme-mcp'] } },
-    });
-    assert.equal(clashing.status, 409);
-    assert.match(clashing.body.error, /^duplicate contribution name: acme-mcp/);
-  });
-});
-
-test('an approved submission with only a link is registered as display-only and cannot be enabled', async () => {
-  await withHost(FIXTURE, async ({ call, readRegistry }) => {
-    const submitted = await call('/api/overall-mcp/submissions', {
-      body: { name: 'link-only', link: 'https://example.test/link-only' },
-    });
-    const approved = await call('/api/overall-mcp/submission-review', {
-      body: { id: submitted.body.submitted, decision: 'approve' },
-    });
-    assert.equal(approved.status, 200);
-    assert.equal(approved.body.displayOnly, true);
-    assert.match(approved.body.note, /仅展示/);
-
-    const row = (await readRegistry()).servers.find((s) => s.name === 'link-only');
-    assert.equal(row.displayOnly, true);
-    assert.equal(row.enabled, false, 'nothing to mount: enabled must stay false');
-    assert.equal(row.command, undefined);
-
-    // `toMcpConfig()` reads a missing command as a stdio launch, so switching
-    // this row on would try to spawn `undefined`; the refusal has to say why.
-    const enabled = await call('/api/overall-mcp/set-enabled', { body: { name: 'link-only', enabled: true } });
-    assert.equal(enabled.status, 409);
-    assert.match(enabled.body.error, /^display-only entry link-only/);
-
-    const servers = await call('/api/overall-mcp/servers', { method: 'GET' });
-    const shown = servers.body.servers.find((s) => s.name === 'link-only');
-    assert.equal(shown.displayOnly, true);
-    assert.equal(shown.link, 'https://example.test/link-only');
-  });
-});
-
-test('a submission with no name, no link or too large a file is refused', async () => {
-  await withHost(FIXTURE, async ({ call, readRegistry }) => {
-    const noName = await call('/api/overall-mcp/submissions', { body: { link: 'https://example.test/x' } });
-    assert.equal(noName.status, 400);
-    assert.match(noName.body.error, /^invalid submission: name is required/);
-
-    const badLink = await call('/api/overall-mcp/submissions', { body: { name: 'x', link: 'ftp://example.test/x' } });
-    assert.equal(badLink.status, 400);
-    assert.match(badLink.body.error, /^invalid submission: link must be an http\(s\) URL/);
-
-    const huge = {
-      name: 'huge',
-      link: 'https://example.test/huge',
-      file: { name: 'big.bin', data: Buffer.alloc(513 * 1024).toString('base64') },
-    };
-    const tooBig = await call('/api/overall-mcp/submissions', { body: huge });
-    assert.equal(tooBig.status, 400);
-    assert.match(tooBig.body.error, /^invalid submission: file is larger than 512 KB/);
-    assert.deepEqual((await readRegistry()).servers.length, 3, 'nothing reached the registry');
-  });
-});
-
 test('the MCP tools expose the row selectors and the install overwrite flag', async () => {
   await withHost(FIXTURE, async ({ tools }) => {
     // Agent-facing capability, not just prose: without `slot`/`from` an agent
@@ -320,12 +216,6 @@ test('the MCP tools expose the row selectors and the install overwrite flag', as
     assert.deepEqual(Object.keys(remove.parameters).sort(), ['from', 'name', 'slot']);
     assert.deepEqual(Object.keys(tools.get('overall_mcp_set_enabled').parameters).sort(), ['enabled', 'from', 'name', 'slot']);
     assert.deepEqual(Object.keys(tools.get('overall_mcp_install').parameters).sort(), ['item', 'overwrite']);
-    // The submission queue is agent-reachable too: an agent can record one,
-    // list the pending ones, and approve it with the mountable information.
-    assert.deepEqual(
-      Object.keys(tools.get('overall_mcp_submissions').parameters).sort(),
-      ['action', 'contributor', 'file', 'id', 'install', 'link', 'name', 'note', 'overwrite', 'reason', 'status'],
-    );
 
     // The scan text used to promise the opposite of what the merge does
     // ("Existing entries are never overwritten" — an imported row *is* updated
