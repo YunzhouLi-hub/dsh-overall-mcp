@@ -1020,18 +1020,23 @@ test('custom sources join a full browse after the built-in sources', async () =>
   assert.ok(result.items.some((i) => i.source === CUSTOM_DEF.id));
 });
 
-test('GitHub search is read as discovery rows, deduped across its two queries', async () => {
+test('GitHub search is read as discovery rows, deduped across its three queries', async () => {
   const calls = [];
   const fetchImpl = async (url) => {
     calls.push(new URL(String(url)).searchParams.get('q'));
     return okFetch(url);
   };
-  const { items } = await fetchGithubMcp({ fetchImpl, limit: 100, pages: 2 });
+  const { items } = await fetchGithubMcp({ fetchImpl, limit: 100, pages: 3 });
 
-  // Two requests — one per query — against a 10-per-minute anonymous budget.
-  // The tag query requires MCP in the description: the bare topic's star-sorted
-  // head is platforms (n8n, gemini-cli), not servers.
-  assert.deepEqual(calls, ['mcp-server in:name archived:false', 'topic:mcp-server mcp in:description archived:false']);
+  // Three requests — one per query — against a 10-per-minute anonymous budget.
+  // The tag queries require more than the tag: the bare `topic:mcp-server`
+  // head is platforms (n8n, gemini-cli), and the bare `topic:model-context-protocol`
+  // head is products and SDKs (rea, nanobot, fastmcp).
+  assert.deepEqual(calls, [
+    'mcp-server in:name archived:false',
+    'topic:mcp-server mcp in:description archived:false',
+    'topic:model-context-protocol mcp in:name archived:false',
+  ]);
 
   // The repository in both answers appears once (dedupe by full_name).
   const shared = items.filter((i) => i.id === 'github:acme/shared-mcp');
@@ -1060,12 +1065,39 @@ test('GitHub search is read as discovery rows, deduped across its two queries', 
   const dead = items.find((i) => i.id === 'github:acme/dead-mcp');
   assert.equal(dead.status, 'archived');
   assert.equal(dead.deprecated, true);
+
+  // The three answers are ranked against each other: each query is already
+  // star-sorted upstream, but "the best repositories" is a fact about the union.
+  // acme/dead-mcp carries 900 stars and acme/github-mcp-server 33637, so the
+  // union order is by stars, not by which query produced the row.
+  assert.deepEqual(items.map((i) => i.stars), [33637, 900, 120]);
+});
+
+test('the third query reaches servers the name query cannot', async () => {
+  // `topic:model-context-protocol mcp in:name` exists for the gap the other two
+  // leave: a server named `…-mcp` rather than `…-mcp-server`. Measured on this
+  // host, its head holds codebase-memory-mcp (46.6k) and mcp-for-blender (30.9k);
+  // `mcp-server in:name` cannot return either.
+  const protoOnly = { total_count: 1, items: [ghRepo('acme/codebase-memory-mcp', 46646, ['mcp', 'model-context-protocol'])] };
+  const fetchImpl = async (url) => {
+    const q = new URL(String(url)).searchParams.get('q') ?? '';
+    if (q.includes('model-context-protocol')) {
+      return { ok: true, status: 200, headers: { get: () => undefined }, json: async () => protoOnly };
+    }
+    return okFetch(url);
+  };
+  const { items } = await fetchGithubMcp({ fetchImpl, limit: 200, pages: 3 });
+  const row = items.find((i) => i.id === 'github:acme/codebase-memory-mcp');
+  assert.ok(row, 'a row only the protocol-tag query can produce is in the result');
+  assert.equal(row.stars, 46646);
+  assert.equal(row.title, 'codebase-memory-mcp');
+  assert.equal(row.install, null, 'and it is still discovery-only');
 });
 
 test('GitHub search obeys the request budget it is given', async () => {
   const calls = [];
   const fetchImpl = async (url) => { calls.push(String(url)); return okFetch(url); };
-  // One request: the second query is simply not asked.
+  // One request: the other two queries are simply not asked.
   const { items } = await fetchGithubMcp({ fetchImpl, limit: 1, pages: 1 });
   assert.equal(calls.length, 1);
   assert.equal(items.length, 1);
