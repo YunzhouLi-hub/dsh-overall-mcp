@@ -425,6 +425,31 @@ window.__ModuleLoader__.load({
 				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text2,
 				display: "inline-flex", alignItems: "center", gap: 6,
 			},
+			// The user's own catalogue sources: a quiet box that only appears when
+			// its row is open, so the market's chrome stays three rows deep.
+			sourceBox: {
+				border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px 12px",
+				marginBottom: 14, background: T.soft, fontSize: 12.5, color: T.text2,
+			},
+			sourceHead: {
+				display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+			},
+			sourceRow: {
+				display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+				padding: "7px 0", borderTop: `1px solid ${T.line2}`,
+			},
+			sourceLabel: { fontWeight: 600, color: T.text, wordBreak: "break-all" },
+			sourceUrl: { color: T.text3, wordBreak: "break-all", flex: "1 1 200px", minWidth: 0 },
+			sourceInput: {
+				flex: "1 1 240px", minWidth: 0, padding: "6px 10px", fontSize: 12.5,
+				borderRadius: 8, border: `1px solid ${T.line}`, background: T.cardBg, color: T.text,
+			},
+			sourceMiniBtn: {
+				padding: "4px 10px", borderRadius: 8, cursor: "pointer", fontSize: 12,
+				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text2,
+				flexShrink: 0, whiteSpace: "nowrap",
+			},
+			sourceMiniBtnDanger: { color: T.red },
 			// Underline tabs: the label sits on a rule and the active rule is
 			// ink, not accent. The rule is drawn by the injected sheet on
 			// `.omkt-tab[aria-selected="true"]::after` rather than as an inline
@@ -1759,6 +1784,18 @@ window.__ModuleLoader__.load({
 			return `${Math.floor(v / 100) / 10}k`;
 		}
 
+		/**
+		 * When one source's listing was read, as HH:MM — or "" when the host did
+		 * not say. Sources age independently (each has its own TTL and validator),
+		 * so this is printed per source rather than once for the whole listing.
+		 */
+		function sourceClock(at) {
+			if (typeof at !== "string" || !at) return "";
+			const t = new Date(at);
+			if (Number.isNaN(t.getTime())) return "";
+			return t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+		}
+
 		/** 12345 -> 12.3k, for the compact star/usage counters (truncated). */
 		function compact(n) {
 			const v = Number(n) || 0;
@@ -2205,6 +2242,18 @@ window.__ModuleLoader__.load({
 			const [marketQuery, setMarketQuery] = useState("");
 			const [marketSource, setMarketSource] = useState("");
 			const [marketAt, setMarketAt] = useState("");
+			// ---- user-added catalogue sources ----
+			// The five built-in sources are compiled in; these are the ones the
+			// user points at (`$DSH_HOME/overall-mcp/sources.json`). `null` means
+			// "not asked yet", and `sourcesMissing` records a host bundle that
+			// predates the route, so the page can say which one it is talking to
+			// instead of showing an empty list as if nothing was configured.
+			const [catalogSources, setCatalogSources] = useState(null);
+			const [sourcesMissing, setSourcesMissing] = useState(false);
+			const [sourcesOpen, setSourcesOpen] = useState(false);
+			const [sourceDraft, setSourceDraft] = useState("");
+			const [sourceBusy, setSourceBusy] = useState(false);
+			const [sourceNote, setSourceNote] = useState("");
 			const [repoStats, setRepoStats] = useState({});
 			const [repoMedia, setRepoMedia] = useState({});
 			// Repos whose picture lookup failed. Kept separately because a failed
@@ -2309,7 +2358,71 @@ window.__ModuleLoader__.load({
 
 			useEffect(() => {
 				refresh().catch((err) => setError(String(err.message || err)));
+				loadSources();
 			}, []);
+
+			/**
+			 * The user's own catalogue sources. Kept in its own request because it
+			 * answers a different question from the listing ("what am I pointing
+			 * at" vs "what is on the market") and the page needs it before it has
+			 * any listing at all: the source filter and the per-source status line
+			 * both name these rows.
+			 */
+			async function loadSources() {
+				try {
+					const body = await api("/sources");
+					setCatalogSources({
+						sources: Array.isArray(body.sources) ? body.sources : [],
+						max: Number(body.max) > 0 ? Number(body.max) : 8,
+						error: typeof body.error === "string" ? body.error : "",
+					});
+					setSourcesMissing(false);
+				} catch (err) {
+					const text = String(err.message || err);
+					// An old host has no such route; that is a version fact, not a
+					// failure of this page.
+					const missing = text.includes("404");
+					setSourcesMissing(missing);
+					setCatalogSources({ sources: [], max: 8, error: missing ? "" : text });
+				}
+			}
+
+			async function addCatalogSource() {
+				const url = sourceDraft.trim();
+				if (!url) { setSourceNote("先填一个 https 地址"); return; }
+				setSourceBusy(true); setSourceNote("");
+				try {
+					const body = await api("/sources", { method: "POST", body: JSON.stringify({ url }) });
+					setCatalogSources({ sources: body.sources ?? [], max: body.max ?? 8, error: "" });
+					setSourceDraft("");
+					setSourceNote(`已添加「${body.source?.label ?? url}」，正在重新拉取…`);
+					setSourcesOpen(true);
+					await loadMarket({ refresh: true });
+					setSourceNote(`已添加「${body.source?.label ?? url}」`);
+				} catch (err) {
+					// The host refuses with a reason a user can act on (只接受 https、
+					// 地址已添加过、上限 8 个); show it verbatim.
+					setSourceNote(String(err.message || err));
+				} finally {
+					setSourceBusy(false);
+				}
+			}
+
+			async function removeCatalogSource(id, label) {
+				setSourceBusy(true); setSourceNote("");
+				try {
+					await api("/sources/remove", { method: "POST", body: JSON.stringify({ id }) });
+					// Its rows must not come back from the listing this page already
+					// holds, so the market is re-read rather than filtered here.
+					setCatalogSources((prev) => ({ ...(prev ?? {}), sources: (prev?.sources ?? []).filter((s) => s.id !== id) }));
+					setSourceNote(`已移除「${label}」`);
+					await loadMarket({ refresh: true });
+				} catch (err) {
+					setSourceNote(String(err.message || err));
+				} finally {
+					setSourceBusy(false);
+				}
+			}
 
 			async function loadMarket(options = {}) {
 				setMarketBusy(true); setMarketError("");
@@ -2907,6 +3020,19 @@ window.__ModuleLoader__.load({
 
 			const marketItems = market?.items ?? null;
 			const installedCount = marketItems ? marketItems.filter((i) => i.installed).length : 0;
+			// The user's own sources, as rows the page can filter and label by.
+			// Their ids come from the host, so a listing filtered by one of them
+			// is the same request the built-in five use.
+			const customSourceRows = catalogSources?.sources ?? [];
+			const marketSourceOptions = [
+				...MARKET_SOURCES,
+				...customSourceRows.map((s) => [s.id, s.label]),
+			];
+			// Custom ids are long and machine-made (`custom:raw-github…`); the
+			// per-source counters line uses the label the user chose instead.
+			const shortSourceName = (id) => SOURCE_SHORT[id]
+				?? customSourceRows.find((s) => s.id === id)?.label
+				?? (id.startsWith("custom:") ? id.slice(7, 21) : id);
 			// Entries the listing marks as favourites (the host annotates every
 			// item it returns). Only the loaded listing can be counted here; the
 			// set's own size comes from `/favorites`.
@@ -3295,7 +3421,7 @@ window.__ModuleLoader__.load({
 									? { ...styles.filterSelect, ...styles.filterSelectOn }
 									: styles.filterSelect,
 								value: marketSource,
-								title: marketSource ? `来源筛选：${marketSource}` : "按来源筛选",
+								title: marketSource ? `来源筛选：${shortSourceName(marketSource)}` : "按来源筛选",
 								onChange: (e) => {
 									setMarketSource(e.target.value);
 									// A new listing may not hold the selected group;
@@ -3303,7 +3429,7 @@ window.__ModuleLoader__.load({
 									setMarketGroup("");
 									loadMarket({ source: e.target.value });
 								},
-							}, MARKET_SOURCES.map(([value, label]) => createElement("option", { key: value, value }, label))),
+							}, marketSourceOptions.map(([value, label]) => createElement("option", { key: value, value }, label))),
 							createElement("select", {
 								key: "sort", className: `omkt-select${marketSort !== "default" ? " omkt-select-on" : ""}`,
 								style: marketSort !== "default"
@@ -3397,18 +3523,102 @@ window.__ModuleLoader__.load({
 						: createElement("div", { key: "meta", style: styles.metaLine }, "正在发现…"),
 					// Provenance counts are facts about the catalogue, not
 					// controls, so they get a quiet line of their own instead of
-					// competing with the chip row.
+					// competing with the chip row. Each source carries its own age
+					// and state because they now age independently: one can answer
+					// from a TTL entry while another re-validates upstream.
 					market && market.counts
 						? createElement("div", { key: "srcline", style: { ...styles.hint, marginBottom: 14 } },
 							[
 								Object.entries(market.counts)
-									.map(([s, n]) => `${SOURCE_SHORT[s] ?? s} ${n}`).join(" · "),
+									.map(([s, n]) => {
+										const st = market.sources?.[s];
+										const state = st?.error ? "不可用" : st?.stale ? "旧" : st?.cached ? "缓存" : "";
+										const at = sourceClock(st?.at);
+										return `${shortSourceName(s)} ${n}${state || at ? `（${[state, at].filter(Boolean).join(" ")}）` : ""}`;
+									}).join(" · "),
 								`其中 ${installedCount} 个已安装`,
 								marketGroup && sortedItems
 									? `「${marketGroup === "__none__" ? "未分类" : marketGroup}」筛选后 ${sortedItems.length} 条`
 									: null,
 							].filter(Boolean).join(" · "))
 						: null,
+					// The user's own sources, in one collapsible box: the market's
+					// filter row is not the place to add or remove one, but the
+					// listing's own numbers are what tell a user whether a source
+					// they added actually answered.
+					sourcesMissing
+						? createElement("div", { key: "srcold", style: styles.hint },
+							"自定义目录源需要新版宿主插件：请完全退出 DSH（桌面版注意托盘图标）后重新打开。")
+						: createElement("div", { key: "srcedit", style: styles.sourceBox }, [
+							createElement("div", { key: "head", style: styles.sourceHead }, [
+								createElement("span", { key: "t", style: styles.sourceLabel }, "目录源"),
+								createElement("span", { key: "n", style: styles.hint },
+									`自定义 ${customSourceRows.length} / ${catalogSources?.max ?? 8}`),
+								createElement("button", {
+									key: "toggle", type: "button", className: "omkt-btn omkt-btn-outline",
+									style: { ...styles.sourceMiniBtn, marginLeft: "auto" },
+									onClick: () => setSourcesOpen((v) => !v),
+								}, sourcesOpen ? "收起" : "管理"),
+							]),
+							sourcesOpen
+								? createElement("div", { key: "body" }, [
+									// What each one last did, read off the listing the page
+									// already holds — no extra request.
+									createElement("div", { key: "builtin", style: { ...styles.hint, paddingTop: 8 } },
+										`内置：${MARKET_SOURCES.slice(1).map(([id, label]) => {
+											const st = market?.sources?.[id];
+											if (market?.sources && !st) return `${label} 未参与`;
+											const at = sourceClock(st?.at);
+											return `${label} ${market?.counts?.[id] ?? 0}${at ? `（${at}）` : ""}`;
+										}).join(" · ")}`),
+									...customSourceRows.map((s) => {
+										const st = market?.sources?.[s.id];
+										const at = sourceClock(st?.at);
+										return createElement("div", { key: s.id, style: styles.sourceRow }, [
+											createElement("span", { key: "l", style: styles.sourceLabel }, s.label),
+											createElement("span", { key: "u", style: styles.sourceUrl, title: s.url }, s.url),
+											createElement("span", { key: "c", style: styles.hint },
+												st?.error
+													? `不可用：${st.error}`
+													: `${market?.counts?.[s.id] ?? 0} 条${at ? ` · ${at}` : ""}${st?.stale ? " · 本次未更新" : ""}`),
+											createElement("button", {
+												key: "del", type: "button", className: "omkt-btn omkt-btn-outline",
+												style: { ...styles.sourceMiniBtn, ...styles.sourceMiniBtnDanger },
+												disabled: sourceBusy,
+												onClick: () => removeCatalogSource(s.id, s.label),
+											}, "移除"),
+										]);
+									}),
+									!customSourceRows.length
+										? createElement("div", { key: "none", style: { ...styles.hint, paddingTop: 8 } },
+											"还没有自定义源。加一个你自己的 registry.json 地址，它和内置五个来源一起出现在市场里。")
+										: null,
+									createElement("div", { key: "add", style: styles.sourceRow }, [
+										createElement("input", {
+											key: "in", className: "omkt-input", style: styles.sourceInput,
+											type: "url", value: sourceDraft, spellCheck: false,
+											placeholder: "https://raw.githubusercontent.com/<owner>/<repo>/<branch>/registry.json",
+											onChange: (e) => setSourceDraft(e.target.value),
+											onKeyDown: (e) => { if (e.key === "Enter") addCatalogSource(); },
+										}),
+										createElement("button", {
+											key: "addbtn", type: "button", className: "omkt-btn omkt-btn-outline",
+											style: styles.sourceMiniBtn,
+											disabled: sourceBusy || !sourceDraft.trim(),
+											onClick: () => addCatalogSource(),
+										}, sourceBusy ? "处理中…" : "添加"),
+									]),
+									createElement("div", { key: "tip", style: { ...styles.hint, paddingTop: 2 } },
+										"只接受 https（地址里的安装命令会被本机执行）；最多 8 个；私有源请用本机文件或带鉴权的宿主，不要把口令写进地址。"),
+									catalogSources?.error
+										? createElement("div", { key: "err", style: styles.error }, `sources.json：${catalogSources.error}`)
+										: null,
+									sourceNote
+										? createElement("div", { key: "note", style: styles.hint }, sourceNote)
+										: null,
+								])
+								: null,
+						]),
 					// Old host, new page: every item lacks `group`, so the chip row
 					// would degrade to 全部/未分类 and look broken. Name the cause.
 					!marketBusy && marketItems && marketItems.length > 0

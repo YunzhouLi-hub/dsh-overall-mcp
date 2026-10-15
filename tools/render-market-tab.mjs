@@ -97,6 +97,21 @@ const MARKET = {
   },
 };
 
+// The custom catalogue sources the host reports. One is configured, and it is
+// deliberately NOT part of the listing below: a source that is pointed at but
+// did not contribute rows must still appear in the manager, with its own zero,
+// instead of looking like it was never added.
+const CUSTOM_SOURCE = {
+  id: 'custom:raw-githubusercontent-com-acme-mcp-registry-main-registry-json',
+  label: 'acme/mcp-registry',
+  url: 'https://raw.githubusercontent.com/acme/mcp-registry/main/registry.json',
+};
+// The stub host keeps its own copy of the configured sources and answers the
+// page from it: the effect that lists them re-runs on every pass here (the
+// shim has no dependency arrays), so a GET that ignored the page's own removal
+// would put the row back and hide the empty state the page really shows.
+let liveSources = [CUSTOM_SOURCE];
+
 let captured = null;
 const calls = [];
 const styleElements = [];
@@ -112,9 +127,31 @@ globalThis.fetch = async (url, init) => {
   if (path.startsWith('/catalog')) {
     // The source filter travels in the POST body, not the query string.
     let source = '';
-    try { source = JSON.parse(init?.body ?? '{}').source ?? ''; } catch { source = ''; }
-    calls.push(`POST /catalog${source ? ` source=${source}` : ''}`);
+    let refresh = false;
+    try {
+      const body = JSON.parse(init?.body ?? '{}');
+      source = body.source ?? '';
+      refresh = body.refresh === true;
+    } catch { source = ''; }
+    calls.push(`POST /catalog${source ? ` source=${source}` : ''}${refresh ? ' refresh' : ''}`);
     return ok(MARKET);
+  }
+  // The user's own sources: GET lists them, POST adds one, /remove drops one.
+  // Adding is answered with the list the host would send back afterwards.
+  if (path.startsWith('/sources/remove')) {
+    const body = JSON.parse(init?.body ?? '{}');
+    calls.push(`POST /sources/remove id=${body.id}`);
+    liveSources = liveSources.filter((s) => s.id !== body.id);
+    return ok({ removed: CUSTOM_SOURCE, dropped: 1, sources: liveSources, max: 8, error: '' });
+  }
+  if (path.startsWith('/sources')) {
+    if (init?.method === 'POST') {
+      const body = JSON.parse(init?.body ?? '{}');
+      calls.push(`POST /sources url=${body.url}`);
+      return ok({ source: CUSTOM_SOURCE, sources: liveSources, max: 8, error: '' });
+    }
+    calls.push('GET /sources');
+    return ok({ sources: liveSources, max: 8, error: '' });
   }
   if (path.startsWith('/servers')) return ok({ servers: [{ name: 'codegraph', source: 'claude-code', enabled: true }] });
   if (path.startsWith('/repo-stats')) return ok({ stats: {} });
@@ -325,6 +362,70 @@ assert.equal(sourceLine.length, 1, 'per-source line present');
 const sourceText = textOf(sourceLine[0]);
 assert.ok(sourceText.includes('官方 1'), 'per-source line names the sources');
 assert.ok(sourceText.includes('其中 1 个已安装'), 'per-source line names the installed count');
+
+// --- 3d. the user's own catalogue sources -----------------------------------
+// A source the user pointed at is a first-class source: it must be reachable
+// from the filter, listed with its own numbers in the manager, and removable
+// from there. The host reports it as contributing nothing to this listing,
+// which is exactly the state that used to be invisible — 「我加了但它好像没生效」.
+{
+  const srcSelect = loadedNodes.find((n) => n.type === 'select'
+    && directChildren(n).some((o) => o.type === 'option' && o.props?.value === 'smithery'));
+  const customOption = directChildren(srcSelect).find((o) => o.props?.value === CUSTOM_SOURCE.id);
+  assert.ok(customOption, 'the source filter lists a user-added source');
+  assert.equal(textOf(customOption), 'acme/mcp-registry', 'and names it by its label, not its machine id');
+
+  const box = findByKey(loadedNodes, 'srcedit');
+  assert.equal(box.length, 1, 'the source manager is present');
+  assert.ok(textOf(box[0]).includes('自定义 1 / 8'), 'the manager states how many are configured');
+
+  const manage = buttonByText(walk(box[0]), '管理');
+  assert.ok(manage, 'the manager has a toggle instead of always taking space');
+  manage.props.onClick();
+  const opened = walk(await render());
+  const openBox = findByKey(opened, 'srcedit')[0];
+  const rowText = textOf(openBox);
+  assert.ok(rowText.includes('acme/mcp-registry'), 'the row names the source');
+  assert.ok(rowText.includes(CUSTOM_SOURCE.url), 'and shows the address it reads');
+  assert.ok(/0 条/.test(rowText), `a source that contributed nothing says so instead of vanishing (got ${rowText})`);
+  assert.ok(rowText.includes('内置：'), 'the built-in five are listed beside the user\'s own');
+  assert.ok(rowText.includes('最多 8 个'), 'the cap and the https rule are stated where the URL is typed');
+
+  // Typing an address and adding it must reach the host, and the page must then
+  // re-read the listing: the rows of a source added a moment ago are not in the
+  // listing the page is holding.
+  const input = walk(openBox).find((n) => n.type === 'input' && String(n.props?.placeholder ?? '').includes('raw.githubusercontent'));
+  assert.ok(input, 'the manager has a URL field');
+  input.props.onChange({ target: { value: 'https://example.com/other.json' } });
+  const withDraft = walk(await render());
+  const addBtn = buttonByText(findByKey(withDraft, 'srcedit').length ? walk(findByKey(withDraft, 'srcedit')[0]) : [], '添加');
+  assert.ok(addBtn, 'the add button appears beside the field');
+  assert.equal(addBtn.props.disabled, false, 'a typed address can be submitted');
+  const beforeAdd = calls.length;
+  addBtn.props.onClick();
+  await render();
+  const addCalls = calls.slice(beforeAdd).join(' ');
+  assert.ok(addCalls.includes('POST /sources url=https://example.com/other.json'),
+    `adding must post the address (got: ${addCalls || 'nothing'})`);
+  assert.ok(addCalls.includes('POST /catalog') && addCalls.includes('refresh'),
+    `and re-read the listing, or the new source looks empty (got: ${addCalls || 'nothing'})`);
+
+  // Removing must name the source by its id, and the row must go.
+  const removed = walk(await render());
+  const body = findByKey(removed, 'srcedit')[0];
+  const del = buttonByText(walk(body), '移除');
+  assert.ok(del, 'each user-added row has a remove control');
+  const beforeRemove = calls.length;
+  del.props.onClick();
+  // Removing ends in two awaits (the host's answer, then the re-read listing),
+  // so give the page a tick before reading the tree again.
+  await settle();
+  const afterRemove = walk(await render());
+  assert.ok(calls.slice(beforeRemove).join(' ').includes(`POST /sources/remove id=${CUSTOM_SOURCE.id}`),
+    'removing posts the id the host issued, not the label');
+  assert.ok(textOf(findByKey(afterRemove, 'srcedit')[0]).includes('还没有自定义源'),
+    'and the manager falls back to its empty copy');
+}
 
 // Conditional requests are invisible unless the page says so: "refreshed" and
 // "asked and told nothing changed" look identical without this. The span lives

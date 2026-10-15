@@ -103,6 +103,7 @@ test('the plugin registers the documented route and tool surface', async () => {
       '/api/overall-mcp/set-source-enabled', '/api/overall-mcp/updates', '/api/overall-mcp/self',
       '/api/overall-mcp/self-update', '/api/overall-mcp/update', '/api/overall-mcp/remove',
       '/api/overall-mcp/forget-orphans', '/api/overall-mcp/tools',
+      '/api/overall-mcp/sources', '/api/overall-mcp/sources/remove',
     ]) {
       assert.ok(routes.has(route), `${route} is registered`);
     }
@@ -296,5 +297,58 @@ test('the MCP tools expose the row selectors and the install overwrite flag', as
     const scan = tools.get('overall_mcp_scan').description;
     assert.ok(!/existing entries are never overwritten/i.test(scan));
     assert.match(scan, /added by hand is never overwritten/);
+  });
+});
+
+test('a user-added catalogue source is stored, listed and refused when it is unusable', async () => {
+  const GH = 'https://raw.githubusercontent.com/acme/mcp-registry/main/registry.json';
+  await withHost(FIXTURE, async ({ dir, call }) => {
+    const readSources = async () => JSON.parse(await fs.readFile(path.join(dir, 'sources.json'), 'utf8'));
+
+    const empty = await call('/api/overall-mcp/sources', { method: 'GET' });
+    assert.equal(empty.status, 200);
+    assert.deepEqual(empty.body.sources, []);
+    assert.equal(empty.body.max, 8);
+    assert.equal(empty.body.error, null, 'no file yet is not damage');
+
+    const added = await call('/api/overall-mcp/sources', { body: { url: GH } });
+    assert.equal(added.status, 200);
+    assert.equal(added.body.source.label, 'acme/mcp-registry');
+    assert.deepEqual(added.body.sources.map((s) => s.url), [GH]);
+    // Persisted in the same shape a restart reads back.
+    const stored = await readSources();
+    assert.equal(stored.version, 1);
+    assert.deepEqual(stored.sources.map((s) => s.id), [added.body.source.id]);
+    // The payload the panel needs carries no field the page did not ask for.
+    assert.deepEqual(Object.keys(added.body.source).sort(), ['id', 'label', 'url']);
+
+    // A duplicate is a conflict (409) and a plain-http address is the caller's
+    // mistake (400) — neither is a plugin fault, and both are visible.
+    const twice = await call('/api/overall-mcp/sources', { body: { url: GH } });
+    assert.equal(twice.status, 409);
+    assert.match(twice.body.error, /已经添加过/);
+    const plain = await call('/api/overall-mcp/sources', { body: { url: 'http://raw.githubusercontent.com/acme/x/main/r.json' } });
+    assert.equal(plain.status, 400);
+    assert.match(plain.body.error, /https/);
+    assert.deepEqual((await readSources()).sources.length, 1, 'a refused address is not written');
+  });
+});
+
+test('removing a source names what went, and an unknown id is a 404', async () => {
+  const GH = 'https://raw.githubusercontent.com/acme/mcp-registry/main/registry.json';
+  await withHost(FIXTURE, async ({ dir, call }) => {
+    const added = await call('/api/overall-mcp/sources', { body: { url: GH } });
+    const id = added.body.source.id;
+
+    const missing = await call('/api/overall-mcp/sources/remove', { body: { id: 'custom:never-added' } });
+    assert.equal(missing.status, 404);
+    assert.match(missing.body.error, /unknown source/);
+
+    const removed = await call('/api/overall-mcp/sources/remove', { body: { id } });
+    assert.equal(removed.status, 200);
+    assert.equal(removed.body.removed.id, id);
+    assert.deepEqual(removed.body.sources, []);
+    // Removing twice is the 404 above, and the file reflects the empty list.
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(dir, 'sources.json'), 'utf8')).sources, []);
   });
 });

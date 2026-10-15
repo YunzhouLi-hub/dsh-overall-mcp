@@ -19,6 +19,9 @@ import { scanHost, mergeIntoRegistry, scannedSources, findOrphans, setMountHolde
 import { browseCatalog, catalogItemToEntry, fetchRepoStats } from './lib/catalog.js';
 import { createCatalogCache } from './lib/catalog-cache.js';
 import {
+  SOURCES_MAX, addSourceTo, readSourcesDocument, removeSourceFrom, sourcesDocumentOf,
+} from './lib/custom-sources.js';
+import {
   readInstalls, writeInstalls, recordInstallIn, installKeyOf,
   localInstallsOf, localLastInstallOf,
 } from './lib/installs.js';
@@ -171,6 +174,26 @@ export async function apply(ctx) {
   // the user asked for them (「下载量以后从我们市场下载的也要统计一下」).
   const installsFile = path.join(dir, 'installs.json');
   let installs = await readInstalls(installsFile);
+
+  // User-added catalogue sources (lib/custom-sources.js). Same treatment as the
+  // registry: a damaged file is quarantined and reported rather than silently
+  // treated as "no sources yet" and then overwritten.
+  const sourcesFile = path.join(dir, 'sources.json');
+  const loadedSources = await readSourcesDocument(sourcesFile, (file, enc) => fs.readFile(file, enc));
+  let customSources = loadedSources.sources;
+  let sourcesLoadError = null;
+  if (loadedSources.damaged) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backup = `${sourcesFile}.corrupt-${stamp}`;
+    try { await fs.copyFile(sourcesFile, backup); } catch { /* keep going: reporting beats failing */ }
+    sourcesLoadError = `自定义目录源文件无法解析（${loadedSources.damaged}），本次以空列表启动；原文件已备份为 ${path.basename(backup)}`;
+    log?.warn?.(`overall-mcp: ${sourcesLoadError}`);
+  }
+
+  /** Persist the custom source list (temp file + rename, like every document here). */
+  async function saveSources() {
+    await writeJson(sourcesFile, sourcesDocumentOf(customSources));
+  }
 
   const loaded = await readRegistryDocument(registryFile);
   let registry = loaded.registry;
@@ -971,7 +994,9 @@ export async function apply(ctx) {
     const q = typeof query === 'string' ? query.slice(0, CATALOG_QUERY_MAX) : '';
     // The listing is cached RAW: the installed flag depends on the registry and
     // is recomputed on every read, so installing/removing never shows a stale badge.
-    const result = await browseCatalog({ query: q, limit, source, cache: catalogCache, force: refresh });
+    const result = await browseCatalog({
+      query: q, limit, source, customSources, cache: catalogCache, force: refresh,
+    });
     // The panel says how old the listing is; with several sources that can
     // differ, so the age reported is the oldest one still standing.
     const oldest = Object.values(result.sources)
@@ -992,6 +1017,44 @@ export async function apply(ctx) {
       fetchedAt: new Date(oldest ?? Date.now()).toISOString(),
       servers: (await serversPayload()).servers,
     };
+  }
+
+  /**
+   * The user's own catalogue sources, as the panel reads them. The listing is
+   * kept out of `/catalog`: it answers "what is on the market", not "what am I
+   * pointing at", and the page needs the second before it has a listing at all.
+   */
+  function sourcesPayload() {
+    return {
+      sources: customSources.map((s) => ({ id: s.id, label: s.label, url: s.url })),
+      max: SOURCES_MAX,
+      error: sourcesLoadError,
+    };
+  }
+
+  /**
+   * Add one custom source. A new source must not be served from the cache of a
+   * source that used to own this id, so its remembered rows are dropped.
+   */
+  async function doAddSource({ url, label } = {}) {
+    const next = addSourceTo({ version: 1, sources: customSources }, { url, label });
+    customSources = next.doc.sources;
+    await saveSources();
+    catalogCache.forgetSourceId(next.source.id);
+    log?.info?.(`overall-mcp: custom source added — ${next.source.label} (${next.source.url})`);
+    return { source: next.source, ...sourcesPayload() };
+  }
+
+  /** Remove one custom source, dropping whatever the market remembered of it. */
+  async function doRemoveSource({ id } = {}) {
+    if (typeof id !== 'string' || !id.trim()) throw new Error('id required');
+    const { doc, removed } = removeSourceFrom({ version: 1, sources: customSources }, id.trim());
+    if (!removed) throw new Error(`unknown source: ${id.trim()}`);
+    customSources = doc.sources;
+    await saveSources();
+    const dropped = catalogCache.forgetSourceId(removed.id);
+    log?.info?.(`overall-mcp: custom source removed — ${removed.label} (${dropped} cached result(s) dropped)`);
+    return { removed, dropped, ...sourcesPayload() };
   }
 
   // ---- GitHub star enrichment for the market cards -------------------------
@@ -1174,8 +1237,10 @@ export async function apply(ctx) {
         // Same all-source query the settings page uses, so the agent and the UI
         // rank and dedupe identically; the cap keeps the reply inside a context.
         // Shares the panel's cache: an agent search and a page search of the same
-        // words cost one walk between them.
-        return await browseCatalog({ query, limit: 50, cache: catalogCache });
+        // words cost one walk between them. The user's own sources are part of
+        // "all sources" — an agent that cannot find what they added would be
+        // answering a different question than the tab they are looking at.
+        return await browseCatalog({ query, limit: 50, customSources, cache: catalogCache });
       },
     }),
     defineTool({
@@ -1359,6 +1424,19 @@ export async function apply(ctx) {
         favorites: [...favorites].sort(),
         count: favorites.size,
       }))],
+      // The user's own catalogue sources. GET is what the page reads before it
+      // has any listing; POST adds one. Removal is its own path (POST), because
+      // "add" and "remove" carry different bodies and a 405 is a worse answer
+      // than a named route.
+      ['/api/overall-mcp/sources', ['GET', 'POST'], guard(async (req) => {
+        if (req.method !== 'POST') return json(sourcesPayload());
+        const { url, label } = await readBody(req);
+        return json(await doAddSource({ url, label }));
+      })],
+      ['/api/overall-mcp/sources/remove', ['POST'], guard(async (req) => {
+        const { id } = await readBody(req);
+        return json(await doRemoveSource({ id }));
+      })],
       ['/api/overall-mcp/set-enabled', ['POST'], guard(async (req) => {
         const { name, enabled, slot, from } = await readBody(req);
         if (typeof name !== 'string' || typeof enabled !== 'boolean') return json({ error: 'name (string) and enabled (boolean) required' }, 400);

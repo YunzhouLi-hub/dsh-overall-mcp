@@ -57,7 +57,7 @@ dsh plugin --profile web add ./dsh-overall-mcp
 - 抓取**失败时保留上一次的那份列表**（标 `stale`，条目照常可用），同时把错误照报给界面；冷启动失败才真的报空。上游抽风不该让整个市场页变空
 - 总数以紧凑形式显示：`5.3k 个可用 MCP`（5364 → 5.3k，**截断而非四舍五入**，避免标题数大于真实条数）
 - **市场页三段式 chrome**（按 v4 原型）：① 一整行搜索胶囊（🔍 + 输入框 + 右侧「搜索」按钮，回车即搜）；② 分类 chip 行（可横向滚动）+ 同一行右端的紧凑筛选控件（来源下拉 / 排序下拉 / 刷新，描边小按钮样式，不是大蓝块）；③ 灰字元信息行 `5.3k 个可用 MCP · 第 1 / 1 页 · 每页 20 条`，右端是缓存时间；各来源条数与已安装数退到下面一行更轻的灰字——控件是一行，数字是另一行，互不挤占
-- 统计：各来源条数 · 已安装数 · 当前页码 · 缓存时间
+- 统计：各来源条数 · 已安装数 · 当前页码 · 缓存时间。各来源那一行现在带**每个源自己的时间与状态**（`官方 800（12:03）· acme/mcp-registry 42（缓存 12:01）· …`）：每个源有自己的 TTL 和验证器，所以它们是**各自变旧**的，一个时间戳说不清五份上游
 - **排序**（用户自选，切换即生效，不重新请求上游）：
   - `默认（综合推荐）` — 质量分：已认证(400) > 官方(300) > 可安装(120)，再加 log 量纲的流行度（`installs` 与 Star 各最多 +200）；已废弃 −500
   - `质量最高` — 与默认**同一个**加权分。下拉把它单列，是为了让标签承诺的排序真的被应用，而不是一个和默认同序的空选项
@@ -75,6 +75,7 @@ dsh plugin --profile web add ./dsh-overall-mcp
 - Star 补充只覆盖**当前页**可见的仓库，翻页不重复消耗 GitHub 额度
 - 统计：`N 个可用 MCP · 官方 x · Smithery y · Docker z · 远程 a · Awesome b · 其中 M 个已安装 · 更新于 时间`；整份列表来自缓存时时间后面缀「（缓存）」，本次有来源答 `304` 时再缀上「· N 源未变」
 - 来源筛选：全部市场 / 官方 Registry / Smithery / Docker MCP Catalog / Awesome 远程 / Awesome 清单；支持关键词搜索（关键词同样匹配安装命令，搜 `docker` 或端点域名也能命中）
+- **自定义目录源**：市场不再只有编译进来的那五个来源。市场页有一块可折叠的「目录源」——内置五源列出**各自的条数与时间**，下面是你自己加的源（标签 / 地址 / 条数或错误 / 移除），底部是地址输入框 + 「添加」。宿主把它存在 `$DSH_HOME/overall-mcp/sources.json`（`{version:1, sources:[{id,label,url}]}`，写盘走临时文件 + rename；文件读不出来时面板照报原因，内置五源不受影响），**只接受 https**：地址里的安装命令会被本机执行，所以 `http://` 和带用户名口令的地址在入口就被拒；最多 8 个；重复地址报 409、非法地址报 400、删除未知 id 报 404——三种都在面板上原样显示，不吞成「失败」。源的 id 由宿主签发（`custom:<host+path 的 slug>`，≤48 字符），标签默认从地址推（GitHub raw / jsDelivr 能解析出 `owner/repo`，否则取主机名），也可以自己给。一个自定义源与内置源**完全同权**：它出现在来源下拉里、能单独筛（`/catalog?source=<id>`）、参与合并与排序，抓取同样走 ETag/304 + 60 秒 TTL，失败同样保留上一次的清单并标 `stale`（错误照报）。移除一个源只是把它从下一次抓取里拿掉，并顺手丢掉它的缓存行——正在显示的列表要等下一次刷新。这一块需要新版宿主：旧 bundle 上这里写明「需要新版宿主插件」，而不是显示成一个空列表
 - **卡片形式**呈现（与 dsh-market 插件一致）：图标（Smithery 图标 / GitHub 头像，缺失时用首字母色块）、**标题即入口**（有仓库链仓库、否则链上游官网、Smithery 条目链其目录页——与 dshmarket 卡片名一致的真锚点；卡片正文是 div 而不是 button，链接不会和点击详情打架）、标题旁**GitHub 标记**（只在 `repository` 真的是 GitHub 仓库时出现，悬停才上色）、作者行末尾的**版本**、✓认证/官方/已安装/已废弃徽标、三行描述、标签（分类 / 语言 / 部署范围 / 操作系统 / 仓库 topics）。悬停反馈通过注入的样式表实现（内联样式表达不了 :hover / keyframes / 宽度断点）：卡片描边高亮、主按钮不透明度、详情弹窗入场动画
 - **卡片布局**：按 `frontend-card-style-v4.html` 原型——卡片左右分栏（左内容 / 右「安装 + 详情」，右列**右对齐**贴在卡片右上角），下方是标签 + 收藏/⋯ 图标按钮的页脚（**无分隔线**，标签是描边胶囊而非灰底）；**收藏与 ⋯ 在正文外**，点星星不会顺带打开详情。卡片流用**行优先的等宽网格**砌墙（宽容器三列约 371px、中等两列、≤720px 单列；见下一条为何不是 `column-count`）。断点用**容器查询**（`@container`）而不是媒体查询：面板只是应用窗口里的一块，窗口 1600px 而面板 820px 时必须仍是两列——`tools/shot.mjs` 在一个 1600px 窗口里同时摆 1140px 与 820px 两个盒子来钉住这一点（内联 `repeat(2, minmax(0,1fr))` 只是没有容器支持时的兜底，`@media` 同理）。页面自己**不加水平内边距**：卡片区外面那层「板」已经是 20px 内衬，再叠一层就会把 1140px 的容器压到 1060px，正好掉出三列区间（1100px 是临界值）。整条宽度链（`page` → `tabBody` → `gridHost` → `.omkt-grid`）都显式写了 `min-width: 0`：它们都是网格项，默认的 `min-width: auto` 解析成 min-content——真机上这条链把自动轨道撑到 1891px（621px × 3 列）而页面只有 1180px，于是整页出现横向滚动条、第三列被推到屏幕外（`minmax(0,1fr)` 之后墙的 min-content 只剩 14px 的行间距）。更根本的修法是**轴的选择**：`page` 与 `tabBody` 现在都是 `display:flex; flex-direction:column`（而不是 `display:grid`）——列向 flex 的主轴竖直、横向不存在 `min-width:auto`，子项一律按容器宽度拉伸，所以墙宽恒等于可用宽度；这同时修掉另一个真机现象：`height:100%` 的网格会把隐式行**拉伸铺满整个面板**（`align-content: normal` 即 stretch），于是「刚切到 MCP 市场」的加载态里页头、页签、搜索框被摊在一屏空白上，列向 flex 把主轴内容压在顶部、剩余空间留在底部。`tools/shot.mjs` 因此有两组探针：**框架探针**（240px 侧栏 + 中栏、4 种窗口宽度，注入超长 URL、660px 宽幻灯片、94 字符长名字，外加一张 min-content 达 6000px 的卡片）断言「墙宽 == 可用宽度、页面无横向溢出、最宽卡片不溢出自身盒子、描述截断到 3 行」；**首帧探针**把目录请求挂起后冷启动渲染一次，断言「没有任何一行比自己内容更高」（旧版网格页面是 315px 的拉伸空白，现在 7px 取整误差）。两个探针各带一个反向自检开关（`OMKT_RED_FRAME` / `OMKT_RED_PAINT`），能把旧设计原样装回去，用来证明探针真的会失败。列向 flex 有一个必须显式关掉的行为：**主轴上的子项默认会收缩**，而页面是有确定高度的滚动容器——市场页内容很高时页签行是最便宜的可收缩项，于是它被压成 1px 的边框、「已注册」按钮消失，市场页变成单向门。所以注入样式表里有一条 `.omkt-page > *,.omkt-tabbody > *{flex-shrink:0;min-width:0}`，框架探针同时断言「页面每一行都保留自己的高度」（输出里的 `page rows [...]`；把旧行为装回去时页签行是 1px，探针立刻失败）
 - **卡上的传输方式是一枚小 chip 而不是命令行**：v4 原型卡片只有 `MCP · stdio` / `MCP · remote` 这样的兼容性小标（`title` 仍是可执行命令，悬停可见），完整命令留给详情面板——每张卡再压一段等宽字体，正是原型刻意去掉的东西
@@ -215,6 +216,7 @@ Invalid schema for function 'mcp__rea-om__analyze_javascript_application':
 `GET /api/overall-mcp/servers`、`GET /api/overall-mcp/tools`（schema 取证）、
 `GET|POST /api/overall-mcp/updates`（版本检查）、`POST /api/overall-mcp/update`（更新并重连）、
 `GET|POST /api/overall-mcp/catalog?query=&source=&limit=&refresh=`、
+`GET|POST /api/overall-mcp/sources`（自定义目录源：列出 / 添加）、`POST /api/overall-mcp/sources/remove`（移除一个，见下）、
 `POST /api/overall-mcp/scan`、
 `POST /api/overall-mcp/install`、`POST /api/overall-mcp/set-enabled`、
 `POST /api/overall-mcp/set-source-enabled`、`POST /api/overall-mcp/remove`、
@@ -224,7 +226,9 @@ Invalid schema for function 'mcp__rea-om__analyze_javascript_application':
 
 错误码分层（`lib/http-status.js`，单测 `test/http-status.test.mjs`）：`unknown server`/`unknown source` → **404**；缺参数（`item/key/name/source/enabled ... required`）、`no installable transport`、`is not launched through a package runner` → **400**；`ambiguous server name`（同名多条目，没带 `slot`/`from`）、`stale entry`（你读到的那一行已经不在原位）、`manual entry`（这个名字属于手工添加的记录，安装不覆盖它）→ **409**；上游版本查询失败（`version lookup failed`）→ **502**；其余一律 **500** 并由宿主 `log.warn` 记一行（含方法、URL 与消息）——500 的含义就是「这条路径我们没预料到」，早先它和「你参数写错了」共用 400，真正的事故看起来像用户的错。
 
-`POST /api/overall-mcp/install` 的 body 是 `{ item, overwrite? }`；`/update`、`/remove`、`/set-enabled` 是 `{ name, slot?, from? }`（同名多条目时不带 `slot`/`from` 返回 409）。
+`POST /api/overall-mcp/install` 的 body 是 `{ item, overwrite? }`；`/update`、`/remove`、`/set-enabled` 是 `{ name, slot?, from? }`（同名多条目时不带 `slot`/`from` 返回 409）；`POST /api/overall-mcp/sources` 是 `{ url, label? }`（`label` 省略时由地址推断）；`POST /api/overall-mcp/sources/remove` 是 `{ id }`。
+
+`GET|POST /api/overall-mcp/sources` 与 `POST /api/overall-mcp/sources/remove` 是「自定义目录源」的读写面（`lib/custom-sources.js`，单测 `test/custom-sources.test.mjs`）：GET 回 `{sources:[{id,label,url}], max:8, error}`（`error` 是 `sources.json` 读不出来的原因，此时 `sources` 为空**但仍然可用内置五源**），POST 添加一个。校验在 `normalizeSourceUrl`（只放行 `https:`、必须带主机、拒掉带用户名口令的地址、长度上限 600）与 `validateSourceInput`（地址重复 → 409，含与自己的对比；标签上限 40 字符），落盘前还兜一层 `addSourceTo` 的上限检查（第 9 个 → 409 `too-many-sources`）。id 由 `sourceIdFor` 从 `host + pathname` 生成 `custom:<slug>`（≤48 字符，小写、非字母数字折成 `-`、去重尾），所以「同一个地址」永远是同一个 id；标签由 `defaultLabelFor` 推出 `owner/repo`（GitHub raw、jsDelivr 的 `gh/owner/repo@ref`）或主机名。`normalizeSourcesDocument` 在**读取时**重跑地址校验：手改文件塞进来的 `http://` / 带口令 / 超长的行会被丢掉而不是带着进市场。删除成功会调 `catalogCache.forgetSourceId(id)`，否则被删源的行还能从来源层缓存里活 60 秒。
 
 `/catalog` 的缓存分两层（都在 `lib/catalog-cache.js` 里，单测 `test/catalog-cache.test.mjs`）：
 
@@ -232,6 +236,7 @@ Invalid schema for function 'mcp__rea-om__analyze_javascript_application':
 - **来源层（TTL）**：抓取结果按 `来源|查询串|单源上限` 缓存 **60 秒**，TTL 内连上游都不问；TTL 过了才去问，而问的结果又常常是 `304`。上游失败时回退到同一个键上一次的结果（条目标 `stale`、错误照报），冷启动失败才真的报空——上游抽风不该让整页变空。
 - 缓存按参数显式传入（`browseCatalog({ cache })`），不传就是老行为（每次真抓）——单测里近百次 `browseCatalog({ fetchImpl })` 因此不需要知道缓存存在。
 - 查询串截断到 200 字符后才参与缓存键（否则请求方可以拿超长 query 撑出无界键空间、每条都吃一份整份列表的内存）。手动 `refresh` 跳过来源层 TTL，但**仍然**走 URL 层的条件请求：刷新通常就是一次 `304`，元信息行会把「N 源未变」写出来。
+- 用户自己加的目录源（见「MCP 市场」一节）走的是**同一条**路径：它们进 `CATALOG_SOURCES` 之外的动态列表，来源层缓存键就是它们的 id，`/catalog?source=<自定义 id>` 与内置源行为一致；`sources` 返回体因此把每个源写成 `{at, cached, stale, notModified, items}`（或一个 `{error}`），面板的各源时间/状态行读的就是它。
 
 模型工具 `overall_mcp_search` 与市场页共用同一条聚合查询（`lib/catalog.js` 的 `browseCatalog`）：同一套去重、分组与排序，只是服务端把结果截到 50 条。
 

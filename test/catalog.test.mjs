@@ -833,3 +833,99 @@ test('without a cache every walk reaches upstream exactly as before', async () =
   assert.equal(fetchImpl.calls.length, 2, 'no cache argument, no reuse');
 });
 
+// ---- user-added sources (lib/custom-sources.js feeds these in) --------------
+
+const CUSTOM_URL = 'https://raw.githubusercontent.com/acme/mcp-registry/main/registry.json';
+const CUSTOM_DEF = { id: 'custom:raw-githubusercontent-com-acme-mcp-registry-main-registry-json', label: 'acme/mcp-registry', url: CUSTOM_URL };
+
+// The document shape this plugin's own GitHub Action emits, plus the two
+// near-misses that must be kept out: a row with no name, and one that carries
+// neither a command nor a URL (nothing to install).
+const CUSTOM_DOC = {
+  version: 1,
+  servers: [
+    { name: 'Team Search', description: 'internal search', command: 'npx', args: ['-y', '@acme/search-mcp'], repository: 'https://github.com/acme/search-mcp', downloadCount: 999999 },
+    { name: 'Team Wiki', description: 'hosted wiki endpoint', url: 'https://wiki.acme.internal/mcp' },
+    { description: 'no name at all' },
+    { name: 'Docs Only', description: 'a link with nothing runnable', homepage: 'https://acme.internal/docs' },
+  ],
+};
+
+function customFetch({ doc = CUSTOM_DOC, fail = false } = {}) {
+  const calls = [];
+  const impl = async (url) => {
+    calls.push(String(url));
+    if (fail) throw new Error('HTTP 503');
+    if (!String(url).startsWith(CUSTOM_URL)) throw new Error(`unexpected url ${url}`);
+    return { ok: true, json: async () => doc };
+  };
+  impl.calls = calls;
+  return impl;
+}
+
+test('a user-added source is browsed like a built-in one, named by its own id', async () => {
+  const fetchImpl = customFetch({});
+  const result = await browseCatalog({ fetchImpl, source: CUSTOM_DEF.id, customSources: [CUSTOM_DEF] });
+  assert.deepEqual(fetchImpl.calls, [CUSTOM_URL]);
+  assert.equal(result.counts[CUSTOM_DEF.id], 3, 'three rows carry a name');
+  assert.deepEqual(result.sources[CUSTOM_DEF.id].items, 3);
+  assert.equal(result.errors.length, 0);
+
+  const search = result.items.find((i) => i.title === 'Team Search');
+  assert.equal(search.install.command, 'npx');
+  assert.deepEqual(search.install.args, ['-y', '@acme/search-mcp']);
+  assert.equal(search.transport, 'stdio');
+  assert.equal(search.author, 'acme', 'the owner is read off the repository URL');
+  assert.equal(search.source, CUSTOM_DEF.id);
+  // The listing orders by popularity, so a figure the document asserts about
+  // itself is deliberately not read as one.
+  assert.equal(search.rank, undefined);
+
+  const wiki = result.items.find((i) => i.title === 'Team Wiki');
+  assert.equal(wiki.transport, 'streamable-http');
+  assert.equal(wiki.install.url, 'https://wiki.acme.internal/mcp');
+
+  // A row with nothing runnable still lists (the user may browse it), but it is
+  // not installable — nothing is guessed on its behalf.
+  const docs = result.items.find((i) => i.title === 'Docs Only');
+  assert.equal(docs.install, null);
+  assert.equal(docs.transport, 'unknown');
+  assert.equal(result.items.find((i) => i.title === 'no name at all'), undefined);
+});
+
+test('a failing user-added source is reported under its own id, and can go stale', async () => {
+  const cache = createCatalogCache();
+  const good = customFetch({});
+  const first = await browseCatalog({ fetchImpl: good, source: CUSTOM_DEF.id, customSources: [CUSTOM_DEF], cache });
+  assert.equal(first.items.length, 3);
+
+  const broken = customFetch({ fail: true });
+  const second = await browseCatalog({ fetchImpl: broken, source: CUSTOM_DEF.id, customSources: [CUSTOM_DEF], cache, force: true });
+  assert.equal(second.items.length, 3, 'the remembered rows survive the failed walk');
+  assert.equal(second.sources[CUSTOM_DEF.id].stale, true);
+  assert.deepEqual(second.errors, [{ source: CUSTOM_DEF.id, message: 'HTTP 503', stale: true }]);
+});
+
+test('a custom id that is no longer configured answers unknown, not a crash', async () => {
+  const result = await browseCatalog({ fetchImpl: customFetch({}), source: 'custom:removed', customSources: [] });
+  assert.deepEqual(result.items, []);
+  assert.deepEqual(result.errors, [{ source: 'custom:removed', message: 'unknown catalog source: custom:removed' }]);
+  assert.deepEqual(result.sources['custom:removed'], { error: 'unknown catalog source: custom:removed' });
+});
+
+test('custom sources join a full browse after the built-in five', async () => {
+  const fetchImpl = async (url) => {
+    if (String(url) === CUSTOM_URL) return { ok: true, json: async () => CUSTOM_DOC };
+    return okFetch(url);
+  };
+  const result = await browseCatalog({ fetchImpl, customSources: [CUSTOM_DEF] });
+  assert.equal(result.errors.length, 0);
+  assert.equal(result.counts[CUSTOM_DEF.id], 3);
+  assert.equal(result.sources[CUSTOM_DEF.id].cached, false);
+  // Every built-in still answered; the custom rows are merged in, not replacing.
+  for (const id of ['official-registry', 'smithery', 'docker-catalog', 'awesome-remote', 'awesome-list']) {
+    assert.ok(result.sources[id], `${id} still browsed`);
+  }
+  assert.ok(result.items.some((i) => i.source === CUSTOM_DEF.id));
+});
+
