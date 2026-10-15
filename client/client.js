@@ -3581,6 +3581,16 @@ window.__ModuleLoader__.load({
 												st?.error
 													? `不可用：${st.error}`
 													: `${market?.counts?.[s.id] ?? 0} 条${at ? ` · ${at}` : ""}${st?.stale ? " · 本次未更新" : ""}`),
+											// Only lists that live in a GitHub repository can take a
+											// submission, and only they carry this target; every other
+											// source renders no link at all.
+											s.submission?.url
+												? createElement(LinkChip, {
+													key: "sub", href: s.submission.url,
+													label: "投稿 ↗",
+													title: `在 ${s.submission.repo} 开一条已预填的收录 issue`,
+												})
+												: null,
 											createElement("button", {
 												key: "del", type: "button", className: "omkt-btn omkt-btn-outline",
 												style: { ...styles.sourceMiniBtn, ...styles.sourceMiniBtnDanger },

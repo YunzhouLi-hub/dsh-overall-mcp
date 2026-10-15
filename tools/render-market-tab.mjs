@@ -105,6 +105,12 @@ const CUSTOM_SOURCE = {
   id: 'custom:raw-githubusercontent-com-acme-mcp-registry-main-registry-json',
   label: 'acme/mcp-registry',
   url: 'https://raw.githubusercontent.com/acme/mcp-registry/main/registry.json',
+  // The host derives this from the address (a GitHub-hosted list can take
+  // submissions through an issue); a source hosted anywhere else reports null.
+  submission: {
+    repo: 'acme/mcp-registry',
+    url: 'https://github.com/acme/mcp-registry/issues/new?title=%5BMCP%20%E6%94%B6%E5%BD%95%5D&body=%23%23%23%20%E5%90%8D%E7%A7%B0%0A%0A_No%20response_',
+  },
 };
 // The stub host keeps its own copy of the configured sources and answers the
 // page from it: the effect that lists them re-runs on every pass here (the
@@ -391,6 +397,15 @@ assert.ok(sourceText.includes('其中 1 个已安装'), 'per-source line names t
   assert.ok(rowText.includes('内置：'), 'the built-in five are listed beside the user\'s own');
   assert.ok(rowText.includes('最多 8 个'), 'the cap and the https rule are stated where the URL is typed');
 
+  // Where the list accepts entries, the row offers the uplink — and it opens the
+  // prefilled issue, not the repository (the point is that nobody has to know
+  // how the list is fed).
+  const submitLink = walk(openBox).find((n) => n.type === 'a' && String(n.props?.href ?? '').includes('/issues/new'));
+  assert.ok(submitLink, 'a GitHub-hosted list offers a 投稿 link');
+  assert.equal(textOf(submitLink), '投稿 ↗', 'and says what it does');
+  assert.equal(submitLink.props.href, CUSTOM_SOURCE.submission.url, 'opening the prefilled issue the host derived');
+  assert.equal(submitLink.props.target, '_blank', 'outside the panel, in a browser tab');
+
   // Typing an address and adding it must reach the host, and the page must then
   // re-read the listing: the rows of a source added a moment ago are not in the
   // listing the page is holding.
@@ -425,6 +440,7 @@ assert.ok(sourceText.includes('其中 1 个已安装'), 'per-source line names t
     'removing posts the id the host issued, not the label');
   assert.ok(textOf(findByKey(afterRemove, 'srcedit')[0]).includes('还没有自定义源'),
     'and the manager falls back to its empty copy');
+  console.log('custom sources: filter option, manager rows, add/remove and the 投稿 uplink ✓');
 }
 
 // Conditional requests are invisible unless the page says so: "refreshed" and

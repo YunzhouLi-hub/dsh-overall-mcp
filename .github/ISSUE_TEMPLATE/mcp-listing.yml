@@ -1,0 +1,69 @@
+name: MCP 收录
+description: 把一个 MCP 服务提交到本仓库的 registry.json（合入后所有订阅这份清单的面板都能看到）
+title: "[MCP 收录] "
+labels: ["mcp-listing"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        从插件面板点「投稿到这份清单」会**预先填好**这些字段，直接提交即可；在这里手填也一样。
+
+        规则很简单：**启动命令**（stdio 型，如 `npx` / `uvx` / `docker`）和**服务地址**（streamable-http 型，https）二选一。
+        命令必须是**一个可执行文件**，不能带 `|` `;` `&&` 反引号 重定向 `$()`——这些不会被执行，只会被拒绝。
+        提交后工作流会自动校验：通过就合入 `registry.json` 并在这里回复，不通过会列出原因，你编辑这条 issue 即可重试。
+  - type: input
+    id: name
+    attributes:
+      label: 名称
+      description: 这个 MCP 服务叫什么（列表里显示的名字）
+      placeholder: acme-db
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: 说明
+      description: 一两句话：它能做什么
+      placeholder: 查询内部的 acme 数据库，只读
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: 启动命令
+      description: stdio 型填这一个：npx、uvx、docker 等可执行文件
+      placeholder: npx
+  - type: input
+    id: args
+    attributes:
+      label: 命令参数
+      description: 传给上面那条命令的参数，用空格分隔
+      placeholder: -y acme-db-mcp --read-only
+  - type: input
+    id: url
+    attributes:
+      label: 服务地址
+      description: streamable-http 型填这一个：https 端点
+      placeholder: https://mcp.acme.dev/mcp
+  - type: input
+    id: repository
+    attributes:
+      label: 仓库
+      description: 源码地址（https://github.com/owner/repo）
+      placeholder: https://github.com/acme/acme-db-mcp
+  - type: input
+    id: homepage
+    attributes:
+      label: 主页
+      description: 文档或主页地址
+  - type: input
+    id: tags
+    attributes:
+      label: 标签
+      description: 逗号分隔，最多 8 个
+      placeholder: database, sql
+  - type: input
+    id: category
+    attributes:
+      label: 分类
+      description: 例如：开发者工具

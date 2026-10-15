@@ -1,0 +1,92 @@
+# Turn one submitted issue into one row of registry.json.
+#
+# This is the repo-side half of the loop the panel starts: a user opens the
+# prefilled "投稿到这份清单" link (or files the 「MCP 收录」 form), the issue body is
+# parsed and vetted by tools/registry-submission.mjs — the same functions the
+# panel uses — and only a row that passes every check is committed.
+#
+# Notes for whoever maintains this repository:
+#   - The body is attacker-controlled. It is passed through `env:`, never
+#     interpolated into the shell script itself.
+#   - The row is validated before it is written, and the committed document is
+#     validated again (`--check`) before the commit, so a hand-edited file
+#     cannot publish a row nobody vetted.
+#   - Rows are committed straight to the default branch. If you protect that
+#     branch, swap the commit/push step for a pull request (gh pr create) and
+#     review submissions there instead.
+name: registry-submission
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: registry-submission-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    if: github.event.issue.pull_request == null
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse and vet the issue body
+        id: stage
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          set -u
+          printf '%s' "$ISSUE_BODY" > /tmp/issue.md
+          status=0
+          node tools/registry-submission.mjs \
+            --body-file /tmp/issue.md \
+            --registry registry.json \
+            --write \
+            --comment /tmp/comment.md > /tmp/report.json || status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "action=$(jq -r '.action' /tmp/report.json)" >> "$GITHUB_OUTPUT"
+          cat /tmp/report.json
+          exit 0
+
+      - name: Refuse with reasons
+        if: steps.stage.outputs.status == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh issue comment "${{ github.event.issue.number }}" --body-file /tmp/comment.md
+
+      - name: Fail loudly when the program itself broke
+        if: steps.stage.outputs.status != '0' && steps.stage.outputs.status != '1'
+        run: |
+          echo "registry-submission exited ${{ steps.stage.outputs.status }}" >&2
+          cat /tmp/report.json >&2
+          exit 1
+
+      - name: Validate the committed document
+        if: steps.stage.outputs.status == '0'
+        run: node tools/registry-submission.mjs --check --registry registry.json
+
+      - name: Commit the accepted row
+        id: commit
+        if: steps.stage.outputs.status == '0'
+        run: |
+          if git diff --quiet -- registry.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "registry-submission[bot]"
+          git config user.email "registry-submission@users.noreply.github.com"
+          git add registry.json
+          git commit -m "registry: 收录 $(jq -r '.row.name' /tmp/report.json)"
+          git push
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Answer the issue
+        if: steps.stage.outputs.status == '0' && steps.stage.outputs.action != 'ignored'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh issue comment "${{ github.event.issue.number }}" --body-file /tmp/comment.md

@@ -322,6 +322,13 @@ test('a user-added catalogue source is stored, listed and refused when it is unu
     // The payload the panel needs carries no field the page did not ask for.
     assert.deepEqual(Object.keys(added.body.source).sort(), ['id', 'label', 'url']);
 
+    // Where that list accepts submissions, derived from the address alone so the
+    // panel can offer a prefilled issue without knowing GitHub's URL shapes.
+    const target = added.body.sources[0].submission;
+    assert.equal(target.repo, 'acme/mcp-registry');
+    assert.ok(target.url.startsWith('https://github.com/acme/mcp-registry/issues/new?'));
+    assert.match(new URL(target.url).searchParams.get('body'), /### 名称/);
+
     // A duplicate is a conflict (409) and a plain-http address is the caller's
     // mistake (400) — neither is a plugin fault, and both are visible.
     const twice = await call('/api/overall-mcp/sources', { body: { url: GH } });
@@ -331,6 +338,14 @@ test('a user-added catalogue source is stored, listed and refused when it is unu
     assert.equal(plain.status, 400);
     assert.match(plain.body.error, /https/);
     assert.deepEqual((await readSources()).sources.length, 1, 'a refused address is not written');
+  });
+});
+
+test('a catalogue that is not a GitHub repository advertises no submission link', async () => {
+  await withHost(FIXTURE, async ({ call }) => {
+    const added = await call('/api/overall-mcp/sources', { body: { url: 'https://example.com/catalog/registry.json' } });
+    assert.equal(added.status, 200);
+    assert.equal(added.body.sources[0].submission, null, 'no submission target, so the panel renders no link');
   });
 });
 

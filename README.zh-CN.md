@@ -85,6 +85,7 @@ dsh plugin --profile web add ./dsh-overall-mcp
 - **预览位放仓库自己的图**：v4 原型卡片中部是 3 张彩色预览图。没有任何 MCP 目录发布产品截图，编造占位图等于用装饰冒充信息，因此同一位置改放**该仓库自己的图**：优先 README 里引用的截图（按文档出现顺序，最多 8 张，`images.weserv.nl` 代理缩放并统一高度），一张都没有时退回 GitHub 的社交卡片（`opengraph.githubassets.com`，它就是这张卡在社交平台上的样子）；两者皆无就不渲染这一格（不硬凑装饰）。滚动条隐藏、`scroll-snap` 对齐，左右圆钮手动翻页、**永不自动播放**——阅读时图片自己走位是干扰。图片按仓库缓存到 `$DSH_HOME/overall-mcp/media.json`（TTL 7 天，最多 300 个仓库）
 - **事实静态印在卡片上**（用户要求）：Star · 使用量 · 更新时间这些数字直接在卡片正面，不藏在轮播里——要等的数字就是没法比较的数字。来源名（官方 Registry / Awesome 清单 / Smithery）**排在数字行末尾的灰字**里，不占名行——名行只放标题、GitHub 标记和最多两枚徽标
 - **收藏**：卡片页脚与详情面板都可收藏；宿主持久化到 `registry.favorites`，界面只本地改自己那份列表（为了一颗星重新拉 ~3MB 市场列表不值当下次浏览/安装/开会话会与宿主对齐）。市场筛选行有**仅看收藏 (N)**：对已加载列表做视图过滤，并在 `GET /api/overall-mcp/favorites` 报告的宿主总数大于可见数时说明差了多少（见「收藏」一节）
+- **往清单里投稿**：如果这份清单住在 GitHub 仓库里（`raw.githubusercontent.com/owner/repo/...`、`cdn.jsdelivr.net/gh/owner/repo@...`，或直接一个仓库地址），那一行右侧会出现「投稿 ↗」——它打开的是**已经预填好字段**的 `issues/new` 页面（`?title=&body=`，零令牌、零后端），提交后由仓库里的工作流校验并写回 `registry.json`。托管在别处的清单不显示这个链接（没有可投稿的地方），面板不会画一个点了没用的按钮。详见「投稿到社区清单（GitHub 上行）」
 - **页面头**（按 v4 原型，两行）：第一行 = 星座图标（一个品牌蓝中枢 + 五个 `currentColor` 卫星，深色主题自动反色）+「全局 MCP」+ 版本号（与 `package.json` 一致，`tools/client-smoke.mjs` 断言两者相等——会撒谎的版本号比不显示更糟）｜右侧主操作；第二行 = 副标题「宿主机扫描 · 市场发现 · 一键接入」｜右侧「⤓ 导出日志」。主按钮是**墨色**（`T.text` 铺底 + `T.cardBg` 作字色，深浅色主题自动翻转）而不是品牌蓝：品牌蓝留给链接、页签下划线、徽标和 gh 仓库名
 - **每个标签页最多一个主操作**：注册表页主按钮是「重新扫描宿主机」；市场页**没有主按钮**——重拉目录是「分类」那一行里 `刷新` 的活，一个常驻的填充按钮会和小按钮重复。另一页的主操作以无边框文字按钮留在同一行（「打开 MCP 市场」/「重新扫描宿主机」），两个主按钮等于没有主按钮。**本插件自己的更新不属于任何一个页签**：它跟着版本号走（页头 `全局 MCP v0.1.0` 右侧），「检查更新」报出新版时才出现，点了走 `POST /self-update`（宿主执行 `dsh plugin --profile <p> add dsh-overall-mcp@<v>`，装完提示重启 DSH 生效）——插件自身的版本判定见 `lib/self-update.js`：`link:`/本地检出（正是本仓库的开发形态）**不提供**自更新，因为那份代码就是版本来源，`npm` 上的新版本与它无关
 - **⤓ 导出日志**：把这一页知道的东西写成 JSON 文件（插件版本、注册表全量、市场各源条数/**每个来源各自的时间/是否命中缓存/是否 stale/是否 304/返回条数**/未变更来源数/返回条数、当前筛选与页码、两处错误）——排查问题时缺的正是这些。客户端本地拼装并下载，不新增宿主路由：宿主自己的日志不归这个插件导出
@@ -95,6 +96,38 @@ dsh plugin --profile web add ./dsh-overall-mcp
 - **详情页**：点卡片主体或「详情」按钮弹出完整面板（按 v4 原型：680px、圆角 16、**一整张白纸**——页头不再是灰底带、底部只有一条分隔线），含：页头（头像 + 标题 + 贴着标题的徽标，关闭按钮在右上角）、完整描述（卡片只显示 3 行）、全部标签、**GitHub 仓库区块**（浅灰底卡片、owner/repo 锚点用品牌蓝、★ Star · Fork · Issue（含 PR）· Watch（订阅）竖排大数字带小标签、语言/许可证/最近推送/创建于事实行、归档警示；缺失数字保持缺失——没有任何目录发布 GitHub 数据，缺数字不等于 0，也不等于排最后）、逐项标注的**无底色事实表**（来源/作者/版本/传输/Star/使用量口径/更新时间（优先 GitHub pushed_at）/安装方式）、**将执行的确切命令**（stdio 为完整命令行，http 为端点 URL；标题右侧有**复制**按钮，成功显示「已复制」、两条复制路径都失败时显示「复制失败，请手动选中」而不是谎报成功）、按 URL 去重的链接组（官网 / GitHub 仓库 / **GitHub 镜像** / MCP 端点 / Smithery 页面）、底部「安装 + ♡ 收藏」。Smithery 的 `repository` 指向它自己的列表页而非上游项目，因此额外提供其目录页链接（实测 `smithery.ai/server/<name>` 308 到 `/servers/<name>`，直接用后者）
 - **GitHub 镜像链接**：GitHub 在本网络环境下时通时断（实测连续数小时 TCP 超时后恢复 200）。实测（2026-10-12）`gh-proxy.com` 现已代理 github.com 仓库页面（200/640ms）——与 dshmarket 2026-09 实测的 403 相反，其注释明确要求"重新测量而非推断"。因此有仓库的条目同时提供直连与镜像两个链接，由用户择一
 - **废弃标记**：上游标记为 deprecated 的条目不隐藏、仍可安装（有人可能需要旧版），但降到最后、显示橙色「已废弃」徽标、按钮改为「仍要安装」，并附上上游自己的 `statusMessage` 说明。目前仅官方 Registry（`_meta…official.status`）与 Smithery（`inactive`）发布该信号；两个 Awesome 清单没有生命周期字段，因此这些条目的 `status` 为**缺省**而非 `active`——界面不会把"没人扫过"显示成"正常"
+
+### 投稿到社区清单（GitHub 上行）
+
+自定义目录源解决了「读」，这一节解决「写」：别人怎么把**他自己**的 MCP 服务送进你这份清单。答案是**不经过任何本机服务**——清单住在哪，投稿就在哪发生：
+
+| 角色 | 东西 | 位置 |
+| --- | --- | --- |
+| 清单仓库 | 已收录的条目（`{version, updatedAt, servers:[…]}`，就是市场读的那种文档） | `registry.json` |
+| 清单仓库 | 一条 issue 进来就校验并写回上面那个文件 | `.github/workflows/registry-submission.yml` |
+| 清单仓库 | 校验与写入的全部逻辑（无依赖，Node 直接跑） | `tools/registry-submission.mjs` |
+| 清单仓库 | 人手填写的表单（字段与解析器一一对应） | `.github/ISSUE_TEMPLATE/mcp-listing.yml` |
+| 投稿者面板 | 该清单那一行上的「投稿 ↗」→ 预填好的 `issues/new` | `lib/submission.js` 的 `buildIssueUrl` |
+| 宿主 | 清单地址 → 它的 GitHub 仓库坐标 | `index.js` 的 `submissionTargetFor`（跟着 `/sources` 返回体走） |
+
+工作流只做四件事，失败都留下可读的原因：解析 issue 正文 → 校验 → `--check` 复核整份清单 → 提交并在 issue 里回复。**投稿正文是不可信输入**，所以它既在解析时校验、也在写入前复核，而且整段正文只通过 `env:` 传给 shell，绝不插值进脚本（那是个注入面）。退出码就是控制流：`0` 收录/更新/无变化，`1` 校验不过（回帖列出原因，文件不动），`2` 程序自身出错（job 失败，不静默）。
+
+可以单独跑：
+
+```bash
+node tools/registry-submission.mjs --body-file /tmp/issue.md                  # 只校验，不改文件
+node tools/registry-submission.mjs --body-file /tmp/issue.md --write --comment /tmp/comment.md
+node tools/registry-submission.mjs --check --registry registry.json           # 复核已提交的清单
+npm run test:registry                                                         # 上面那条，进 verify
+```
+
+**投稿规则（`lib/submission.js`，单测 `test/submission.test.mjs`）**：名称与说明必填（120 / 600 字符）；**启动命令**（stdio）与**服务地址**（streamable-http）二选一，都填或都不填都被拒；命令上限 200 字符、参数最多 32 个（每个 120 字符）；命令与参数里出现 `|` `;` `&&` 反引号 重定向 或 `$()` 一律拒绝——这一行会在**别人的机器上**执行，一个需要 shell 的条目不是这个格式能承载的，宁可拒掉也不静默执行；仓库/主页只接受 https；标签最多 8 个；所有字段都剥掉控制字符（否则一个字段就能伪造出别的字段）。**同一份清单只保留一行**：先按仓库地址（`github.com/owner/repo`，小写、去 `.git`）认，其次服务地址，最后名称；所以「编辑 issue 补个说明」是就地更新而不是新增第二份。写入按这个键排序（diff 小），而且**内容没变时连 `updatedAt` 都不动**——工作流据此判断「没有东西要提交」，编辑一次 issue 不会凭空产生一个 commit。
+
+正文有两种形状，解析器都吃：GitHub 表单渲染出来的 `### 名称` + 值，以及面板预填链接里的 `名称: …` 行（表单里没填的可选项 GitHub 会写 `_No response_`，解析器当空值丢掉）。这条是**刻意**的：投稿者从哪进来都行，工作流不需要知道。未识别的 issue 一律忽略、不回帖（`action: ignored`）——普通 bug 报告不该被机器人搭话。
+
+**订阅**：在面板「目录源」里加上 `https://raw.githubusercontent.com/<owner>/<repo>/<branch>/registry.json` 就完了（也可以直接填仓库地址，标签会从地址推出来）。合入后的条目会在 60 秒 TTL 内自动出现，与内置五源同权。
+
+维护者注意：默认直提默认分支；那条分支若开了保护，把工作流里的 commit/push 换成开 PR（`gh pr create`）即可——审核就变成一次普通的 `registry.json` diff 审阅，这也是这个设计里唯一的「审核」环节。
 
 ### GitHub 不可达时的镜像链（实测）
 
@@ -228,7 +261,7 @@ Invalid schema for function 'mcp__rea-om__analyze_javascript_application':
 
 `POST /api/overall-mcp/install` 的 body 是 `{ item, overwrite? }`；`/update`、`/remove`、`/set-enabled` 是 `{ name, slot?, from? }`（同名多条目时不带 `slot`/`from` 返回 409）；`POST /api/overall-mcp/sources` 是 `{ url, label? }`（`label` 省略时由地址推断）；`POST /api/overall-mcp/sources/remove` 是 `{ id }`。
 
-`GET|POST /api/overall-mcp/sources` 与 `POST /api/overall-mcp/sources/remove` 是「自定义目录源」的读写面（`lib/custom-sources.js`，单测 `test/custom-sources.test.mjs`）：GET 回 `{sources:[{id,label,url}], max:8, error}`（`error` 是 `sources.json` 读不出来的原因，此时 `sources` 为空**但仍然可用内置五源**），POST 添加一个。校验在 `normalizeSourceUrl`（只放行 `https:`、必须带主机、拒掉带用户名口令的地址、长度上限 600）与 `validateSourceInput`（地址重复 → 409，含与自己的对比；标签上限 40 字符），落盘前还兜一层 `addSourceTo` 的上限检查（第 9 个 → 409 `too-many-sources`）。id 由 `sourceIdFor` 从 `host + pathname` 生成 `custom:<slug>`（≤48 字符，小写、非字母数字折成 `-`、去重尾），所以「同一个地址」永远是同一个 id；标签由 `defaultLabelFor` 推出 `owner/repo`（GitHub raw、jsDelivr 的 `gh/owner/repo@ref`）或主机名。`normalizeSourcesDocument` 在**读取时**重跑地址校验：手改文件塞进来的 `http://` / 带口令 / 超长的行会被丢掉而不是带着进市场。删除成功会调 `catalogCache.forgetSourceId(id)`，否则被删源的行还能从来源层缓存里活 60 秒。
+`GET|POST /api/overall-mcp/sources` 与 `POST /api/overall-mcp/sources/remove` 是「自定义目录源」的读写面（`lib/custom-sources.js`，单测 `test/custom-sources.test.mjs`）：GET 回 `{sources:[{id,label,url,submission}], max:8, error}`（`error` 是 `sources.json` 读不出来的原因，此时 `sources` 为空**但仍然可用内置五源**），POST 添加一个。`submission` 由宿主从地址推出（`lib/submission.js` 的 `githubRepoOfSourceUrl`）：住在 GitHub 仓库里的清单得到 `{repo, url}`（`url` 就是预填好的 `issues/new` 地址），别处托管的清单得到 `null`、面板于是不画那个链接。校验在 `normalizeSourceUrl`（只放行 `https:`、必须带主机、拒掉带用户名口令的地址、长度上限 600）与 `validateSourceInput`（地址重复 → 409，含与自己的对比；标签上限 40 字符），落盘前还兜一层 `addSourceTo` 的上限检查（第 9 个 → 409 `too-many-sources`）。id 由 `sourceIdFor` 从 `host + pathname` 生成 `custom:<slug>`（≤48 字符，小写、非字母数字折成 `-`、去重尾），所以「同一个地址」永远是同一个 id；标签由 `defaultLabelFor` 推出 `owner/repo`（GitHub raw、jsDelivr 的 `gh/owner/repo@ref`）或主机名。`normalizeSourcesDocument` 在**读取时**重跑地址校验：手改文件塞进来的 `http://` / 带口令 / 超长的行会被丢掉而不是带着进市场。删除成功会调 `catalogCache.forgetSourceId(id)`，否则被删源的行还能从来源层缓存里活 60 秒。
 
 `/catalog` 的缓存分两层（都在 `lib/catalog-cache.js` 里，单测 `test/catalog-cache.test.mjs`）：
 
@@ -313,6 +346,10 @@ node tools/preview-paged.mjs "<base-url-with-?token=…>" 20 1 installs
                                                           # 按面板页的方式渲染某一页（可带 pageSize/page/sort/group，group 如"金融支付"/"__none__"）
 node tools/verify-sort-paging.mjs                         # 校验 6 种排序、3 种页宽、越界夹取、紧凑计数
 node tools/verify-detail-links.mjs                        # 校验详情页链接：逐源覆盖、零死链、零重复 URL
+node tools/registry-submission.mjs --check --registry registry.json
+                                                          # 复核已发布的清单（npm run test:registry，进 verify）
+node tools/registry-submission.mjs --body-file /tmp/issue.md
+                                                          # 单独跑一遍投稿校验（--write 才写盘；退出码 0/1/2 见「投稿到社区清单」）
 node tools/probe-real-cards.mjs                           # 拉真实市场条目逐条渲染卡片+详情（活实例）
 node tools/probe-media.mjs <token>                        # 实测 /repo-media：五个真实仓库的图片数/尺寸/缓存命中耗时
 node tools/probe-favorites.mjs <token>                    # 收藏闭环实测（活实例：POST /favorite on/off → GET /favorites 计数 → /catalog 回读）

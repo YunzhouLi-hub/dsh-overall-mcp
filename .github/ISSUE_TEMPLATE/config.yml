@@ -1,0 +1,8 @@
+# Keep a blank issue available: the panel's 「投稿到这份清单」 link prefills the
+# title and body itself, which only works when GitHub opens a blank issue rather
+# than the template chooser.
+blank_issues_enabled: true
+contact_links:
+  - name: 插件面板里的自定义目录源
+    url: https://github.com/deepseek-ai/dsh
+    about: 想先在自己机器上试：把本仓库的 registry.json 加为「自定义目录源」即可。

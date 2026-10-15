@@ -21,6 +21,7 @@ import { createCatalogCache } from './lib/catalog-cache.js';
 import {
   SOURCES_MAX, addSourceTo, readSourcesDocument, removeSourceFrom, sourcesDocumentOf,
 } from './lib/custom-sources.js';
+import { buildIssueUrl, githubRepoOfSourceUrl } from './lib/submission.js';
 import {
   readInstalls, writeInstalls, recordInstallIn, installKeyOf,
   localInstallsOf, localLastInstallOf,
@@ -1023,13 +1024,32 @@ export async function apply(ctx) {
    * The user's own catalogue sources, as the panel reads them. The listing is
    * kept out of `/catalog`: it answers "what is on the market", not "what am I
    * pointing at", and the page needs the second before it has a listing at all.
+   *
+   * Each row also carries where that list *accepts submissions*, when it is a
+   * GitHub repository — derived here rather than in the panel so the URL shapes
+   * (`raw.githubusercontent.com/…`, `cdn.jsdelivr.net/gh/…`, a plain repo link)
+   * are known in one place. A source hosted anywhere else simply has no
+   * `submission`, which is what keeps the panel's 「投稿」 link hidden by default.
    */
   function sourcesPayload() {
     return {
-      sources: customSources.map((s) => ({ id: s.id, label: s.label, url: s.url })),
+      sources: customSources.map((s) => ({ id: s.id, label: s.label, url: s.url, submission: submissionTargetFor(s.url) })),
       max: SOURCES_MAX,
       error: sourcesLoadError,
     };
+  }
+
+  /**
+   * The issue an entry for this catalogue should be filed as. The body is the
+   * template with its placeholders left in: the panel knows the *list*, not the
+   * server the user means to add, so it pre-fills the form rather than the facts.
+   */
+  function submissionTargetFor(url) {
+    const coords = githubRepoOfSourceUrl(url);
+    if (!coords) return null;
+    const repo = `${coords.owner}/${coords.repo}`;
+    const issueUrl = buildIssueUrl({ repo, row: {} });
+    return issueUrl ? { repo, url: issueUrl } : null;
   }
 
   /**
