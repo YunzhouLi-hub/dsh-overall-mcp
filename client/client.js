@@ -761,10 +761,15 @@ window.__ModuleLoader__.load({
 						: null,
 					createElement("button", {
 						key: "toggle", type: "button", style: styles.button, disabled: busy,
+						// A row another mount already provides owns no fiber here, so
+						// 「停用」 cannot stop its tools — say that on the button itself
+						// rather than only in the toast after the click.
+						title: provided ? "这条记录由另一个插件挂载提供，本插件的停用不会让它的工具消失" : undefined,
 						onClick: () => onToggle(server.name, !enabled),
 					}, enabled ? "停用" : "启用"),
 					createElement("button", {
 						key: "remove", type: "button", style: styles.button, disabled: busy,
+						title: provided ? "只移除本插件的注册表记录；那些工具仍由另一个插件提供" : undefined,
 						onClick: () => onRemove(server.name),
 					}, "移除"),
 				]),
@@ -1436,18 +1441,6 @@ window.__ModuleLoader__.load({
 		}
 
 		/**
-		 * Compare two market entries under a user-chosen sort.
-		 *
-		 * `default` and the explicit `quality` choice are the same weighted score
-		 * (above). The others each key on ONE field so the order is explainable,
-		 * and every field falls back to quality rather than to 0 — an entry the
-		 * source published no number for is not thereby the least popular one.
-		 *
-		 * For a descending sort an entry that HAS the number still outranks one
-		 * that does not, so a missing value sorts last rather than tying with
-		 * every real value and being resolved by quality alone.
-		 */
-		/**
 		 * The figure 「使用量最多」 orders by: the source's own count **plus** this
 		 * machine's installs from the panel.
 		 *
@@ -1466,6 +1459,18 @@ window.__ModuleLoader__.load({
 			return { value: (upstream ?? 0) + local, hasData: true };
 		}
 
+		/**
+		 * Compare two market entries under a user-chosen sort.
+		 *
+		 * `default` and the explicit `quality` choice are the same weighted score
+		 * (above). The others each key on ONE field so the order is explainable,
+		 * and every field falls back to quality rather than to 0 — an entry the
+		 * source published no number for is not thereby the least popular one.
+		 *
+		 * For a descending sort an entry that HAS the number still outranks one
+		 * that does not, so a missing value sorts last rather than tying with
+		 * every real value and being resolved by quality alone.
+		 */
 		function compareMarket(a, b, sort, stats) {
 			const qa = qualityOf(a, stats);
 			const qb = qualityOf(b, stats);
@@ -1651,7 +1656,7 @@ window.__ModuleLoader__.load({
 		 * the repository, and the install command — because a market entry is only
 		 * half the story: the user needs the source of truth before deciding.
 		 */
-		function MarketDetail({ item, stats, media, busy, onClose, onInstall, onToggleFavorite }) {
+		function MarketDetail({ item, stats, media, busy, mediaFailed, onRetryMedia, onClose, onInstall, onToggleFavorite }) {
 			const repo = repoKeyOf(item);
 			const enriched = repo ? (stats ?? {})[repo] : null;
 			const repoMedia = repo ? (media ?? {})[repo] : null;
@@ -1743,6 +1748,19 @@ window.__ModuleLoader__.load({
 					// Shown first because it is the only part of this panel a
 					// screenshot can answer, and absent when the repo has none.
 					createElement(MediaStrip, { key: "media", media: repoMedia, height: 200 }),
+					// The strip is absent for a repo with no pictures, and also for one
+					// whose lookup failed — the two must not look the same here either.
+					mediaFailed
+						? createElement("div", { key: "mediafail", style: styles.hint }, [
+							"配图加载失败（可能被 GitHub 限流），稍后可重试。",
+							createElement("button", {
+								key: "retry", type: "button", className: "omkt-btn omkt-btn-outline",
+								style: { ...styles.outlineBtn, marginLeft: 8, padding: "2px 8px", fontSize: 12 },
+								disabled: busy,
+								onClick: () => onRetryMedia?.(),
+							}, "重试"),
+						])
+						: null,
 					// The GitHub block: what the API enrichment knows about the
 					// repository, as plain labelled facts. Absent numbers stay absent —
 					// no catalog publishes GitHub data, and a missing number must not
@@ -1904,6 +1922,10 @@ window.__ModuleLoader__.load({
 			const [marketAt, setMarketAt] = useState("");
 			const [repoStats, setRepoStats] = useState({});
 			const [repoMedia, setRepoMedia] = useState({});
+			// Repos whose picture lookup failed. Kept separately because a failed
+			// repo does get an empty media entry (the strip must render), so
+			// "no images" and "could not ask" would otherwise look identical.
+			const [mediaFailures, setMediaFailures] = useState([]);
 			const [starNote, setStarNote] = useState("");
 			const [marketSort, setMarketSort] = useState("default");
 			const [marketGroup, setMarketGroup] = useState("");
@@ -2005,8 +2027,10 @@ window.__ModuleLoader__.load({
 			 * with a rate limit. Only the ranked URLs come back, cached for
 			 * hours, so paging through the market costs one request once.
 			 *
-			 * Failures are silent on purpose: a card without a picture is a
-			 * complete card, and a broken strip must never take the tab down.
+			 * A failure is not fatal — a card without a picture is a complete
+			 * card — but it is no longer silent: the host says which repos it
+			 * could not ask about, and those are listed with a 重试 control
+			 * instead of rendering as "this repo has no images".
 			 */
 			function enrichMedia(items, refresh) {
 				const repos = [];
@@ -2014,14 +2038,25 @@ window.__ModuleLoader__.load({
 				for (const item of items) {
 					const key = repoKeyOf(item);
 					if (!key || seen.has(key)) continue;
-					if (repoMedia[key]) continue;
+					// A plain load asks once per repo: anything already answered —
+					// including a failure, which gets an empty entry so the strip can
+					// render — is skipped. 刷新 and 重试 pass `refresh`, which asks the
+					// host again (it bypasses both TTLs for that call).
+					if (!refresh && repoMedia[key]) continue;
 					seen.add(key);
 					repos.push(key);
 					if (repos.length >= 24) break;
 				}
 				if (!repos.length) return;
 				api("/repo-media", { method: "POST", body: JSON.stringify({ repos, refresh }) })
-					.then((body) => setRepoMedia((prev) => ({ ...prev, ...(body.media ?? {}) })))
+					.then((body) => {
+						setRepoMedia((prev) => ({ ...prev, ...(body.media ?? {}) }));
+						const errors = body.errors ?? [];
+						setMediaFailures((prev) => [
+							...prev.filter((e) => !repos.includes(e.repo)),
+							...errors,
+						]);
+					})
 					.catch(() => {});
 			}
 
@@ -2047,17 +2082,20 @@ window.__ModuleLoader__.load({
 				() => api("/scan", { method: "POST" }),
 				(r) => `扫描完成：新增 ${r.added.length} 台，跳过 ${r.skipped.length} 台（${r.scannedFiles} 个配置文件）`,
 			);
+			// `note` wins when the host has one: it is the honest wording for an
+			// entry another mcp-client mount provides, where「已停用」/「已移除」
+			// would claim an effect this plugin cannot have.
 			const doToggle = (name, enabled) => run(
 				() => api("/set-enabled", { method: "POST", body: JSON.stringify({ name, enabled }) }),
-				(r) => `${r.name} ${r.enabled ? "已启用并连接" : "已停用"}`,
+				(r) => r.note ?? `${r.name} ${r.enabled ? "已启用并连接" : "已停用"}`,
 			);
 			const doToggleSource = (source, enabled) => run(
 				() => api("/set-source-enabled", { method: "POST", body: JSON.stringify({ source, enabled }) }),
-				(r) => `${sourceLabel(r.source)}：${r.changed} 台已${r.enabled ? "启用" : "停用"}`,
+				(r) => r.note ?? `${sourceLabel(r.source)}：${r.changed} 台已${r.enabled ? "启用" : "停用"}`,
 			);
 			const doRemove = (name) => run(
 				() => api("/remove", { method: "POST", body: JSON.stringify({ name }) }),
-				(r) => `${r.removed} 已移除`,
+				(r) => r.note ?? `${r.removed} 已移除`,
 			);
 			// 「检查更新」 answers two questions at once: which mounted MCP
 			// servers have a newer package, and whether *this plugin* does. The
@@ -2146,16 +2184,12 @@ window.__ModuleLoader__.load({
 			}
 
 			// Return-to-top: this page is its own scroller (the centre column
-			// does not scroll), so the listener goes on the first scrollable
-			// element at or above it — starting with the page itself, which is
-			// the one that actually moves — and falls back to the window when
-			// there is none.
-			// The scroll container is no longer necessarily an *ancestor* of the
-			// page: the page is a fixed shell, and the scrolling box is the tab
-			// body (已注册) or the card region inside it (MCP 市场). Look for the
-			// page's own scroller first and only then walk up, so the button
-			// tracks what the user is actually dragging. Re-runs on a tab change
-			// because that replaces the scroller node.
+			// does not scroll), so the listener goes on the tab's own scrolling
+			// box — the registry tab body, or the market's card region.
+			// Re-runs on a tab change AND when the content that creates the box
+			// changes: the market's card region only exists once a listing has
+			// arrived, so a `[tab]`-only effect latched onto the window on the
+			// first open and then never re-bound to the box the user drags.
 			useEffect(() => {
 				if (typeof document === "undefined" || typeof getComputedStyle !== "function") return undefined;
 				const node = pageRef.current;
@@ -2179,7 +2213,12 @@ window.__ModuleLoader__.load({
 				host.addEventListener("scroll", onScroll, { passive: true });
 				onScroll();
 				return () => host.removeEventListener("scroll", onScroll);
-			}, [tab]);
+				// `market` (the listing that creates the card region) and `servers`
+				// (the rows that make the registry body tall) both arrive after the
+				// first render, so they belong in the deps. Only state declared above
+				// this effect may appear here — the memoized page slice is declared
+				// further down and would be in its temporal dead zone.
+			}, [tab, market, servers]);
 
 			function backToTop() {
 				const target = scrollerRef.current;
@@ -2433,7 +2472,14 @@ window.__ModuleLoader__.load({
 				message ? createElement("div", { key: "message", style: styles.message }, message) : null,
 
 				// ---------------- registry tab ----------------
-				tab === "registry" ? createElement("div", { key: "reg", className: "omkt-tabbody", style: styles.tabBody }, [
+				// Marked with the same `scroller` hook as the market's card box:
+				// this tab body IS the box that scrolls, and it is a *descendant*
+				// of the page rather than an ancestor, so the return-to-top effect
+				// could never find it by walking up (the button stayed hidden on
+				// this tab no matter how far the list was scrolled).
+				tab === "registry" ? createElement("div", {
+					key: "reg", className: "omkt-tabbody", "data-omkt": "scroller", style: styles.tabBody,
+				}, [
 					createElement("div", { key: "stats", style: styles.stats }, [
 						createElement("span", { key: "t" }, `${stats.total} 台服务器`),
 						createElement("span", { key: "e" }, `${stats.enabled} 已启用`),
@@ -2581,7 +2627,9 @@ window.__ModuleLoader__.load({
 								title: marketSort === "default"
 									? "排序：综合推荐"
 									: `排序：${(SORT_OPTIONS.find(([v]) => v === marketSort) ?? [, marketSort])[1]}`
-										+ (marketSort === "installs" ? "（上游使用量 + 本市场安装次数）" : ""),
+										+ (marketSort === "installs"
+											? "（Smithery 调用次数 + Docker 拉取次数 + 本面板安装次数；三者单位不同）"
+											: ""),
 								onChange: (e) => { setMarketSort(e.target.value); setMarketPage(0); },
 							}, SORT_OPTIONS.map(([value, label]) => createElement("option", { key: value, value }, label))),
 							createElement("button", {
@@ -2591,6 +2639,15 @@ window.__ModuleLoader__.load({
 							}, marketBusy ? "拉取中…" : "刷新"),
 						]),
 					].filter(Boolean)),
+					// 「使用量最多」 sums three counters that do not share a unit:
+					// Smithery's invocation count, Docker's pull count and this
+					// panel's own install count (`usageOf`). The cards state each
+					// number with its own label, so the sorted order needs the same
+					// caveat — otherwise the label reads as one comparable metric.
+					marketSort === "installs"
+						? createElement("div", { key: "installnote", style: styles.hint },
+							"使用量最多：Smithery 的调用次数 + Docker 的拉取次数 + 本面板的安装次数；三者单位不同，仅作热度参考。")
+						: null,
 					// Row 3 — v4's meta line: the three numbers a reader checks
 					// before paging, with the freshness note pushed to the end.
 					sortedItems
@@ -2649,6 +2706,21 @@ window.__ModuleLoader__.load({
 							`部分来源不可用：${market.errors.map((e) => e.source).join("、")}`)
 						: null,
 					starNote ? createElement("div", { key: "star", style: styles.hint }, starNote) : null,
+					// The host reports which repo lookups failed; those repos have an
+					// empty media entry, so without this line "加载失败" would read as
+					// "这个仓库没有配图". The retry asks the host again regardless of
+					// its TTLs.
+					mediaFailures.length
+						? createElement("div", { key: "mediafail", style: styles.hint }, [
+							`${mediaFailures.length} 个仓库的配图加载失败（${mediaFailures.map((e) => e.repo).join("、")}）。`,
+							createElement("button", {
+								key: "retry", type: "button", className: "omkt-btn omkt-btn-outline",
+								style: { ...styles.outlineBtn, marginLeft: 8, padding: "2px 8px", fontSize: 12 },
+								disabled: marketBusy,
+								onClick: () => enrichMedia(sortedItems ?? [], true),
+							}, "重试"),
+						])
+						: null,
 					pageItems && pageItems.length === 0 && !marketBusy
 						? createElement("div", { key: "none", style: styles.message }, "没有匹配的 MCP。")
 						: null,
@@ -2718,6 +2790,8 @@ window.__ModuleLoader__.load({
 				detail
 					? createElement(MarketDetail, {
 							key: "detail", item: detail, stats: repoStats, media: repoMedia, busy,
+							mediaFailed: mediaFailures.some((e) => e.repo === repoKeyOf(detail)),
+							onRetryMedia: () => enrichMedia([detail], true),
 							onClose: () => setDetail(null),
 							onInstall: doInstall,
 							onToggleFavorite: doToggleFavorite,

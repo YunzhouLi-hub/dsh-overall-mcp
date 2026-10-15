@@ -22,6 +22,7 @@ import {
   localInstallsOf, localLastInstallOf,
 } from './lib/installs.js';
 import { collectRepoMedia } from './lib/media.js';
+import { httpStatusFor } from './lib/http-status.js';
 import { sanitizeToolDefinition } from './lib/schema-guard.js';
 import { checkAllUpdates, checkEntryUpdate, parsePackageInvocation, pinArgs } from './lib/updates.js';
 import { checkSelfUpdate, updateSelf } from './lib/self-update.js';
@@ -495,6 +496,15 @@ export async function apply(ctx) {
     };
   }
 
+  // ---- mutations ------------------------------------------------------------
+  // A `providedExternally` entry is one that another mcp-client mount already
+  // serves under the same DSH server name (see `connect`): this plugin skipped
+  // mounting its own copy, so it owns no fiber for it and *cannot* stop those
+  // tools. `overall_mcp_list` already reports that as `status:
+  // "provided-externally"`; these mutations must not claim otherwise, so each
+  // one that touched such an entry says so in its reply.
+  const externallyProvided = (entry) => entry?.providedExternally === true;
+
   async function doSetEnabled(name, enabled) {
     const entry = registry.servers.find((s) => s.name === name);
     if (!entry) throw new Error(`unknown server: ${name}`);
@@ -502,7 +512,19 @@ export async function apply(ctx) {
     await save();
     if (!enabled) await disconnect(name);
     else if (!fibers.has(name)) await connect(entry);
-    return { name, enabled, connected: fibers.has(name) };
+    // `enabled: false` still means "this plugin should not mount it"; on a
+    // provided-externally entry that was already true, so nothing observable
+    // changes and the reply must say so rather than read as "已停用".
+    return {
+      name,
+      enabled,
+      connected: fibers.has(name),
+      ...(externallyProvided(entry) ? {
+        providedExternally: true,
+        stillProvided: true,
+        note: `${name} 的工具由另一个 mcp-client 挂载提供，本插件从未挂载它：停用只记录本插件的意图，那些工具不会消失。`,
+      } : {}),
+    };
   }
 
   /** Bulk enable/disable every server imported from one source (group switch). */
@@ -515,16 +537,39 @@ export async function apply(ctx) {
       if (!enabled) await disconnect(entry.name);
       else if (!fibers.has(entry.name)) await connect(entry);
     }
-    return { source, enabled, changed: targets.length, ...(await serversPayload()) };
+    const external = targets.filter(externallyProvided).length;
+    return {
+      source,
+      enabled,
+      changed: targets.length,
+      ...(external ? {
+        externallyProvided: external,
+        note: `其中 ${external} 台由另一个 mcp-client 挂载提供，本插件的开关不影响它们已经挂载的工具。`,
+      } : {}),
+      ...(await serversPayload()),
+    };
   }
 
   async function doRemove(name) {
     const i = registry.servers.findIndex((s) => s.name === name);
     if (i < 0) throw new Error(`unknown server: ${name}`);
+    const entry = registry.servers[i];
+    const external = externallyProvided(entry);
     await disconnect(name);
     registry.servers.splice(i, 1);
     await save();
-    return { removed: name, ...(await serversPayload()) };
+    // Removing a *provided-externally* record deletes this plugin's bookkeeping
+    // only; the other mount keeps the tools alive, and the panel must not imply
+    // otherwise.
+    return {
+      removed: name,
+      ...(external ? {
+        providedExternally: true,
+        stillProvided: true,
+        note: `${name} 已从本插件的注册表移除；它的工具仍由另一个 mcp-client 挂载提供，不会消失。`,
+      } : {}),
+      ...(await serversPayload()),
+    };
   }
 
   // ---- package updates ------------------------------------------------------
@@ -585,7 +630,30 @@ export async function apply(ctx) {
   // ---- MCP market (browse the open catalogs) -------------------------------
   // Cached per query key so opening the market tab repeatedly does not hammer
   // the upstream registries; `refresh: true` forces a new fetch.
+  //
+  // The key contains the caller's query, so its key space is unbounded: the map
+  // is capped and evicts the oldest entry. Each entry can hold the entire merged
+  // market (~2 MB at the route's limit of 10000, ~5.4k items), so eight of them
+  // bound this cache at roughly 16 MB worst case — and the queries that reach
+  // that size are the deliberate "fetch everything" ones, not the common case.
   const catalogCache = new Map(); // key -> { at, data }
+  const CATALOG_CACHE_MAX = 8;
+  // A search query longer than this is a caller mistake, not a search; the cut
+  // keeps one absurd query from occupying a cache entry (and a key) of its own.
+  const CATALOG_QUERY_MAX = 200;
+
+  /** Keep a `key -> { at }` map bounded by dropping its oldest entries. */
+  function evictOldest(map, max) {
+    while (map.size > max) {
+      let oldestKey;
+      let oldestAt = Infinity;
+      for (const [key, value] of map) {
+        const at = typeof value?.at === 'number' ? value.at : 0;
+        if (at <= oldestAt) { oldestAt = at; oldestKey = key; }
+      }
+      map.delete(oldestKey);
+    }
+  }
 
   /**
    * Stable identity for a market entry's favourite state.
@@ -639,14 +707,16 @@ export async function apply(ctx) {
     return { key: normalized, favorite: favorites.has(normalized), favorites: registry.favorites };
   }
   async function doBrowse({ query = '', limit = 120, source = '', refresh = false } = {}) {
-    const key = `${source}|${query}|${limit}`;
+    const q = typeof query === 'string' ? query.slice(0, CATALOG_QUERY_MAX) : '';
+    const key = `${source}|${q}|${limit}`;
     const hit = catalogCache.get(key);
     const now = Date.now();
     // Cache the RAW listing only: the installed flag depends on the registry and
     // is recomputed on every read, so installing/removing never shows a stale badge.
     if (refresh || !hit || now - hit.at >= CATALOG_TTL_MS) {
-      const result = await browseCatalog({ query, limit, source });
+      const result = await browseCatalog({ query: q, limit, source });
       catalogCache.set(key, { at: now, data: { items: result.items, errors: result.errors, counts: result.counts, total: result.total } });
+      evictOldest(catalogCache, CATALOG_CACHE_MAX);
     }
     const cached = catalogCache.get(key);
     return {
@@ -735,12 +805,22 @@ export async function apply(ctx) {
    * hours, because a README is up to a megabyte and paging back through the
    * market must not re-download it.
    *
-   * Misses are cached too: a repo with neither a README nor a social card is
-   * answered once and not asked again until the TTL expires.
+   * Misses are cached too: a repo the lookup answered — with a README, or with
+   * neither a README nor a social card — is not asked again until the TTL
+   * expires. A *failure* is different: see `REPO_MEDIA_FAIL_TTL_MS`.
    */
-  const repoMediaCache = new Map(); // 'owner/repo' -> { at, data }
+  const repoMediaCache = new Map(); // 'owner/repo' -> { at, data, failed? }
   const REPO_MEDIA_TTL_MS = 6 * 60 * 60 * 1000;
+  // A failed lookup is cached, but only briefly. The honest causes are
+  // transient (a network blip, or GitHub's rate limit), and reusing the
+  // six-hour TTL for the empty result this failure produces would hide a repo's
+  // screenshots for the rest of the session — and make them indistinguishable
+  // from "this repo has no images".
+  const REPO_MEDIA_FAIL_TTL_MS = 5 * 60 * 1000;
   const REPO_MEDIA_MAX = 24;
+  // How many repos may stay cached overall (see `evictOldest`). Five pages' worth
+  // covers paging back and forth without keeping a session's whole history.
+  const REPO_MEDIA_CACHE_MAX = 120;
 
   async function doRepoMedia({ repos = [], refresh = false } = {}) {
     const keys = [...new Set((Array.isArray(repos) ? repos : [])
@@ -752,21 +832,35 @@ export async function apply(ctx) {
     const stale = [];
     for (const key of keys) {
       const hit = repoMediaCache.get(key);
-      if (!refresh && hit && now - hit.at < REPO_MEDIA_TTL_MS) {
+      const ttl = hit?.failed ? REPO_MEDIA_FAIL_TTL_MS : REPO_MEDIA_TTL_MS;
+      if (!refresh && hit && now - hit.at < ttl) {
         media[key] = hit.data;
       } else {
         stale.push(key);
       }
     }
+    const errors = [];
     if (stale.length) {
       const fetched = await collectRepoMedia(stale, { max: stale.length });
+      const failed = new Set((fetched.errors ?? []).map((e) => e.repo));
       for (const key of stale) {
         const data = fetched.media?.[key] ?? { repo: key, images: [], og: null };
-        repoMediaCache.set(key, { at: now, data });
+        repoMediaCache.set(key, { at: now, data, ...(failed.has(key) ? { failed: true } : {}) });
         media[key] = data;
       }
+      // Entries are small (ranked URL lists, never the README bytes), but the key
+      // is a repo name that arrives from the caller, so this map is capped too.
+      evictOldest(repoMediaCache, REPO_MEDIA_CACHE_MAX);
+      // Reported, not swallowed: the caller can then say "配图加载失败" instead of
+      // rendering an empty strip as if it were the repo's real answer.
+      for (const e of fetched.errors ?? []) errors.push({ repo: e.repo, error: e.error });
     }
-    return { media, requested: keys.length, cached: stale.length === 0 };
+    return {
+      media,
+      requested: keys.length,
+      cached: stale.length === 0,
+      ...(errors.length ? { errors } : {}),
+    };
   }
 
   // ---- management tools ----------------------------------------------------
@@ -804,7 +898,7 @@ export async function apply(ctx) {
     }),
     defineTool({
       name: 'overall_mcp_install',
-      description: 'Install one MCP server from catalog search results (pass the exact item object from overall_mcp_search) and connect it immediately. Its tools appear as mcp__<name>__<tool>.',
+      description: 'Install one MCP server from catalog search results (pass the exact item object from overall_mcp_search) and connect it immediately. Its tools appear as mcp__<name>__<tool>. If another mcp-client mount already serves that DSH server name, this plugin records the entry as provided externally instead of mounting a second copy — the tools are already there.',
       parameters: {
         item: { type: 'json', required: true, description: 'One catalog item object exactly as returned by overall_mcp_search.' },
       },
@@ -815,7 +909,7 @@ export async function apply(ctx) {
     }),
     defineTool({
       name: 'overall_mcp_set_enabled',
-      description: 'Enable or disable one registry server. Disabling disconnects it (its tools disappear); enabling reconnects it.',
+      description: 'Enable or disable one registry server. Enabling mounts and connects it; disabling unmounts the copy this plugin mounted and disconnects it, so its mcp__<name>__ tools disappear. An entry overall_mcp_list reports as status "provided-externally" is served by a different mcp-client mount that this plugin never mounted: disabling only records the intent, and those tools stay available (the reply carries stillProvided).',
       parameters: {
         name: { type: 'string', required: true },
         enabled: { type: 'boolean', required: true },
@@ -827,7 +921,7 @@ export async function apply(ctx) {
     }),
     defineTool({
       name: 'overall_mcp_set_source_enabled',
-      description: 'Enable or disable every server imported from one source (the source-group switch shown in the settings page), e.g. source "claude-desktop" or "catalog:smithery".',
+      description: 'Enable or disable every server imported from one source (the source-group switch shown in the settings page), e.g. source "claude-desktop" or "catalog:smithery". Entries another mcp-client mount already provides are unaffected: the reply reports how many there were (externallyProvided).',
       parameters: {
         source: { type: 'string', required: true, description: 'Import source id, as shown by overall_mcp_list.' },
         enabled: { type: 'boolean', required: true },
@@ -871,7 +965,7 @@ export async function apply(ctx) {
     }),
     defineTool({
       name: 'overall_mcp_remove',
-      description: 'Remove one server from the overall MCP registry and disconnect it.',
+      description: 'Remove one server from this plugin\'s registry. When this plugin mounted it, the mount is disconnected and its tools disappear. A server that overall_mcp_list reports as status "provided-externally" keeps working: only this plugin\'s registry record is removed (the reply carries stillProvided).',
       parameters: {
         name: { type: 'string', required: true },
       },
@@ -892,9 +986,19 @@ export async function apply(ctx) {
       status,
       headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
     });
+    // Status per failure class (see lib/http-status.js), and the log line the
+    // old always-400 catch never wrote: a 5xx means the plugin or an upstream
+    // broke, which is the one a maintainer has to be able to see.
     const guard = (fn) => async (request) => {
       try { return await fn(request); }
-      catch (err) { return json({ error: String(err?.message ?? err) }, 400); }
+      catch (err) {
+        const status = httpStatusFor(err);
+        const message = String(err?.message ?? err);
+        if (status >= 500) {
+          log?.warn?.(`overall-mcp: ${request?.method ?? 'GET'} ${request?.url ?? ''} -> ${status}: ${message}`);
+        }
+        return json({ error: message, status }, status);
+      }
     };
     const readBody = async (request) => {
       try { return await request.json(); } catch { return {}; }

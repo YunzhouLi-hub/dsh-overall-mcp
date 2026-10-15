@@ -46,8 +46,9 @@ dsh plugin --profile web add ./dsh-overall-mcp
 - **市场页三段式 chrome**（按 v4 原型）：① 一整行搜索胶囊（🔍 + 输入框 + 右侧「搜索」按钮，回车即搜）；② 分类 chip 行（可横向滚动）+ 同一行右端的紧凑筛选控件（来源下拉 / 排序下拉 / 刷新，描边小按钮样式，不是大蓝块）；③ 灰字元信息行 `5.3k 个可用 MCP · 第 1 / 1 页 · 每页 20 条`，右端是缓存时间；各来源条数与已安装数退到下面一行更轻的灰字——控件是一行，数字是另一行，互不挤占
 - 统计：各来源条数 · 已安装数 · 当前页码 · 缓存时间
 - **排序**（用户自选，切换即生效，不重新请求上游）：
-  - `默认（综合推荐）` — 质量分：已认证(400) > 官方(300) > 可安装(120)，再加 log 量纲的流行度；已废弃 −500
-  - `使用量最多` — 按 `installs` 倒序
+  - `默认（综合推荐）` — 质量分：已认证(400) > 官方(300) > 可安装(120)，再加 log 量纲的流行度（`installs` 与 Star 各最多 +200）；已废弃 −500
+  - `质量最高` — 与默认**同一个**加权分。下拉把它单列，是为了让标签承诺的排序真的被应用，而不是一个和默认同序的空选项
+  - `使用量最多` — 按**合并后的使用量**倒序：Smithery 的调用次数 + Docker 的拉取次数 + 本面板的安装次数。三者单位不同（`lib/catalog.js` 自己也标注为不可比），因此它只是热度参考；下拉的悬停提示与列表上方的提示行都写明了这一点
   - `Star 最多` — 按 GitHub Star 倒序
   - `最近更新` — 按 `updatedAt` 倒序
   - `名称 A→Z`
@@ -74,7 +75,7 @@ dsh plugin --profile web add ./dsh-overall-mcp
 - **每个标签页最多一个主操作**：注册表页主按钮是「重新扫描宿主机」；市场页**没有常驻主按钮**——重拉目录是「分类」那一行里 `刷新` 的活，一个常驻的填充按钮会和小按钮重复。只有当「检查更新」报出**本插件**（`dsh-overall-mcp`）有更新时，市场页主按钮才出现，文案是「更新 overall-mcp」，点了走 `POST /self-update`（宿主执行 `dsh plugin --profile <p> add dsh-overall-mcp@<v>`，装完提示重启 DSH 生效）。另一页的主操作以无边框文字按钮留在同一行（「打开 MCP 市场」/「重新扫描宿主机」），两个主按钮等于没有主按钮——插件自身的版本判定见 `lib/self-update.js`：`link:`/本地检出（正是本仓库的开发形态）**不提供**自更新，因为那份代码就是版本来源，`npm` 上的新版本与它无关
 - **⤓ 导出日志**：把这一页知道的东西写成 JSON 文件（插件版本、注册表全量、市场各源条数/缓存时间/返回条数、当前筛选与页码、两处错误）——排查问题时缺的正是这些。客户端本地拼装并下载，不新增宿主路由：宿主自己的日志不归这个插件导出
 - **只有卡片区滚动**：这一页是**固定外壳**（`height:100%` + `overflow:hidden`，自己不滚），滚动属于内部两个盒子——「已注册」的标签页主体整段可滚；「MCP 市场」里只有**卡片区**（`data-omkt="scroller"`，`flex:1 1 auto` + `min-height:0` + `overflow-y:auto`）可滚，搜索框、分类下拉、筛选行与 meta 行都是钉住的 chrome，翻页条留在滚动区下方。`tools/shot.mjs` 的框架探针把这条契约量出来：把卡片区往下拖 240px 后，页签行与搜索框的 `top` 位移必须为 0，页面外壳的 `scrollTop` 必须为 0（四种窗口宽度下实测 0/0/0）。注意 flex 的自动最小尺寸在**滚动容器**里会失效（这正是当初页签行被压成 1px 的原因），所以 chrome 行统一 `.omkt-page > *,.omkt-tabbody > *{flex-shrink:0}`，而「该让出高度」的两个盒子用内联 `flex:1 1 auto` 明确覆盖
-- **回到顶部**：监听挂在「本页内部第一个 `[data-omkt="scroller"]`，否则本页或它之上的第一个可滚动元素」（退化为 window），随标签页切换重新绑定，只在滚动超过 400px 后才出现，短页面不留一个死按钮
+- **回到顶部**：监听挂在「本页内部第一个 `[data-omkt="scroller"]`，否则本页或它之上的第一个可滚动元素」（退化为 window），只在滚动超过 400px 后才出现，短页面不留一个死按钮。市场页签的滚动盒是卡片墙本身，**已注册页签的滚动盒是它的页体**（两者都带该 hook）——早先只有卡片墙带 hook，而页体是它的祖先，向上查找找不到，于是已注册页签上这个按钮从不出现。重新绑定的时机是「页签、市场列表、服务器列表任一变化」，因为卡片墙要等列表到达才存在（首次打开时若只按页签绑定，会绑到 window 且之后不再重绑）
 - 操作：可安装的显示「安装」，已注册的显示「已安装」，只有仓库链接的显示「需手动配置」+「仓库」/「主页」
 - **详情页**：点卡片主体或「详情」按钮弹出完整面板（按 v4 原型：680px、圆角 16、**一整张白纸**——页头不再是灰底带、底部只有一条分隔线），含：页头（头像 + 标题 + 贴着标题的徽标，关闭按钮在右上角）、完整描述（卡片只显示 3 行）、全部标签、**GitHub 仓库区块**（浅灰底卡片、owner/repo 锚点用品牌蓝、★ Star · Fork · Issue · Watch 竖排大数字带小标签、语言/许可证/最近推送/创建于事实行、归档警示；缺失数字保持缺失——没有任何目录发布 GitHub 数据，缺数字不等于 0，也不等于排最后）、逐项标注的**无底色事实表**（来源/作者/版本/传输/Star/使用量口径/更新时间（优先 GitHub pushed_at）/安装方式）、**将执行的确切命令**（stdio 为完整命令行，http 为端点 URL）、按 URL 去重的链接组（官网 / GitHub 仓库 / **GitHub 镜像** / MCP 端点 / Smithery 页面）、底部「安装 + ♡ 收藏」。Smithery 的 `repository` 指向它自己的列表页而非上游项目，因此额外提供其目录页链接（实测 `smithery.ai/server/<name>` 308 到 `/servers/<name>`，直接用后者）
 - **GitHub 镜像链接**：GitHub 在本网络环境下时通时断（实测连续数小时 TCP 超时后恢复 200）。实测（2026-10-12）`gh-proxy.com` 现已代理 github.com 仓库页面（200/640ms）——与 dshmarket 2026-09 实测的 403 相反，其注释明确要求"重新测量而非推断"。因此有仓库的条目同时提供直连与镜像两个链接，由用户择一
@@ -101,9 +102,10 @@ dsh plugin --profile web add ./dsh-overall-mcp
 | 两个 Awesome 清单 | — | 不显示 | 同上 |
 
 排序时流行度只是弱信号（满分 400，而"可安装"是 1000），且取 log10 量纲，避免 190 万拉取的镜像压平其他条目。GitHub Star 仍单独一路，来自本地补充而非目录。
-- 「全部市场」默认按来源**轮转交错**排列（各目录体量差异极大，纯按热度排序会把其中两个目录完全埋掉），因此打开即可同时看到三类来源；单来源筛选时则按热度排序
+- 「全部市场」默认按质量分排序（`默认（综合推荐）` 与 `质量最高` 用同一个加权分）；宿主在一次响应里按来源**轮转交错**返回（各目录体量差异极大，纯按上游顺序会把其中两个目录埋掉），而界面会对整份列表重排，所以默认视图最前面的是质量分最高的条目，不是来源轮转的结果；选单来源时同样按所选的排序（默认即质量分）
 - GitHub Star 数是本地补充的：目录本身不提供，卡片先渲染，随后一次性补齐当前可见的 GitHub 仓库（最多 30 个，宿主缓存 6 小时）
-- GitHub 未认证接口**每小时仅 60 次**且没有批量端点，因此宿主会读取额度状态：一旦耗尽即暂停补充并显示提示，下个整点后自动恢复。Star 只是装饰，额度不足时卡片内容依然完整
+- GitHub 未认证接口**每小时仅 60 次**且没有批量端点，因此宿主会读取额度状态：一旦耗尽即暂停补充并显示提示「额度恢复后会自动补齐」（额度是自首次请求起 60 分钟滚动恢复，不是整点重置）。Star 只是装饰，额度不足时卡片内容依然完整
+- 配图（详情页轮播与卡片头像）同样来自外部（GitHub OG 图与仓库图片）：单个仓库取图失败时**不会**被当成「这个仓库没有图」缓存 6 小时，而是按 5 分钟短 TTL 重试，并把失败的仓库报给界面——市场页与详情页都会显示「配图加载失败（可能被 GitHub 限流）」和「重试」按钮
 
 ### 与 dshmarket 的 4508 条相比
 
@@ -118,11 +120,13 @@ MCP 生态目前**没有对等物**——没有站点把上千个 MCP 收录成�
 - `overall_mcp_catalog [query] [source] [limit] [refresh]` — 浏览 MCP 市场（可不带关键词），返回条目含 `installable` / `installed` / `author` / `tags` / `installs`
 - `overall_mcp_search <query>` — 按关键词搜索市场（与市场标签页同源）
 - `overall_mcp_install <item>` — 安装市场条目并连接（`npx -y <pkg>` / `uvx <pkg>` / streamable-http）
-- `overall_mcp_set_enabled <name> <bool>` — 启用/停用单台（停用即断开并卸载工具；启用即重连）
+- `overall_mcp_set_enabled <name> <bool>` — 启用/停用单台（停用即断开并卸载本插件挂载的那份工具；启用即重连）
 - `overall_mcp_set_source_enabled <source> <bool>` — 按来源批量启用/停用（等同界面上的分组开关）
 - `overall_mcp_check_updates` — 检查所有启用服务器的可用更新（npm / PyPI）
 - `overall_mcp_update <name>` — 更新到最新版（重写包参数为精确版本）并重连
-- `overall_mcp_remove <name>` — 删除条目并断开
+- `overall_mcp_remove <name>` — 删除本插件的注册表条目并断开它挂载的那份
+
+对 `overall_mcp_list` 报成 `provided-externally` 的条目（工具由别的 mcp-client 挂载提供，本插件从未挂载过），上面这几个变更类工具的**返回值**会带 `stillProvided: true` 与一句 `note`：停用只记录本插件的意图、移除只删掉本插件的记录，那些 `mcp__<name>__` 工具都不会消失（`overall_mcp_set_source_enabled` 则回报 `externallyProvided: N`）。
 
 ## 版本检查与更新
 
@@ -174,6 +178,8 @@ Invalid schema for function 'mcp__rea-om__analyze_javascript_application':
 
 若某个服务器名已被其它 mcp-client 挂载占用（例如 harness 家目录补丁里的 `rea-mcp` 已提供 REA），本插件**不再重复挂载**，该条目状态标为 `provided-externally`（界面显示蓝色点 +「已由其他插件提供（跳过重复挂载）」）。这样既避免重复工具集膨胀上下文，也避免重复连接把坏 schema 带进请求。
 
+这类条目没有本插件挂载的 fiber，所以本插件**无法**停掉或移除那些工具：界面上仍然可以点「停用」/「移除」（那是在记录本插件的意图或清掉本插件的记录），但两个按钮的悬停提示、动作返回的 `note` 与模型工具的描述都会说明「工具仍由另一个插件提供」，不会反过来宣称已经断开（返回体带 `stillProvided: true`）。
+
 ## HTTP API（界面使用，Connection 鉴权）
 
 `GET /api/overall-mcp/servers`、`GET /api/overall-mcp/tools`（schema 取证）、
@@ -184,6 +190,10 @@ Invalid schema for function 'mcp__rea-om__analyze_javascript_application':
 `POST /api/overall-mcp/set-source-enabled`、`POST /api/overall-mcp/remove`、
 `POST /api/overall-mcp/favorite`（收藏，见下）、
 `GET /api/overall-mcp/repo-stats?repos=owner/name,...`
+
+错误码分层（`lib/http-status.js`，单测 `test/http-status.test.mjs`）：`unknown server`/`unknown source` → **404**；缺参数（`item/key/name/source/enabled ... required`）、`no installable transport`、`is not launched through a package runner` → **400**；上游版本查询失败（`version lookup failed`）→ **502**；其余一律 **500** 并由宿主 `log.warn` 记一行（含方法、URL 与消息）——500 的含义就是「这条路径我们没预料到」，早先它和「你参数写错了」共用 400，真正的事故看起来像用户的错。
+
+`/catalog` 的缓存有两道闸：条目上限 8（超出按最旧写入淘汰），查询串截断到 200 字符后才参与缓存键（否则请求方可以拿超长 query 撑出无界键空间、每条都吃一份整份列表的内存）。
 
 模型工具 `overall_mcp_search` 与市场页共用同一条聚合查询（`lib/catalog.js` 的 `browseCatalog`）：同一套去重、分组与排序，只是服务端把结果截到 50 条。
 
@@ -254,7 +264,7 @@ node tools/layout-probe.mjs                               # 真实 Chrome 量卡
 node tools/shot.mjs                                       # 把真页面渲染成 HTML 交给 headless Chrome：出七张对照截图（tools/out/*.png，含带 240px 侧栏的 frame-2col.png / frame-wide.png / frame-loading.png），断言栅格列数跟着**容器**走而不是窗口走、四种窗口宽度下面板都不出现横向滚动、且加载态不会把行拉伸铺满面板（`npm run test:layout`）
 node tools/preview-paged.mjs "<base-url-with-?token=…>" 20 1 installs
                                                           # 按面板页的方式渲染某一页（可带 pageSize/page/sort/group，group 如"金融支付"/"__none__"）
-node tools/verify-sort-paging.mjs                         # 校验 5 种排序、3 种页宽、越界夹取、紧凑计数
+node tools/verify-sort-paging.mjs                         # 校验 6 种排序、3 种页宽、越界夹取、紧凑计数
 node tools/verify-detail-links.mjs                        # 校验详情页链接：逐源覆盖、零死链、零重复 URL
 node tools/probe-real-cards.mjs                           # 拉真实市场条目逐条渲染卡片+详情（活实例）
 node tools/probe-media.mjs <token>                        # 实测 /repo-media：五个真实仓库的图片数/尺寸/缓存命中耗时
@@ -273,6 +283,7 @@ node tools/fixture-bad-schema-mcp.mjs                     # 故意带 `^[^\0]*$`
 | `lib/scanner.js` | 宿主机 MCP 配置扫描与规范化（纯函数） |
 | `lib/catalog.js` | 5 个远程开放目录的拉取、归一化、跨目录合并、排序与 GitHub 补充（纯 fetch） |
 | `lib/about.js` | 「这个 MCP 是干什么的」：从服务器 `instructions` / 已注册工具 / 启动命令中取一句人话，含 markdown 剥离、截断与证据标签；以及判断何时需要重读 system prompt 的 `needsInstructionsRead()` |
+| `lib/http-status.js` | 把宿主内部的错误映射成 HTTP 状态码（`unknown server|source`→404、缺参数/不可安装传输→400、上游版本查询失败→502、其余 500），供 `index.js` 的 `guard` 使用 |
 | `index.js` | cordis 宿主插件（`inject:['tools']`）：注册表、每服务器 `ctx.plugin(mcpClient)` 桥接、`defineTool` 管理工具、HTTP 路由 |
 | `client/client.js` | `__ModuleLoader__` 客户端插件：注册侧栏入口（`sidebar.panellist`，id `overall-mcp`，order 5）与面板本体（布局的 `main` 键控插槽，同一 id） |
 | `cordis.patch.yml` | 宿主 composition 补丁 |
