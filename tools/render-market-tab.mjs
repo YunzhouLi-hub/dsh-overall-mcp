@@ -87,6 +87,14 @@ const MARKET = {
   ],
   counts: { 'official-registry': 1, 'awesome-list': 1, 'awesome-remote': 1 },
   total: 3, cached: true, fetchedAt: Date.now(),
+  // Two of the five sources answered 304 on the last walk, so the freshness
+  // line has something honest to say beyond the timestamp.
+  notModified: 2,
+  sources: {
+    'official-registry': { at: new Date().toISOString(), cached: true, stale: false, notModified: 1, items: 1 },
+    'awesome-list': { at: new Date().toISOString(), cached: true, stale: false, notModified: 1, items: 1 },
+    'awesome-remote': { at: new Date().toISOString(), cached: false, stale: false, notModified: 0, items: 1 },
+  },
 };
 
 let captured = null;
@@ -317,6 +325,16 @@ assert.equal(sourceLine.length, 1, 'per-source line present');
 const sourceText = textOf(sourceLine[0]);
 assert.ok(sourceText.includes('官方 1'), 'per-source line names the sources');
 assert.ok(sourceText.includes('其中 1 个已安装'), 'per-source line names the installed count');
+
+// Conditional requests are invisible unless the page says so: "refreshed" and
+// "asked and told nothing changed" look identical without this. The span lives
+// inside the meta line, so read the line's own text.
+const freshnessLine = marketOwn.filter((n) => n.props?.key === 'meta');
+assert.equal(freshnessLine.length, 1, 'freshness meta line present');
+const freshnessText = textOf(freshnessLine[0]);
+assert.ok(freshnessText.includes('更新于 '), 'freshness line leads with the timestamp');
+assert.ok(freshnessText.includes('（缓存）'), 'freshness line marks a cached listing');
+assert.ok(freshnessText.includes('2 源未变'), 'freshness line reports how many sources answered 304');
 
 const search = loadedNodes.find((n) => n.type === 'input'
   && String(n.props?.placeholder ?? '').includes('搜索'));

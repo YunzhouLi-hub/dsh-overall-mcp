@@ -6,6 +6,7 @@ import {
   fetchAwesomeRemote, fetchDockerCatalog, githubReposOf, fetchRepoStats,
   functionalGroupOf, inferGroupOf, groupSourceOf,
 } from '../lib/catalog.js';
+import { createCatalogCache } from '../lib/catalog-cache.js';
 
 // The companion list of *hosted* endpoints: `- [Title](home) \`url\`` with an
 // indented continuation line carrying the auth flag and description.
@@ -700,3 +701,135 @@ test('inference is deterministic and title-weighted', () => {
   // Weighted by phrase length: the two-word phrase beats the generic one.
   assert.equal(inferGroupOf({ title: 'x', description: 'google sheets search' }), '办公协作');
 });
+
+// ---------------------------------------------------------------------------
+// Conditional requests and the source TTL
+// ---------------------------------------------------------------------------
+
+/**
+ * `okFetch` wrapped so the test can see what was asked.
+ *
+ * @param options.tag - the validator a URL answers with, and demands back.
+ * @param options.fail - URLs that are unreachable (the blocked-CDN case).
+ */
+function taggedFetch({ tag = () => undefined, fail = () => false } = {}) {
+  const calls = [];
+  const impl = async (url, init = {}) => {
+    const href = String(url);
+    const ifNoneMatch = init?.headers?.['if-none-match'];
+    calls.push({ url: href, ifNoneMatch });
+    if (fail(href)) throw new Error('fetch failed');
+    const validator = tag(href);
+    const headers = { get: (name) => (name === 'etag' ? validator : undefined) };
+    if (validator !== undefined && ifNoneMatch === validator) {
+      return { ok: false, status: 304, headers, text: async () => '', json: async () => ({}) };
+    }
+    const res = await okFetch(href);
+    return { ...res, headers };
+  };
+  impl.calls = calls;
+  return impl;
+}
+
+test('a re-walk sends the validator and a 304 hands back the remembered body', async () => {
+  const cache = createCatalogCache();
+  const fetchImpl = taggedFetch({ tag: (href) => (href.includes('hub.docker.com') ? '"docker-v1"' : undefined) });
+
+  const first = await browseCatalog({ fetchImpl, source: 'docker-catalog', cache });
+  assert.equal(first.items.length, 2);
+  assert.equal(fetchImpl.calls.length, 1, 'the cache is cold, so this walk downloads once');
+  assert.equal(fetchImpl.calls[0].ifNoneMatch, undefined, 'nothing to validate against yet');
+  assert.equal(first.sources['docker-catalog'].notModified, 0);
+
+  // `force` skips the TTL, so this walk is "due" — and it still costs a 304.
+  const second = await browseCatalog({ fetchImpl, source: 'docker-catalog', cache, force: true });
+  assert.deepEqual(second.items.map((i) => i.title), first.items.map((i) => i.title));
+  assert.equal(fetchImpl.calls.length, 2);
+  assert.equal(fetchImpl.calls[1].ifNoneMatch, '"docker-v1"', 'the validator travels back');
+  assert.equal(second.sources['docker-catalog'].notModified, 1);
+  assert.equal(second.sources['docker-catalog'].stale, false);
+  assert.ok(cache.stats().saved > 0, 'the point: bytes that were not downloaded again');
+});
+
+test('a re-walk of a README is one 304, not a second copy of the list', async () => {
+  const cache = createCatalogCache();
+  // The canonical raw URL answers with a validator; the CDN mirrors are down,
+  // which is exactly the network this mirror chain exists for.
+  const fetchImpl = taggedFetch({
+    tag: (href) => (href.startsWith('https://raw.githubusercontent.com/punkpeye/awesome-mcp-servers') ? '"readme-v1"' : undefined),
+    fail: (href) => href.includes('jsdelivr'),
+  });
+
+  const first = await browseCatalog({ fetchImpl, source: 'awesome-list', cache });
+  assert.equal(first.items.length, 3);
+
+  const second = await browseCatalog({ fetchImpl, source: 'awesome-list', cache, force: true });
+  assert.deepEqual(second.items.map((i) => i.title), first.items.map((i) => i.title));
+  assert.ok(fetchImpl.calls.some((c) => c.ifNoneMatch === '"readme-v1"'), 'every mirror is asked with what we hold');
+  assert.equal(second.sources['awesome-list'].notModified, 1);
+});
+
+test('inside the source TTL the market does not ask at all', async () => {
+  const cache = createCatalogCache();
+  const fetchImpl = taggedFetch({});
+  await browseCatalog({ fetchImpl, source: 'docker-catalog', cache });
+  const afterFirst = fetchImpl.calls.length;
+
+  const second = await browseCatalog({ fetchImpl, source: 'docker-catalog', cache });
+  assert.equal(fetchImpl.calls.length, afterFirst, 'no request inside the TTL');
+  assert.equal(second.items.length, 2);
+  assert.equal(second.sources['docker-catalog'].cached, true);
+  assert.equal(second.sources['docker-catalog'].stale, false);
+
+  // A different query is a different result, so it is a different walk.
+  await browseCatalog({ fetchImpl, source: 'docker-catalog', cache, query: 'fetch' });
+  assert.ok(fetchImpl.calls.length > afterFirst, 'the TTL is per source and per query');
+});
+
+test('a source that fails keeps its last listing and says why', async () => {
+  const cache = createCatalogCache();
+  const first = await browseCatalog({ fetchImpl: taggedFetch({}), source: 'docker-catalog', cache });
+  assert.equal(first.items.length, 2);
+
+  // 'HTTP 500', not 'fetch failed': the retry path is not what this test is about.
+  const broken = async () => { throw new Error('HTTP 500'); };
+  const second = await browseCatalog({ fetchImpl: broken, source: 'docker-catalog', cache, force: true });
+  assert.equal(second.items.length, 2, 'the rows survive one failed walk');
+  assert.equal(second.sources['docker-catalog'].stale, true);
+  assert.deepEqual(second.errors, [{ source: 'docker-catalog', message: 'HTTP 500', stale: true }]);
+});
+
+test('a source that fails with nothing remembered reports an error and no rows', async () => {
+  const cache = createCatalogCache();
+  const broken = async () => { throw new Error('HTTP 500'); };
+  const result = await browseCatalog({ fetchImpl: broken, source: 'docker-catalog', cache });
+  assert.deepEqual(result.items, []);
+  assert.equal(result.sources['docker-catalog'].stale, undefined, 'a cold failure is not a stale answer');
+  assert.deepEqual(result.errors, [{ source: 'docker-catalog', message: 'HTTP 500' }]);
+});
+
+test('a 304 with no remembered body fails the walk instead of inventing an empty listing', async () => {
+  // A cache that holds a validator but not the body it labels: only reachable if
+  // a remembered body had been evicted, and the honest answer is an error — an
+  // empty market would silently claim the catalog has no servers.
+  const stripped = {
+    etagFor: () => '"gone"',
+    noteRequest() {}, noteDownload() {}, remember() {},
+    reuse: () => undefined,
+    sourceResult: () => undefined,
+    storeSourceResult() {},
+    stats: () => ({ notModified: 0 }),
+  };
+  const fetchImpl = async () => ({ ok: false, status: 304, headers: { get: () => undefined } });
+  const result = await browseCatalog({ fetchImpl, source: 'docker-catalog', cache: stripped });
+  assert.deepEqual(result.items, []);
+  assert.match(result.errors[0].message, /HTTP 304 without a cached body/);
+});
+
+test('without a cache every walk reaches upstream exactly as before', async () => {
+  const fetchImpl = taggedFetch({});
+  await browseCatalog({ fetchImpl, source: 'docker-catalog' });
+  await browseCatalog({ fetchImpl, source: 'docker-catalog' });
+  assert.equal(fetchImpl.calls.length, 2, 'no cache argument, no reuse');
+});
+

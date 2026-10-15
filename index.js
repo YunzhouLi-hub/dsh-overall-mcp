@@ -17,6 +17,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools';
 import { describeAbout, toolNamesFor, aboutSourceLabel, needsInstructionsRead } from './lib/about.js';
 import { scanHost, mergeIntoRegistry, scannedSources, findOrphans, setMountHolder, clearMountHolder } from './lib/scanner.js';
 import { browseCatalog, catalogItemToEntry, fetchRepoStats } from './lib/catalog.js';
+import { createCatalogCache } from './lib/catalog-cache.js';
 import {
   readInstalls, writeInstalls, recordInstallIn, installKeyOf,
   localInstallsOf, localLastInstallOf,
@@ -32,8 +33,6 @@ export const inject = ['tools'];
 
 const REGISTRY_VERSION = 1;
 const SERVER_NAME_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
-/** How long a browsed market listing stays fresh before the next fetch. */
-const CATALOG_TTL_MS = 10 * 60 * 1000;
 /** Bounded readiness wait for one mcp-client mount (see connect()). */
 const CONNECT_WAIT_MS = 8000;
 
@@ -881,16 +880,15 @@ export async function apply(ctx) {
   }
 
   // ---- MCP market (browse the open catalogs) -------------------------------
-  // Cached per query key so opening the market tab repeatedly does not hammer
-  // the upstream registries; `refresh: true` forces a new fetch.
+  // Reading the market costs two different things, and they are held
+  // separately (see `lib/catalog-cache.js`): how often we *ask* a source, and
+  // how much we *download* when we do. The first is a 60-second TTL per
+  // (source, query); the second is an ETag per URL, so a reread that is due is
+  // usually answered 304 instead of shipping the two community READMEs again.
   //
-  // The key contains the caller's query, so its key space is unbounded: the map
-  // is capped and evicts the oldest entry. Each entry can hold the entire merged
-  // market (~2 MB at the route's limit of 10000, ~5.4k items), so eight of them
-  // bound this cache at roughly 16 MB worst case — and the queries that reach
-  // that size are the deliberate "fetch everything" ones, not the common case.
-  const catalogCache = new Map(); // key -> { at, data }
-  const CATALOG_CACHE_MAX = 8;
+  // `refresh: true` (the panel's 刷新 button) skips the TTL but still sends the
+  // validators — a forced refresh should cost a round trip, not 3 MB.
+  const catalogCache = createCatalogCache();
   // A search query longer than this is a caller mistake, not a search; the cut
   // keeps one absurd query from occupying a cache entry (and a key) of its own.
   const CATALOG_QUERY_MAX = 200;
@@ -971,24 +969,27 @@ export async function apply(ctx) {
   }
   async function doBrowse({ query = '', limit = 120, source = '', refresh = false } = {}) {
     const q = typeof query === 'string' ? query.slice(0, CATALOG_QUERY_MAX) : '';
-    const key = `${source}|${q}|${limit}`;
-    const hit = catalogCache.get(key);
-    const now = Date.now();
-    // Cache the RAW listing only: the installed flag depends on the registry and
+    // The listing is cached RAW: the installed flag depends on the registry and
     // is recomputed on every read, so installing/removing never shows a stale badge.
-    if (refresh || !hit || now - hit.at >= CATALOG_TTL_MS) {
-      const result = await browseCatalog({ query: q, limit, source });
-      catalogCache.set(key, { at: now, data: { items: result.items, errors: result.errors, counts: result.counts, total: result.total } });
-      evictOldest(catalogCache, CATALOG_CACHE_MAX);
-    }
-    const cached = catalogCache.get(key);
+    const result = await browseCatalog({ query: q, limit, source, cache: catalogCache, force: refresh });
+    // The panel says how old the listing is; with several sources that can
+    // differ, so the age reported is the oldest one still standing.
+    const oldest = Object.values(result.sources)
+      .map((s) => s.at)
+      .filter((at) => typeof at === 'string')
+      .sort()[0];
     return {
-      items: cached.data.items.map(annotateItem),
-      errors: cached.data.errors,
-      counts: cached.data.counts,
-      total: cached.data.total,
-      cached: !refresh && hit !== undefined,
-      fetchedAt: new Date(cached.at).toISOString(),
+      items: result.items.map(annotateItem),
+      errors: result.errors,
+      counts: result.counts,
+      sources: result.sources,
+      total: result.total,
+      // "cached" means every source answered from what we already held — the
+      // panel writes the listing's age next to it, so a mixed read must not
+      // claim to be one.
+      cached: Object.values(result.sources).every((s) => s.cached === true),
+      notModified: Object.values(result.sources).reduce((sum, s) => sum + (s.notModified ?? 0), 0),
+      fetchedAt: new Date(oldest ?? Date.now()).toISOString(),
       servers: (await serversPayload()).servers,
     };
   }
@@ -1172,7 +1173,9 @@ export async function apply(ctx) {
       async execute({ query }) {
         // Same all-source query the settings page uses, so the agent and the UI
         // rank and dedupe identically; the cap keeps the reply inside a context.
-        return await browseCatalog({ query, limit: 50 });
+        // Shares the panel's cache: an agent search and a page search of the same
+        // words cost one walk between them.
+        return await browseCatalog({ query, limit: 50, cache: catalogCache });
       },
     }),
     defineTool({

@@ -2551,6 +2551,10 @@ window.__ModuleLoader__.load({
 							? {
 								total: market.total, counts: market.counts ?? null,
 								cached: market.cached === true, fetchedAt: market.fetchedAt ?? null,
+								// Per-source facts: a missing count or a stale row is
+								// otherwise invisible in a screenshot.
+								sources: market.sources ?? null,
+								notModified: market.notModified ?? 0,
 								returned: marketItems?.length ?? 0,
 							}
 							: null,
@@ -3381,7 +3385,13 @@ window.__ModuleLoader__.load({
 								: null,
 							marketAt
 								? createElement("span", { key: "at", style: styles.metaTail },
-									`更新于 ${marketAt}${market && market.cached ? "（缓存）" : ""}`)
+									`更新于 ${marketAt}${market && market.cached ? "（缓存）" : ""}`
+									+ (market && market.notModified > 0
+										// Conditional requests mean a re-walk can cost
+										// nothing; say so, or "refreshed" and "not
+										// refetched" look identical from here.
+										? ` · ${market.notModified} 源未变`
+										: ""))
 								: null,
 						].filter(Boolean))
 						: createElement("div", { key: "meta", style: styles.metaLine }, "正在发现…"),

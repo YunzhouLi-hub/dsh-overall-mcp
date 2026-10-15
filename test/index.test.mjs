@@ -117,6 +117,79 @@ test('the plugin registers the documented route and tool surface', async () => {
   });
 });
 
+/**
+ * The market route reads the open catalogs over the global fetch. This stub
+ * answers only Docker's repository listing, with a validator, and records what
+ * each request carried — enough to prove the panel's read is conditional.
+ */
+function dockerFetchStub() {
+  const calls = [];
+  const DOCKER = {
+    count: 2,
+    next: null,
+    results: [
+      { name: 'mcp/fetch', namespace: 'mcp', description: 'Fetches a URL', pull_count: 10, is_official: true },
+      { name: 'mcp/git', namespace: 'mcp', description: 'Git operations', pull_count: 5, is_official: true },
+    ],
+  };
+  const stub = async (url, init = {}) => {
+    const href = String(url);
+    const ifNoneMatch = init?.headers?.['if-none-match'];
+    calls.push({ url: href, ifNoneMatch });
+    if (!href.includes('hub.docker.com')) throw new Error(`unexpected request to ${href}`);
+    const headers = { get: (name) => (name === 'etag' ? '"docker-v1"' : undefined) };
+    if (ifNoneMatch === '"docker-v1"') return { ok: false, status: 304, headers, json: async () => ({}) };
+    return { ok: true, status: 200, headers, json: async () => DOCKER };
+  };
+  stub.calls = calls;
+  return stub;
+}
+
+test('the market route reuses a listing inside the TTL and validates a forced refresh', async () => {
+  const realFetch = globalThis.fetch;
+  const stub = dockerFetchStub();
+  globalThis.fetch = stub;
+  try {
+    await withHost(FIXTURE, async ({ call }) => {
+      const first = await call('/api/overall-mcp/catalog', { body: { source: 'docker-catalog' } });
+      assert.equal(first.status, 200);
+      assert.equal(first.body.items.length, 2);
+      assert.equal(first.body.sources['docker-catalog'].cached, false);
+      assert.equal(first.body.sources['docker-catalog'].notModified, 0);
+      assert.equal(first.body.cached, false, 'a cold read is not a cached one');
+      assert.equal(stub.calls.length, 1);
+
+      // Opening the tab again inside the TTL must not touch the network at all.
+      const again = await call('/api/overall-mcp/catalog', { body: { source: 'docker-catalog' } });
+      assert.equal(stub.calls.length, 1, 'no request inside the source TTL');
+      assert.equal(again.body.cached, true);
+      assert.equal(again.body.items.length, 2);
+
+      // 刷新 skips the TTL — and still costs a validator, not a body.
+      const forced = await call('/api/overall-mcp/catalog', { body: { source: 'docker-catalog', refresh: true } });
+      assert.equal(stub.calls.length, 2);
+      assert.equal(stub.calls[1].ifNoneMatch, '"docker-v1"', 'the forced read is conditional');
+      assert.equal(forced.body.sources['docker-catalog'].notModified, 1);
+      assert.equal(forced.body.notModified, 1);
+      assert.equal(forced.body.items.length, 2);
+      assert.equal(forced.body.cached, false, 'a forced read is a fresh read');
+    });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('the market route reports an unknown source as an error, not as an empty market', async () => {
+  await withHost(FIXTURE, async ({ call }) => {
+    const result = await call('/api/overall-mcp/catalog', { body: { source: 'nope' } });
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.body.items, []);
+    assert.deepEqual(result.body.errors, [{ source: 'nope', message: 'unknown catalog source: nope' }]);
+    assert.deepEqual(result.body.sources.nope, { error: 'unknown catalog source: nope' });
+    assert.equal(result.body.total, 0);
+  });
+});
+
 test('a row action on a duplicated name is refused, and slot picks the row', async () => {
   await withHost(FIXTURE, async ({ call, readRegistry }) => {
     // Two rows named `rea-cursor`. Acting on "the name" used to remove the FIRST
