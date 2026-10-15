@@ -655,6 +655,51 @@ test('docker catalog stops when the upstream reports no next page', async () => 
   assert.equal(items.length, 2);
 });
 
+// Docker Hub lets anonymous callers read page 1 and nothing more. That 403 is
+// the end of the readable list, not a broken source — the source has to come
+// back with the rows it did read plus a note saying the list is cut short.
+test('the anonymous page cap ends the docker walk instead of failing it', async () => {
+  let calls = 0;
+  const fetchImpl = async (url) => {
+    calls += 1;
+    const page = new URL(url).searchParams.get('page');
+    if (page !== '1') {
+      return {
+        ok: false,
+        status: 403,
+        json: async () => ({ message: 'pagination offset too large for anonymous requests; sign in to page further' }),
+        text: async () => '',
+      };
+    }
+    return { ok: true, json: async () => ({ ...DOCKER_JSON, count: 245, next: 'https://hub.docker.com/v2/repositories/mcp/?page=2' }), text: async () => '' };
+  };
+  const { items, note } = await fetchDockerCatalog({ fetchImpl, pages: 3 });
+  assert.equal(items.length, 2, 'the rows from page 1 survive');
+  assert.equal(calls, 2, 'it asks for page 2 once, then accepts the refusal');
+  assert.match(note, /匿名只放出第一页/);
+  assert.match(note, /共 245 个镜像/);
+  assert.match(note, /已取 2/);
+});
+
+test('a policy 403 is not retried, and its note reaches the source record', async () => {
+  let calls = 0;
+  const fetchImpl = async (url) => {
+    if (url.includes('/mcp/')) {
+      calls += 1;
+      if (calls === 1) {
+        return { ok: true, json: async () => ({ ...DOCKER_JSON, count: 245, next: 'https://hub.docker.com/v2/repositories/mcp/?page=2' }), text: async () => '' };
+      }
+      return { ok: false, status: 403, json: async () => ({ message: 'pagination offset too large for anonymous requests' }), text: async () => '' };
+    }
+    throw new Error(`unexpected ${url}`);
+  };
+  const market = await browseCatalog({ fetchImpl, source: 'docker-catalog' });
+  assert.equal(calls, 2, 'the refusal is final: a retry would only add 2.5s of waiting');
+  assert.equal(market.errors.length, 0, 'a capped list is not an unavailable source');
+  assert.equal(market.counts['docker-catalog'], 2);
+  assert.match(market.sources['docker-catalog'].note, /匿名只放出第一页/);
+});
+
 // --- GitHub enrichment ------------------------------------------------------
 
 test('githubReposOf dedupes and bounds the enrichment set', () => {

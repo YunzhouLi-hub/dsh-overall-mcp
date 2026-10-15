@@ -3596,7 +3596,10 @@ window.__ModuleLoader__.load({
 										const st = market.sources?.[s];
 										const state = st?.error ? "不可用" : st?.stale ? "旧" : st?.cached ? "缓存" : "";
 										const at = sourceClock(st?.at);
-										return `${shortSourceName(s)} ${n}${state || at ? `（${[state, at].filter(Boolean).join(" ")}）` : ""}`;
+										// "部分" flags a source whose own note says the list is
+										// cut short (see the 内置 line below for the reason).
+										const marks = [state, st?.note ? "部分" : "", at].filter(Boolean);
+										return `${shortSourceName(s)} ${n}${marks.length ? `（${marks.join(" ")}）` : ""}`;
 									}).join(" · "),
 								`其中 ${installedCount} 个已安装`,
 								marketGroup && sortedItems
@@ -3635,7 +3638,11 @@ window.__ModuleLoader__.load({
 											// read as "this catalog is empty".
 											if (st?.error) return `${label} 不可用：${st.error}`;
 											const at = sourceClock(st?.at);
-											return `${label} ${market?.counts?.[id] ?? 0}${st?.stale ? "（旧）" : ""}${at ? `（${at}）` : ""}`;
+											// `st.note` is the source saying its list is only
+											// part of what exists (Docker Hub's anonymous page
+											// cap). The row count alone would overstate it.
+											const note = st?.note ? `（${st.note}）` : "";
+											return `${label} ${market?.counts?.[id] ?? 0}${st?.stale ? "（旧）" : ""}${at ? `（${at}）` : ""}${note}`;
 										}).join(" · ")}`),
 									...customSourceRows.map((s) => {
 										const st = market?.sources?.[s.id];
