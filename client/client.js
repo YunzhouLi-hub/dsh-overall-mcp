@@ -28,15 +28,15 @@
 //   GET/POST /api/overall-mcp/catalog           { query?, source?, limit?, refresh? }
 //   GET/POST /api/overall-mcp/repo-stats        { refresh? }
 //   GET/POST /api/overall-mcp/repo-media        { repo }
-//   POST /api/overall-mcp/install               { item }
+//   POST /api/overall-mcp/install               { item, overwrite? }
 //   POST /api/overall-mcp/favorite              { key, on? }
 //   GET  /api/overall-mcp/favorites
-//   POST /api/overall-mcp/set-enabled           { name, enabled }
+//   POST /api/overall-mcp/set-enabled           { name, enabled, slot?, from? }
 //   POST /api/overall-mcp/set-source-enabled    { source, enabled }
 //   GET  /api/overall-mcp/updates
 //   POST /api/overall-mcp/self-update
-//   POST /api/overall-mcp/update                { name }
-//   POST /api/overall-mcp/remove                { name }
+//   POST /api/overall-mcp/update                { name, slot?, from? }
+//   POST /api/overall-mcp/remove                { name, slot?, from? }
 
 window.__ModuleLoader__.load({
 	id: "dsh-overall-mcp",
@@ -69,14 +69,35 @@ window.__ModuleLoader__.load({
 		// allowed to drift apart.
 		const PANEL_ID = "overall-mcp";
 
+		// Every route answers in well under a minute except the ones that reach the
+		// network or shell out (检查更新 / 更新 / 安装 / 自更新 / 扫描 / 目录与仓库
+		// 拉取); those pass their own `timeoutMs`. The deadline exists because a
+		// hung host used to latch the whole page: `run()` holds `busy` until its
+		// promise settles, so a request that never answered left every button
+		// disabled for good — no message, no way back except a reload.
+		const API_TIMEOUT_MS = 30000;
 		async function api(path, options) {
-			const res = await fetch(API + path, {
-				headers: { "content-type": "application/json" },
-				...options,
-			});
-			const body = await res.json().catch(() => ({}));
-			if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-			return body;
+			const { timeoutMs = API_TIMEOUT_MS, ...init } = options ?? {};
+			const controller = timeoutMs > 0 && typeof AbortController === "function"
+				? new AbortController() : null;
+			const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+			try {
+				const res = await fetch(API + path, {
+					headers: { "content-type": "application/json" },
+					...init,
+					...(controller ? { signal: controller.signal } : {}),
+				});
+				const body = await res.json().catch(() => ({}));
+				if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+				return body;
+			} catch (err) {
+				if (controller?.signal.aborted) {
+					throw new Error(`${path} 等待超过 ${Math.round(timeoutMs / 1000)} 秒仍未响应：宿主可能正忙或已挂起，请稍后重试；若一直如此就重启 DSH。`);
+				}
+				throw err;
+			} finally {
+				if (timer !== null) clearTimeout(timer);
+			}
 		}
 
 		// The client container's context, captured by `apply(ctx)` below. Link
@@ -383,6 +404,15 @@ window.__ModuleLoader__.load({
 			// instead. `T.text` on `T.cardBg` is v4's own light/dark pair
 			// (#111/#fff ↔ #f2f2f2/#111) without needing a second rule.
 			primary: { background: T.text, borderColor: T.text, color: T.cardBg, fontWeight: 600 },
+			// A row whose update is already queued or running: the row's own
+			// button is where a reader looks for its state, so it reports that
+			// state in place — muted and not clickable — instead of vanishing
+			// from under the pointer or inviting a second click at a control
+			// that is already booked.
+			buttonBusy: {
+				background: T.soft, borderColor: T.line, color: T.text3,
+				fontWeight: 500, cursor: "default",
+			},
 			// v4's `.btn-text`: borderless and muted, so it never competes with
 			// the one filled control beside it.
 			textBtn: {
@@ -496,6 +526,76 @@ window.__ModuleLoader__.load({
 			updateBadge: {
 				fontSize: 12, padding: "1px 8px", borderRadius: 999,
 				background: "rgba(0,180,42,0.12)", color: T.green, fontWeight: 600,
+			},
+			// The plugin's own update control sits beside the version chip it
+			// changes, so it is the compact pill variant of v4's primary button
+			// rather than another full-size one competing with the head's own.
+			chipButton: { padding: "2px 9px", fontSize: 12, borderRadius: 999 },
+			// 更新队列 — the one row that owns every update this page starts. A
+			// single row's 更新 and 全部更新 both report here, so there is exactly
+			// one place on the page that says what is happening to what.
+			updateBar: {
+				display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
+				padding: "10px 12px", borderRadius: 10, border: `1px solid ${T.line}`,
+				background: T.soft, marginBottom: 12, boxSizing: "border-box",
+			},
+			// A real (i/N) bar: the fill's width is the share of items the host
+			// has already answered for. `position: relative` is what the running
+			// sheen is drawn against.
+			progressTrack: {
+				position: "relative", flex: "1 1 160px", minWidth: 120, height: 6,
+				borderRadius: 999, background: T.soft2, overflow: "hidden",
+			},
+			progressFill: {
+				height: "100%", borderRadius: 999, background: T.text,
+				transition: "width .25s ease",
+			},
+			progressText: { fontSize: 12, color: T.text2, whiteSpace: "nowrap" },
+			// The per-item detail under the bar. `flexBasis: 100%` is what drops
+			// it onto its own line inside the wrapping bar row.
+			jobList: {
+				display: "flex", flexDirection: "column", gap: 6,
+				flexBasis: "100%", minWidth: 0, marginTop: 2,
+			},
+			jobRow: { display: "flex", gap: 8, alignItems: "baseline", minWidth: 0, fontSize: 12 },
+			jobIcon: { color: T.text3, flexShrink: 0 },
+			jobName: { color: T.text, fontFamily: "monospace", flexShrink: 0 },
+			jobMsg: {
+				color: T.text3, minWidth: 0, overflow: "hidden",
+				textOverflow: "ellipsis", whiteSpace: "nowrap",
+			},
+			jobUpdated: { color: T.green },
+			jobFailed: { color: T.red },
+			// The finished-queue outcome takes the slot the button was in: a
+			// checked line reads as 「done」, where a live button and a 100%-wide
+			// track still read as 「working」. A row reports its own outcome the
+			// same way, in the slot its 更新 button occupied.
+			jobOutcome: {
+				display: "inline-flex", gap: 6, alignItems: "center",
+				fontSize: 12.5, fontWeight: 600, color: T.green, whiteSpace: "nowrap",
+			},
+			// 「来源已删除」: the row's own source was read by the last scan and no
+			// longer defines this name. Amber, not red — nothing is broken, there
+			// is just a record here that no config anywhere accounts for.
+			orphanBadge: {
+				padding: "1px 7px", borderRadius: 999, fontSize: 11.5, fontWeight: 600,
+				color: T.amber, background: T.soft2, whiteSpace: "nowrap", flexShrink: 0,
+			},
+			// 「检查失败」: the last 「检查更新」 errored for this row, so its version
+			// state is *unknown* rather than current. Red, unlike the amber orphan
+			// chip: something did fail, it just did not fail here. The host stores
+			// the failure in the verdict (`latest: null`, `error`), and before this
+			// chip the row simply showed nothing.
+			checkBadge: {
+				padding: "1px 7px", borderRadius: 999, fontSize: 11.5, fontWeight: 600,
+				color: T.red, background: T.soft2, whiteSpace: "nowrap", flexShrink: 0,
+			},
+			// The host carries `registryError` when registry.json could not be
+			// parsed. Without it the tab would render an empty list that looks
+			// exactly like "you never added a server".
+			registryWarn: {
+				padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.line}`,
+				background: T.soft2, color: "#f53f3f", fontSize: 12.5, lineHeight: 1.7,
 			},
 			groupBody: { display: "grid", gap: 1, padding: "6px 8px 10px" },
 			row: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "7px 10px", borderRadius: 8 },
@@ -792,7 +892,7 @@ window.__ModuleLoader__.load({
 			}));
 		}
 
-		function ServerRow({ server, busy, onToggle, onRemove, onUpdate }) {
+		function ServerRow({ server, busy, job, onToggle, onRemove, onUpdate }) {
 			const enabled = server.enabled !== false;
 			const provided = server.providedExternally === true;
 			const state = provided ? "external" : enabled ? (server.connected ? "on" : "idle") : "off";
@@ -802,7 +902,29 @@ window.__ModuleLoader__.load({
 			const prefix = server.serverName ? `工具前缀 mcp__${server.serverName}__` : "";
 			const pkg = server.package ? `${server.package.name}@${server.package.version ?? "latest"}` : "";
 			const update = server.update;
-			const newVersion = update?.updateAvailable ? update.latest : null;
+			// A row the last scan proved its own source no longer defines. It is a
+			// leftover, so it must not advertise an update: nothing would ever
+			// re-import it, and offering to update a ghost is exactly the confusing
+			// badge the first report was about.
+			const orphan = server.orphan === true;
+			const newVersion = !orphan && update?.updateAvailable ? update.latest : null;
+			// The last lookup for this row errored, so its version state is
+			// unknown — not current. `latest` is null and `error` says why (see
+			// lib/updates.js checkEntryUpdate).
+			const checkFailed = !orphan && update?.error ? String(update.error) : null;
+			// This row's place in the queue, if it is in one. A queued row says
+			// 「等待中」 and the one being rewritten says 「更新中…」, both muted and
+			// unclickable: the button is where a reader looks for that state, and
+			// a control that stays live while the host already owns the entry is
+			// an invitation to write the registry twice.
+			const rowStatus = job?.status === "running" || job?.status === "pending" ? job.status : null;
+			// An answered row stops advertising the badge it was clicked from —
+			// that version has been dealt with — and says what happened instead
+			// where its button was. 「无需更新」 is not an event, so it earns no
+			// label; the badge going away is the whole statement.
+			const settled = job?.answered === true && (job.status === "updated" || job.status === "skipped");
+			const badge = settled ? null : newVersion;
+			const didUpdate = settled && job.status === "updated" ? job.outcome : null;
 			// 「这个 MCP 是干什么的」: the host resolves this from the server's own
 			// MCP instructions, then its registered tools, then its launch
 			// command, and reports which one it used (`aboutLabel`).
@@ -827,16 +949,36 @@ window.__ModuleLoader__.load({
 							[server.transport, status, toolCount, prefix, pkg].filter(Boolean).join(" · ")),
 					]),
 				]),
-				newVersion
-					? createElement("span", { key: "newv", style: styles.updateBadge }, `可更新 → ${newVersion}`)
-					: null,
+				badge
+					? createElement("span", { key: "newv", style: styles.updateBadge }, `可更新 → ${badge}`)
+					: orphan
+						? createElement("span", {
+								key: "orphan",
+								style: styles.orphanBadge,
+								title: `最近的扫描读了它来自的配置（${sourceLabel(server.source)}），里面没有这个名字：这条记录已经没有任何配置文件定义它了。`,
+							}, "来源已删除")
+						: checkFailed
+							? createElement("span", {
+									key: "checkfail",
+									style: styles.checkBadge,
+									title: `最近一次「检查更新」没查到最新版本：${checkFailed}`,
+								}, "检查失败")
+							: didUpdate
+							? createElement("span", { key: "newv", style: styles.jobOutcome }, `✓ 已更新到 ${didUpdate}`)
+							: null,
 				createElement("span", { key: "actions", style: { display: "flex", gap: 6, alignItems: "center", ...styles.spacer } }, [
-					newVersion
+					newVersion && !settled
 						? createElement("button", {
 								key: "update", type: "button",
-								style: { ...styles.button, ...styles.primary }, disabled: busy,
-								onClick: () => onUpdate(server.name),
-							}, "更新")
+								style: rowStatus
+									? { ...styles.button, ...styles.buttonBusy }
+									: { ...styles.button, ...styles.primary },
+								disabled: busy || rowStatus !== null,
+								title: rowStatus === "running" ? "这一台正在更新"
+									: rowStatus === "pending" ? "已排队，轮到时自动开始"
+										: undefined,
+								onClick: () => onUpdate(server),
+							}, rowStatus === "running" ? "更新中…" : rowStatus === "pending" ? "等待中" : "更新")
 						: null,
 					createElement("button", {
 						key: "toggle", type: "button", style: styles.button, disabled: busy,
@@ -844,18 +986,19 @@ window.__ModuleLoader__.load({
 						// 「停用」 cannot stop its tools — say that on the button itself
 						// rather than only in the toast after the click.
 						title: provided ? "这条记录由另一个插件挂载提供，本插件的停用不会让它的工具消失" : undefined,
-						onClick: () => onToggle(server.name, !enabled),
+						onClick: () => onToggle(server, !enabled),
 					}, enabled ? "停用" : "启用"),
 					createElement("button", {
 						key: "remove", type: "button", style: styles.button, disabled: busy,
-						title: provided ? "只移除本插件的注册表记录；那些工具仍由另一个插件提供" : undefined,
-						onClick: () => onRemove(server.name),
+						title: provided ? "只移除本插件的注册表记录；那些工具仍由另一个插件提供"
+							: orphan ? "这条记录来自的配置里已经没有它了（可一次清理全部同类记录）" : undefined,
+						onClick: () => onRemove(server),
 					}, "移除"),
 				]),
 			]);
 		}
 
-		function SourceGroup({ source, servers, busy, collapsed, onToggleCollapsed, onToggleSource, onToggleServer, onRemove, onUpdate }) {
+		function SourceGroup({ source, servers, busy, jobOf, collapsed, onToggleCollapsed, onToggleSource, onToggleServer, onRemove, onUpdate }) {
 			const enabledCount = servers.filter((s) => s.enabled !== false).length;
 			const allOn = enabledCount === servers.length && servers.length > 0;
 			return createElement("div", { style: styles.group }, [
@@ -878,7 +1021,8 @@ window.__ModuleLoader__.load({
 				]),
 				collapsed ? null : createElement("div", { key: "body", style: styles.groupBody },
 					servers.map((server) => createElement(ServerRow, {
-						key: server.name, server, busy,
+						key: rowKey(server), server, busy,
+						job: jobOf(server),
 						onToggle: onToggleServer, onRemove, onUpdate,
 					}))),
 			]);
@@ -946,6 +1090,23 @@ window.__ModuleLoader__.load({
 				".omkt-btn-text:hover{opacity:.7}",
 				".omkt-btn-outline:hover{background:rgba(128,128,128,.10)}",
 				".omkt-btn:disabled{opacity:.55;cursor:default}",
+				// A settled queue states its outcome in the slot the button was
+				// in. It stays a <button> — the layout, focus order and hit area
+				// are unchanged — but it reports a fact, so it drops the fill and
+				// keeps its colour instead of dimming like a disabled control.
+				".omkt-btn-done,.omkt-btn-done:disabled{background:transparent;border-color:transparent;color:" + T.green + ";opacity:1;cursor:default}",
+				".omkt-progress{overflow:hidden}",
+				".omkt-jobs{scrollbar-width:thin}",
+				// A running update queue is the only live thing on this page, so
+				// it is the only place that gets motion. The sheen rides *over*
+				// the track, above the real (i/N) fill: it says "one of them is
+				// still going" without pretending to be a second measure of
+				// progress the host never gave us. Grey, not white — a white
+				// gradient is invisible in light mode and a glare in dark.
+				".omkt-progress-live::after{content:\"\";position:absolute;inset:0;"
+					+ "background:linear-gradient(90deg,transparent,rgba(128,128,128,.45),transparent);"
+					+ "animation:omkt-sheen 1.1s linear infinite}",
+				"@keyframes omkt-sheen{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}",
 				// A flex item inside a *scroll container* (or any non-visible
 				// `overflow`) loses its content-based automatic minimum size, so
 				// its default `flex-shrink: 1` can squash it to nothing. The page
@@ -1646,6 +1807,14 @@ window.__ModuleLoader__.load({
 		 * near-black, which vanishes in the dark theme); only the hub keeps the
 		 * brand blue, so the accent stays a single point.
 		 */
+		// One row of the registry, addressed by position. Two rows can carry the
+		// same server name (the same config file can define it twice), and an
+		// answer about one of them is not an answer about the other. Falls back
+		// to the name so a host that does not report slots still works.
+		function rowKey(row) {
+			return row?.slot ?? row?.name;
+		}
+
 		function brandMark(size = 22, decorative = false) {
 			const dot = (cx, cy, r) => createElement("circle", { key: `c${cx}-${cy}`, cx, cy, r, fill: "currentColor" });
 			return createElement("svg", {
@@ -2018,6 +2187,10 @@ window.__ModuleLoader__.load({
 
 			// ---- registry tab state ----
 			const [servers, setServers] = useState(null);
+			// 注册表文件读不出来时由宿主带回来的原因（见 index.js
+			// readRegistryDocument）：列表会是空的，没有这句话就和「你从没加过
+			// 服务器」长得一样。
+			const [registryError, setRegistryError] = useState("");
 			const [busy, setBusy] = useState(false);
 			const [error, setError] = useState("");
 			const [message, setMessage] = useState("");
@@ -2055,13 +2228,83 @@ window.__ModuleLoader__.load({
 			// `doCheckUpdates`). `null` means "not asked yet", which is why the
 			// head shows no update button on a fresh page.
 			const [selfUpdate, setSelfUpdate] = useState(null);
+			// ---- update queue ----
+			// One queue for every update this page can start: a row's 「更新」 and
+			// 「全部更新」 run through the same runner below. `null` means "nothing
+			// has been updated yet in this session"; after a run the queue stays
+			// put, held at its final state, because the outcome is what the user
+			// came back to read. There is no percentage here and there cannot be
+			// one: the host answers a single /update request only when the whole
+			// rewrite-and-reconnect cycle is done, so the page reports the two
+			// things it does know — how many items are finished, and which one is
+			// running.
+			const [updateJobs, setUpdateJobs] = useState(null);
+			// The queue's answers outlive its progress panel. 关闭进度 puts the
+			// panel away; it does not un-answer the entries the run settled, so
+			// the batch count and the rows keep agreeing with the run instead of
+			// falling back to a listing that may still carry the badge the run
+			// was started from. A fresh answer (or a newer release) supersedes
+			// the old one.
+			const [updateAnswers, setUpdateAnswers] = useState({});
+			const [jobsOpen, setJobsOpen] = useState(false);
+			// Re-rendered about once a second while a queue runs, so the elapsed
+			// time in the bar moves.
+			const [clockMs, setClockMs] = useState(0);
+			// A queue owns the registry file and the mcp-client fibers while it
+			// runs. `busy` disables the buttons on the next render, but a double
+			// click lands before that render — this ref is the guard that makes
+			// "one writer at a time" true at click time rather than paint time.
+			const updateRunRef = useRef(false);
 			const pageRef = useRef(null);
 			const scrollerRef = useRef(null);
 			const [showTop, setShowTop] = useState(false);
 
+			// The servers the host's last 检查更新 marked as updatable. Derived
+			// rather than stored, and derived from the *listing* rather than from
+			// the queue: the page refreshes the registry after every update, so
+			// the batch always acts on what is actually updatable right now and
+			// never re-runs an entry it just upgraded.
+			//
+			// A row is identified by its slot in the registry, not by its name:
+			// one client config can contribute the same server name more than once
+			// (that is a registry problem, not this panel's), and updating the row
+			// somebody clicked must not act on its twin. `slot ?? name` keeps the
+			// old name-keyed behaviour against a host that does not publish slots.
+			const updatable = useMemo(
+				() => (servers ?? [])
+					.filter((s) => s.update?.updateAvailable)
+					.map((s) => ({
+						key: rowKey(s),
+						name: s.name,
+						slot: s.slot ?? null,
+						from: s.update?.current ?? null,
+					})),
+				[servers],
+			);
+
+			// 已用时 only has to move once a second, and only while something is
+			// running. `requestAnimationFrame` is the ticker because it is the
+			// one timer a headless render host does not have: the guard means a
+			// probe or SSR pass never starts a loop it cannot clean up.
+			useEffect(() => {
+				if (!updateJobs?.running) return undefined;
+				if (typeof requestAnimationFrame !== "function") return undefined;
+				let id = 0;
+				const step = () => {
+					const now = Date.now();
+					setClockMs((prev) => (
+						Math.floor(now / 1000) === Math.floor((prev || updateJobs.startedAt) / 1000) ? prev : now
+					));
+					id = requestAnimationFrame(step);
+				};
+				id = requestAnimationFrame(step);
+				return () => { if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(id); };
+			}, [updateJobs]);
+
 			async function refresh() {
 				const body = await api("/servers");
 				setServers(body.servers);
+				setRegistryError(typeof body.registryError === "string" ? body.registryError : "");
 				return body.servers;
 			}
 
@@ -2074,6 +2317,7 @@ window.__ModuleLoader__.load({
 				try {
 					const body = await api("/catalog", {
 						method: "POST",
+						timeoutMs: 120000,
 						body: JSON.stringify({
 							query: options.query ?? marketQuery,
 							source: options.source ?? marketSource,
@@ -2126,7 +2370,7 @@ window.__ModuleLoader__.load({
 					if (repos.length >= 30) break;   // stay inside the GitHub rate budget
 				}
 				if (!repos.length) return;
-				api("/repo-stats", { method: "POST", body: JSON.stringify({ repos, refresh }) })
+				api("/repo-stats", { method: "POST", timeoutMs: 120000, body: JSON.stringify({ repos, refresh }) })
 					.then((body) => {
 						setRepoStats((prev) => ({ ...prev, ...(body.stats ?? {}) }));
 						// GitHub's unauthenticated window is a rolling 60 minutes from
@@ -2167,7 +2411,7 @@ window.__ModuleLoader__.load({
 					if (repos.length >= 24) break;
 				}
 				if (!repos.length) return;
-				api("/repo-media", { method: "POST", body: JSON.stringify({ repos, refresh }) })
+				api("/repo-media", { method: "POST", timeoutMs: 120000, body: JSON.stringify({ repos, refresh }) })
 					.then((body) => {
 						setRepoMedia((prev) => ({ ...prev, ...(body.media ?? {}) }));
 						const errors = body.errors ?? [];
@@ -2198,23 +2442,41 @@ window.__ModuleLoader__.load({
 			}
 
 			const doScan = () => run(
-				() => api("/scan", { method: "POST" }),
+				() => api("/scan", { method: "POST", timeoutMs: 120000 }),
 				(r) => `扫描完成：新增 ${r.added.length} 台，跳过 ${r.skipped.length} 台（${r.scannedFiles} 个配置文件）`,
 			);
 			// `note` wins when the host has one: it is the honest wording for an
 			// entry another mcp-client mount provides, where「已停用」/「已移除」
 			// would claim an effect this plugin cannot have.
-			const doToggle = (name, enabled) => run(
-				() => api("/set-enabled", { method: "POST", body: JSON.stringify({ name, enabled }) }),
+			// Row actions send the row's `slot` (its position in the list the host
+			// just rendered) alongside the name. Names repeat in this registry —
+			// four rows named `rea-cursor` at one point — and a name-keyed action
+			// then hit the first match: 移除 on the last row removed the first one.
+			const rowRef = (server) => ({
+				name: server.name,
+				slot: Number.isInteger(server.slot) ? server.slot : null,
+				from: server.update?.current ?? null,
+			});
+			const doToggle = (server, enabled) => run(
+				() => api("/set-enabled", { method: "POST", body: JSON.stringify({ ...rowRef(server), enabled }) }),
 				(r) => r.note ?? `${r.name} ${r.enabled ? "已启用并连接" : "已停用"}`,
 			);
 			const doToggleSource = (source, enabled) => run(
 				() => api("/set-source-enabled", { method: "POST", body: JSON.stringify({ source, enabled }) }),
 				(r) => r.note ?? `${sourceLabel(r.source)}：${r.changed} 台已${r.enabled ? "启用" : "停用"}`,
 			);
-			const doRemove = (name) => run(
-				() => api("/remove", { method: "POST", body: JSON.stringify({ name }) }),
+			const doRemove = (server) => run(
+				() => api("/remove", { method: "POST", body: JSON.stringify(rowRef(server)) }),
 				(r) => r.note ?? `${r.removed} 已移除`,
+			);
+			// One action for the whole set of rows the last scan proved are gone:
+			// they are all the same kind of leftover, and removing them one by one
+			// is exactly what a name-keyed 移除 got wrong.
+			const doCleanOrphans = () => run(
+				() => api("/forget-orphans", { method: "POST" }),
+				(r) => (r.count
+					? `已清理 ${r.count} 条来源已删除的记录（${[...new Set(r.removed.map((x) => x.name))].join("、")}）`
+					: "没有需要清理的记录"),
 			);
 			// 「检查更新」 answers two questions at once: which mounted MCP
 			// servers have a newer package, and whether *this plugin* does. The
@@ -2223,14 +2485,28 @@ window.__ModuleLoader__.load({
 			// sits in the primary slot.
 			const doCheckUpdates = () => run(
 				async () => {
-					const body = await api("/updates", { method: "POST" });
+					const body = await api("/updates", { method: "POST", timeoutMs: 300000 });
 					setSelfUpdate(body.self ?? null);
 					return body;
 				},
 				(r) => {
-					const parts = [r.updatable > 0
-						? `${r.checked} 个可检测，其中 ${r.updatable} 个有可用更新`
-						: `${r.checked} 个可检测，均已是最新版本`];
+					// Three outcomes, not two: a lookup can also have failed (the
+					// host counts those as `failed`). The two-way message this
+					// replaces called an offline run 「均已是最新版本」, which is a
+					// verdict nobody had.
+					const failed = r.failed ?? 0;
+					const ok = Math.max(0, r.checked - failed);
+					const parts = [];
+					if (r.updatable > 0) {
+						parts.push(`${r.checked} 个可检测，其中 ${r.updatable} 个有可用更新`
+							+ (failed > 0 ? `，${failed} 个查不到最新版本` : ""));
+					} else if (failed === 0) {
+						parts.push(`${r.checked} 个可检测，均已是最新版本`);
+					} else if (ok === 0) {
+						parts.push(`${r.checked} 个可检测，全部都查不到最新版本（网络或包注册表不可用）`);
+					} else {
+						parts.push(`${r.checked} 个可检测，${ok} 个已是最新、${failed} 个查不到最新版本`);
+					}
 					const self = r.self;
 					if (self) {
 						if (self.updateAvailable) parts.push(`插件 dsh-overall-mcp 有新版 v${self.latest}`);
@@ -2244,7 +2520,7 @@ window.__ModuleLoader__.load({
 
 			const doSelfUpdate = () => run(
 				async () => {
-					const body = await api("/self-update", { method: "POST" });
+					const body = await api("/self-update", { method: "POST", timeoutMs: 600000 });
 					setSelfUpdate(null);
 					return body;
 				},
@@ -2346,20 +2622,126 @@ window.__ModuleLoader__.load({
 					window.scrollTo({ top: 0, behavior: "smooth" });
 				}
 			}
-			const doUpdate = async (name) => {
+			/**
+			 * Put the progress panel away. This dismisses the *panel*, not the
+			 * answers the run gave: those live in `updateAnswers`, so the entries
+			 * a finished run settled do not come straight back as a batch to run
+			 * again off a listing that has not caught up yet.
+			 */
+			function closeJobs() {
+				setUpdateJobs(null);
+				setJobsOpen(false);
+			}
+			/**
+			 * Run one or more updates through one sequential queue.
+			 *
+			 * Sequential, not parallel: every update rewrites the registry file
+			 * and re-mounts an mcp-client fiber, and N concurrent rewrites of one
+			 * file is how a registry gets truncated. The queue is also the only
+			 * reason this page can show progress at all — it knows how many items
+			 * it handed over and how many answers came back.
+			 *
+			 * A failure does not stop the queue. Each item records its own
+			 * outcome and the summary separates updated / already-current /
+			 * failed, because those three ask for different reactions.
+			 */
+			const runUpdates = async (rows) => {
+				// Rows arrive two ways: the batched `updatable` list, already
+				// flattened, or straight from a row's 更新 button, which hands over
+				// the server. Both carry a slot; the version a row was showing only
+				// exists on the server, so read it from either place.
+				const list = rows.map((row) => ({
+					key: rowKey(row),
+					name: row.name,
+					slot: row.slot ?? null,
+					from: row.from ?? row.update?.current ?? null,
+				}));
+				if (list.length === 0) return;
+				if (updateRunRef.current) return;
+				updateRunRef.current = true;
+				const items = list.map((row) => ({ ...row, status: "pending", message: "" }));
 				setBusy(true); setError(""); setMessage("");
-				try {
-					const result = await api("/update", { method: "POST", body: JSON.stringify({ name }) });
-					await refresh();
-					setMessage(result.updated
-						? `${result.name} 已从 ${result.from} 更新到 ${result.to}${result.reconnected ? " 并重连" : ""}`
-						: `${result.name} 无需更新（${result.reason}）`);
-				} catch (err) {
-					setError(String(err.message || err));
-				} finally {
-					setBusy(false);
+				setUpdateJobs({
+					total: list.length, done: 0, running: true,
+					startedAt: Date.now(), current: list[0].name, items,
+				});
+				setJobsOpen(list.length > 1);
+				let updated = 0; let skipped = 0; let failed = 0;
+				for (let i = 0; i < list.length; i += 1) {
+					const row = list[i];
+					setUpdateJobs((prev) => (prev ? {
+						...prev,
+						current: row.name,
+						items: prev.items.map((it, j) => (j === i ? { ...it, status: "running" } : it)),
+					} : prev));
+					let settled;
+					try {
+						// `slot` names the exact row, `from` the version it was
+						// showing: the host needs one of them to act on the entry
+						// that was clicked when two rows share a name.
+						const result = await api("/update", {
+							method: "POST",
+							timeoutMs: 300000,
+							body: JSON.stringify({ name: row.name, from: row.from, slot: row.slot }),
+						});
+						if (result.updated) {
+							updated += 1;
+							settled = {
+								status: "updated",
+								// The version this answer covers. A row hides its 更新
+								// button only while the listing still offers exactly
+								// that version, so a newer release supersedes the
+								// answer instead of being hidden by it.
+								answer: result.to,
+								message: `${result.from} → ${result.to}${result.reconnected ? "（已重连）" : ""}`,
+							};
+						} else {
+							skipped += 1;
+							settled = { status: "skipped", answer: result.version, message: result.reason ?? "无需更新" };
+						}
+					} catch (err) {
+						failed += 1;
+						settled = { status: "failed", message: String(err?.message || err) };
+					}
+					const patch = settled;
+					setUpdateJobs((prev) => (prev ? {
+						...prev,
+						done: i + 1,
+						items: prev.items.map((it, j) => (j === i ? { ...it, ...patch } : it)),
+					} : prev));
+					// Record what the host said about this entry, separately from
+					// the panel that shows it. A failure records nothing: that
+					// entry is still outstanding, so it has to keep the badge and
+					// the button that reach it again.
+					setUpdateAnswers((prev) => {
+						const next = { ...prev };
+						if (patch.status === "failed") delete next[row.key];
+						else next[row.key] = { status: patch.status, answer: patch.answer };
+						return next;
+					});
 				}
+				setUpdateJobs((prev) => (prev
+					? { ...prev, running: false, current: null, finishedAt: Date.now() }
+					: prev));
+				try { await refresh(); } catch (err) { setError(String(err.message || err)); }
+				const parts = [`${updated} 台已更新`];
+				if (skipped) parts.push(`${skipped} 台无需更新`);
+				if (failed) parts.push(`${failed} 台失败`);
+				const who = list.length === 1 ? list[0].name : `${list.length} 台服务器`;
+				const summary = `${who}：${parts.join("，")}`;
+				// One failure in a batch is still an error even when the rest
+				// worked: the reader has to act on that one, and a success toast
+				// would bury it.
+				if (failed) setError(summary); else setMessage(summary);
+				updateRunRef.current = false;
+				setBusy(false);
 			};
+			/** A row's own 「更新」 — the same queue with one item in it, so a
+			 * single update reports through the same bar a batch does. */
+			const doUpdate = (row) => runUpdates([row]);
+			/** 「全部更新」 — whatever is still outstanding: the rows the host last marked
+			 * updatable, minus the entries this queue has already settled. */
+			const doUpdateAll = () => runUpdates(pending);
 			/**
 			 * Toggle a market entry's bookmark.
 			 *
@@ -2397,7 +2779,7 @@ window.__ModuleLoader__.load({
 				setError(""); setMessage("");
 				setBusy(true);
 				try {
-					const result = await api("/install", { method: "POST", body: JSON.stringify({ item }) });
+					const result = await api("/install", { method: "POST", timeoutMs: 300000, body: JSON.stringify({ item }) });
 					await refresh();
 					await loadMarket({});
 					setMessage(`${result.installed} 已安装并连接`);
@@ -2416,6 +2798,67 @@ window.__ModuleLoader__.load({
 				connected: all.filter((s) => s.connected).length,
 				failed: all.filter((s) => s.error).length,
 			};
+
+			// ---- the update queue, derived for render ----
+			// The bar reports two facts and no more: how many items the host has
+			// already answered for, and how long the queue has been going. A
+			// "download percentage" would be a number nobody measured — /update
+			// answers once, when the whole rewrite-and-reconnect is done.
+			const updateRunning = updateJobs?.running === true;
+			const updateProgress = updateJobs ? Math.round((updateJobs.done / updateJobs.total) * 100) : 0;
+			const updateElapsed = updateJobs
+				? Math.max(0, Math.round((((updateRunning && clockMs) || updateJobs.finishedAt || Date.now()) - updateJobs.startedAt) / 1000))
+				: 0;
+			// ---- what 「全部更新」 may still act on ----
+			// The listing is not the last word. An entry this queue already
+			// answered must not be re-advertised off a listing that still carries
+			// the badge it was clicked from — that is the page arguing with its own
+			// result, and it is why a dismissed bar used to come straight back as
+			// 「全部更新（1）」. The answer is matched against the version that same
+			// row offers now, so a NEWER release no longer matches and is offered
+			// again. A failure answers nothing, because retrying it is the next
+			// thing a reader wants. (The host rewrites the entry's check too; this
+			// keeps the count honest until that refresh lands — and keeps it honest
+			// for good when the host has not been restarted into the new code yet.)
+			const answered = (row) => {
+				const info = updateAnswers[row.key];
+				if (!info || info.answer == null) return false;
+				const latest = (servers ?? []).find((s) => rowKey(s) === row.key)?.update?.latest;
+				return latest != null && String(latest) === String(info.answer);
+			};
+			const pending = updatable.filter((row) => !answered(row));
+			// Rows the last scan proved their own source no longer defines. They
+			// are one kind of leftover, so they get one action rather than a
+			// per-row 移除 that a name-keyed host call used to aim at the wrong row.
+			const orphans = (servers ?? []).filter((s) => s.orphan === true);
+			const jobsFinished = updateJobs !== null && !updateRunning;
+			const jobsFailed = (updateJobs?.items ?? []).filter((it) => it.status === "failed").length;
+			const jobsUpdated = (updateJobs?.items ?? []).filter((it) => it.status === "updated").length;
+			// Finished, nothing failed, and nothing left outstanding: the bar stops
+			// asking a question. `pending.length` matters — a row's own 更新 settles
+			// that row while other updatable servers are still waiting, and hiding
+			// the batch button then would take away the only control that reaches
+			// them.
+			const queueSettled = jobsFinished && jobsFailed === 0 && pending.length === 0;
+			// A row's own slice of the queue: is it in this run, is it the one
+			// being rewritten right now, and has the run already answered it. The
+			// answer travels with the item so the row can stop offering work that
+			// is done without waiting for the listing to catch up.
+			const jobOf = (server) => {
+				const key = rowKey(server);
+				const item = (updateJobs?.items ?? []).find((it) => it.key === key);
+				if (!item) return null;
+				return { ...item, answered: answered({ key, name: server.name }), outcome: updateAnswers[key]?.answer };
+			};
+			const JOB_ICON = { pending: "○", running: "◌", updated: "✓", skipped: "·", failed: "✗" };
+			const JOB_TEXT = { pending: "等待中", running: "更新中…" };
+			// One status colour per outcome; the icon is where a reader looks
+			// first in a list of ten, so the colour has to agree with it.
+			const jobIconStyle = (status) => (
+				status === "failed" ? { ...styles.jobIcon, ...styles.jobFailed }
+					: status === "updated" ? { ...styles.jobIcon, ...styles.jobUpdated }
+						: styles.jobIcon
+			);
 
 			const sourceOptions = useMemo(() => {
 				const set = new Set(all.map((s) => s.source || "manual"));
@@ -2538,25 +2981,32 @@ window.__ModuleLoader__.load({
 							createElement("strong", { key: "n", style: styles.pageTitle }, "全局 MCP"),
 							createElement("span", { key: "hd-ver", style: styles.versionChip, title: "插件版本" },
 								`v${CLIENT_VERSION}`),
+							// The plugin's own update lives beside the version it
+							// changes, on both tabs: it is the one action here
+							// that is about this page rather than about the
+							// page's content, and 「检查更新」 is what reveals it.
+							selfUpdate && selfUpdate.updateAvailable
+								? createElement("button", {
+									key: "hd-self", type: "button", className: "omkt-btn omkt-btn-primary",
+									style: { ...styles.button, ...styles.primary, ...styles.chipButton },
+									disabled: busy,
+									title: `把 dsh-overall-mcp 更新到 v${selfUpdate.latest}（${selfUpdate.profileName ?? "本 profile"}）`,
+									onClick: doSelfUpdate,
+								}, busy ? "更新中…" : `更新到 v${selfUpdate.latest}`)
+								: null,
 						]),
 						createElement("div", { key: "hd-acts", style: styles.headActs }, [
-							// The filled button is a tab's one important action. On
-							// MCP 市场 that is *not* a refresh — the 分类 row already
-							// carries 刷新 — so it appears only when 检查更新 found a
-							// newer release of this plugin, and then it installs it.
-							tab === "market"
-								? selfUpdate && selfUpdate.updateAvailable
-									? createElement("button", {
-										key: "hd-primary", type: "button", className: "omkt-btn omkt-btn-primary",
-										style: { ...styles.button, ...styles.primary }, disabled: busy,
-										title: `更新到 v${selfUpdate.latest}（${selfUpdate.profileName ?? "本 profile"}）`,
-										onClick: doSelfUpdate,
-									}, busy ? "更新中…" : "更新 overall-mcp")
-									: null
-								: createElement("button", {
+							// The filled button is the *registry* tab's one
+							// important action. The market tab has no equivalent
+							// here: its own row already carries 刷新, and the
+							// plugin's self-update now lives beside the version
+							// chip (above) on both tabs — one action, one place.
+							tab === "registry"
+								? createElement("button", {
 									key: "hd-primary", type: "button", className: "omkt-btn omkt-btn-primary",
 									style: { ...styles.button, ...styles.primary }, disabled: busy, onClick: doScan,
-								}, "重新扫描宿主机"),
+								}, "重新扫描宿主机")
+								: null,
 							// Both tabs keep the other tab's primary action one click
 							// away, as a text button: switching tabs to rescan is
 							// a detour nobody wants to discover.
@@ -2616,6 +3066,7 @@ window.__ModuleLoader__.load({
 
 				error ? createElement("div", { key: "error", style: styles.error }, error) : null,
 				message ? createElement("div", { key: "message", style: styles.message }, message) : null,
+				registryError ? createElement("div", { key: "regwarn", style: styles.registryWarn }, `⚠ ${registryError}`) : null,
 
 				// ---------------- registry tab ----------------
 				// Marked with the same `scroller` hook as the market's card box:
@@ -2634,6 +3085,104 @@ window.__ModuleLoader__.load({
 						stats.failed ? createElement("span", { key: "f", style: styles.error }, `${stats.failed} 连接异常`) : null,
 					]),
 					!error && servers === null ? createElement("div", { key: "loading", style: styles.message }, "加载中…") : null,
+					// 来源已删除 — records the last scan proved no config file on
+					// this machine still defines. They are one kind of leftover (the
+					// old `name-<source>` rename left four of them), so they get one
+					// action for the whole set. The bar says why they are listed at
+					// all rather than quietly dropping them: a record nobody wrote
+					// deserves an explanation, not a silent edit of the registry.
+					orphans.length > 0
+						? createElement("div", { key: "orphanbar", style: styles.updateBar }, [
+							createElement("span", { key: "msg", style: styles.jobMsg, title: orphans.map((s) => `${s.name}（${sourceLabel(s.source)}）`).join("\n") },
+								`${orphans.length} 条记录的来源配置里已经没有它们了（${[...new Set(orphans.map((s) => sourceLabel(s.source)))].join("、")}）`),
+							createElement("span", { key: "spacer", style: styles.spacer }),
+							createElement("button", {
+								key: "clean", type: "button", className: "omkt-btn",
+								style: styles.button, disabled: busy,
+								title: "从本插件的注册表里删掉这些记录；它们已经没有配置文件定义，也不会提供任何工具",
+								onClick: doCleanOrphans,
+							}, `清理 ${orphans.length} 条`),
+						])
+						: null,
+					// 更新队列 — under 已注册, because those are the rows it
+					// updates. It appears only while there is something to
+					// update or something to report, so an idle page keeps no
+					// furniture: a listing whose updates were all answered is
+					// not 「something to update」 any more.
+					pending.length > 0 || updateJobs
+						? createElement("div", { key: "updatebar", style: styles.updateBar }, [
+							createElement("button", {
+								key: "all", type: "button",
+								className: queueSettled ? "omkt-btn omkt-btn-done" : "omkt-btn omkt-btn-primary",
+								style: { ...styles.button, ...styles.primary },
+								// No updatable server is not an error state: the
+								// button stays in place and disabled, because it is
+								// the affordance 「检查更新」 fills in — and once this
+								// queue settles it turns into the outcome itself.
+								disabled: busy || pending.length === 0 || queueSettled,
+								title: pending.length
+									? `依次更新这 ${pending.length} 台有可用更新的服务器`
+									: "当前没有检测到可更新的服务器（先点「检查更新」）",
+								onClick: doUpdateAll,
+							}, updateRunning && updateJobs.total > 1
+								? "更新中…"
+								: queueSettled
+									// The queue answered its own question: this slot
+									// reports the outcome instead of offering the
+									// same batch again off a stale count.
+									? `✓ 已完成${jobsUpdated > 0 ? `（${jobsUpdated} 台已更新）` : "（无需更新）"}`
+									: `全部更新${pending.length ? `（${pending.length}）` : ""}`),
+							updateJobs
+								? [
+									createElement("div", {
+										key: "track", className: `omkt-progress${updateRunning ? " omkt-progress-live" : ""}`,
+										// A finished queue has no progress left to
+										// report: the outcome above says the rest,
+										// and a full black track next to 「已完成」
+										// still reads as work in flight.
+										style: queueSettled ? { ...styles.progressTrack, display: "none" } : styles.progressTrack, role: "progressbar",
+										"aria-valuemin": 0, "aria-valuemax": updateJobs.total,
+										"aria-valuenow": updateJobs.done,
+										"aria-label": `MCP 更新进度：已完成 ${updateJobs.done}/${updateJobs.total}`,
+									}, createElement("div", {
+										key: "fill",
+										style: { ...styles.progressFill, width: `${updateProgress}%` },
+									})),
+									createElement("span", { key: "text", style: styles.progressText },
+										updateRunning
+											? `${updateJobs.done}/${updateJobs.total} · 正在更新 ${updateJobs.current} · 已用时 ${updateElapsed}s`
+											: `已用时 ${updateElapsed}s`),
+									updateJobs.items.length > 1
+										? createElement("button", {
+											key: "togglejobs", type: "button", className: "omkt-btn omkt-btn-text",
+											style: styles.textBtn, "aria-expanded": jobsOpen ? "true" : "false",
+											onClick: () => setJobsOpen((v) => !v),
+										}, jobsOpen ? "收起明细" : "展开明细")
+										: null,
+									// A finished bar is dismissible; a running one is
+									// not, because hiding it would hide the only
+									// sign that a long rewrite is still in flight.
+									updateRunning ? null : createElement("button", {
+										key: "clearjobs", type: "button", className: "omkt-btn omkt-btn-text",
+										style: styles.textBtn,
+										onClick: closeJobs,
+									}, "关闭进度"),
+									updateJobs.items.length > 1 && jobsOpen
+										? createElement("div", { key: "jobs", className: "omkt-jobs", style: styles.jobList },
+											updateJobs.items.map((it) => createElement("div", {
+												key: it.key ?? it.name, style: styles.jobRow,
+											}, [
+												createElement("span", { key: "icon", style: jobIconStyle(it.status) },
+													JOB_ICON[it.status] ?? "·"),
+												createElement("span", { key: "n", style: styles.jobName }, it.name),
+												createElement("span", { key: "m", style: styles.jobMsg },
+													it.message || JOB_TEXT[it.status] || ""),
+											])))
+										: null,
+								]
+								: null,
+						])
+						: null,
 					servers ? createElement("div", { key: "filters", style: styles.filters }, [
 						createElement("select", {
 							key: "source", className: `omkt-select${sourceFilter ? " omkt-select-on" : ""}`,
@@ -2673,7 +3222,7 @@ window.__ModuleLoader__.load({
 						? createElement("div", { key: "nomatch", style: styles.message }, "没有符合筛选条件的服务器。")
 						: null,
 					...groups.map(([source, list]) => createElement(SourceGroup, {
-						key: source, source, servers: list, busy,
+						key: source, source, servers: list, busy, jobOf,
 						collapsed: collapsed.has(source),
 						onToggleCollapsed: () => toggleCollapsed(source),
 						onToggleSource: doToggleSource,

@@ -3,7 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   normalizeServer, extractJsonServers, extractCodexTomlServers,
-  scanHost, mergeIntoRegistry,
+  scanHost, mergeIntoRegistry, scannedSources, findOrphans,
+  setMountHolder, clearMountHolder,
 } from '../lib/scanner.js';
 
 test('normalizeServer stdio', () => {
@@ -96,4 +97,123 @@ test('mergeIntoRegistry updates an imported entry in place and keeps local state
   const same = mergeIntoRegistry(registry, [{ ...found[0], command: 'old', args: [] }]);
   assert.deepEqual(same.updated, []);
   assert.ok(same.skipped.includes('cur'), 'an identical re-scan is a no-op');
+});
+
+test('mergeIntoRegistry keeps the document keys a scan does not own', () => {
+  // `favorites` lives beside `servers` in the same document. The merge used to
+  // return a fresh `{version, servers}` object, and the caller saves what it
+  // returns — so one scan silently un-starred every market bookmark.
+  const registry = {
+    version: 1,
+    favorites: ['smithery:brave', 'official:ac.snag/snag'],
+    scanned: { at: '2026-01-01T00:00:00.000Z', sources: ['cursor'], unreadable: [] },
+    servers: [],
+  };
+  const r = mergeIntoRegistry(registry, [{ name: 'cur', source: 'cursor', transport: 'stdio', command: 'npx', args: [] }]);
+  assert.deepEqual(r.registry.favorites, ['smithery:brave', 'official:ac.snag/snag']);
+  assert.deepEqual(r.registry.servers.map((s) => s.name), ['cur']);
+  assert.equal(registry.servers.length, 0, 'the input registry itself is still untouched');
+  // A registry with nothing but `servers` (or nothing at all) still works.
+  assert.deepEqual(mergeIntoRegistry(null, []).registry, { version: 1, servers: [] });
+});
+
+// The reported state: a config that defines `rea` while an entry named `rea`
+// already existed left `rea-cursor` rows behind, all pinned to a stale version.
+// They are found by comparing the registry against what the last scan actually
+// read — but only the ones that mount nothing. The row that is holding a mount
+// serves tools (on this machine: `rea-cursor` at 6.5.0, the `mcp__rea-cursor__*`
+// namespace), and no config file mentioning it is not a reason to take it away.
+test('findOrphans names imported entries their own source no longer defines', () => {
+  const registry = {
+    version: 1,
+    servers: [
+      { name: 'rea', source: 'cursor', transport: 'stdio', command: 'cmd.exe', args: ['/d', '/c', 'npx', '-y', 'rea-agents@6.1.0', 'mcp'] },
+      { name: 'rea-cursor', source: 'cursor', transport: 'stdio', command: 'cmd.exe', args: [], serverName: 'rea-cursor' },
+      { name: 'rea-cursor', source: 'cursor', transport: 'stdio', command: 'cmd.exe', args: [] },
+      { name: 'tayily-mcp', source: 'claude-desktop', transport: 'stdio', command: 'npx', args: [] },
+      { name: 'hand', source: 'manual', transport: 'stdio', command: 'x', args: [] },
+    ],
+  };
+  const scanned = { at: '2026-10-15T13:19:28.457Z', sources: { cursor: ['rea'], 'claude-desktop': ['tayily-mcp'] }, unreadable: [] };
+  const orphans = findOrphans(registry, scanned);
+  assert.deepEqual(orphans.map((s) => s.name), ['rea-cursor']);
+  assert.equal(orphans[0], registry.servers[2], 'the inert row is named');
+  assert.ok(!orphans.includes(registry.servers[1]),
+    'the row that holds a mount is left alone: it is the entry serving the tools');
+});
+
+test('findOrphans refuses to judge a source the scan could not read', () => {
+  const registry = {
+    version: 1,
+    servers: [
+      { name: 'solo', source: 'windsurf', transport: 'stdio', command: 'x', args: [] },
+      { name: 'ghost', source: 'cursor', transport: 'stdio', command: 'x', args: [] },
+    ],
+  };
+  // windsurf was never read (no file), cursor was read and did not define `ghost`.
+  assert.deepEqual(findOrphans(registry, { sources: { cursor: ['rea'] } }).map((s) => s.name), ['ghost']);
+  // No scan at all: nothing can be proven, so nothing is flagged.
+  assert.deepEqual(findOrphans(registry, null), []);
+  assert.deepEqual(findOrphans(registry, {}), []);
+});
+
+test('findOrphans never names a row that is holding a mount', () => {
+  const registry = {
+    version: 1,
+    servers: [
+      // No config file mentions this one, and it is the only row for the name:
+      // sweeping it would disconnect the tools it is serving right now.
+      { name: 'rea-cursor', source: 'cursor', transport: 'stdio', command: 'cmd.exe', args: [], serverName: 'rea-cursor' },
+    ],
+  };
+  assert.deepEqual(findOrphans(registry, { sources: { cursor: ['rea'] } }), []);
+  // An empty `serverName` is the "not mounted" case, so that same row is swept
+  // once it really has no mount behind it.
+  assert.deepEqual(
+    findOrphans({ servers: [{ ...registry.servers[0], serverName: '' }] }, { sources: { cursor: ['rea'] } }).map((s) => s.name),
+    ['rea-cursor'],
+  );
+});
+
+// `fibers` is keyed by name, so one row per name holds the mount — but a run of
+// per-row 「更新」 on four same-named rows stamped three of them, and findOrphans
+// reads that stamp to decide which rows are still alive. Exclusive or absent.
+test('setMountHolder keeps exactly one row of a duplicated name marked', () => {
+  const rows = [
+    { name: 'rea-cursor', serverName: 'rea-cursor' },
+    { name: 'rea-cursor' },
+    { name: 'other', serverName: 'other' },
+  ];
+  setMountHolder(rows, 'rea-cursor', rows[1], 'rea-cursor');
+  assert.equal(rows[0].serverName, undefined, 'the previous holder gives the mark up');
+  assert.equal(rows[1].serverName, 'rea-cursor');
+  assert.equal(rows[2].serverName, 'other', 'another name is none of this call\u2019s business');
+  clearMountHolder(rows, 'rea-cursor');
+  assert.equal(rows[0].serverName, undefined);
+  assert.equal(rows[1].serverName, undefined);
+});
+
+test('an inert duplicate of a mounted name is still swept', () => {
+  const rows = [
+    { name: 'rea-cursor', source: 'cursor', transport: 'stdio', command: 'cmd.exe', args: [] },
+    { name: 'rea-cursor', source: 'cursor', transport: 'stdio', command: 'cmd.exe', args: [] },
+  ];
+  setMountHolder(rows, 'rea-cursor', rows[0], 'rea-cursor');
+  const scanned = { sources: { cursor: ['rea'] } };
+  assert.deepEqual(findOrphans({ servers: rows }, scanned), [rows[1]]);
+  // With the mount gone, both rows are leftovers and both are sweepable.
+  clearMountHolder(rows, 'rea-cursor');
+  assert.deepEqual(findOrphans({ servers: rows }, scanned), rows);
+});
+
+test('scannedSources separates "read and empty" from "could not read"', () => {
+  const read = scannedSources([
+    { app: 'cursor', file: '/h/.cursor/mcp.json', serverNames: ['cur'] },
+    { app: 'vscode', file: '/h/Code/User/mcp.json', serverNames: [] },
+    { app: 'windsurf', file: '/h/.codeium/windsurf/mcp_config.json', error: 'not-found' },
+    { app: 'gemini-cli', file: '/h/.gemini/settings.json', error: 'EACCES: permission denied' },
+  ]);
+  assert.deepEqual(read.sources, { cursor: ['cur'], vscode: [] });
+  assert.equal('windsurf' in read.sources, false, 'a missing file is unknown, not empty');
+  assert.deepEqual(read.unreadable, ['/h/.gemini/settings.json']);
 });

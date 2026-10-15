@@ -26,6 +26,21 @@ test('httpStatusFor maps an upstream registry failure to 502', () => {
   assert.equal(httpStatusFor(new Error('version lookup failed for left-pad: ETIMEDOUT')), 502);
 });
 
+// Both of these are the panel racing itself: the row was removed or re-scanned
+// between the render and the click. Answering 500 made a routine retry look like
+// a plugin fault, and the guard logs 5xx.
+test('httpStatusFor maps a row that moved under the caller to 409', () => {
+  assert.equal(httpStatusFor(new Error('ambiguous server name: rea-cursor（4 条同名记录）；请带上 slot')), 409);
+  assert.equal(httpStatusFor(new Error('stale entry: rea-cursor（注册表已变化，请刷新后重试）')), 409);
+});
+
+// A conflict with state the caller did not see: the name is already owned by a
+// hand-added record, so the install is refused instead of replacing it. 400
+// would blame the caller's payload; 500 would send a maintainer after a bug.
+test('httpStatusFor maps a manual-entry collision to 409', () => {
+  assert.equal(httpStatusFor(new Error('manual entry fs: 这是手工添加的记录，安装不会覆盖它；请先移除它，或带 overwrite=true 明确替换')), 409);
+});
+
 test('httpStatusFor falls back to 500 for anything unrecognised', () => {
   assert.equal(httpStatusFor(new Error('socket hang up')), 500);
   assert.equal(httpStatusFor('a thrown string'), 500);

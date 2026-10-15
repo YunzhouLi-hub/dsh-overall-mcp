@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   splitPackageSpec, packageSpec, parsePackageInvocation, compareVersions,
-  pinArgs, checkEntryUpdate, checkAllUpdates,
+  pinArgs, checkEntryUpdate, checkAllUpdates, checkDescribesEntry,
 } from '../lib/updates.js';
 
 test('splitPackageSpec handles plain and scoped specs', () => {
@@ -99,4 +99,65 @@ test('checkAllUpdates summarises the registry', async () => {
   assert.equal(r.checked, 2);
   assert.equal(r.updatable, 2);
   assert.equal(r.entries.find((e) => e.name === 'graph').detectable, false);
+});
+
+// A verdict is written for the entry as it was, and it names the version it saw.
+// The registry in the field held an entry pinned to 6.5.0 that still carried the
+// check written when it pinned 6.1.0, so the row advertised 「可更新 → 6.5.0」 —
+// an update to the version it was already running.
+test('checkDescribesEntry keeps a verdict that still matches the pinned version', () => {
+  const entry = { transport: 'stdio', command: 'npx', args: ['-y', 'rea-agents@6.1.0'] };
+  const stored = { at: '2026-10-15T05:19:28.457Z', current: '6.1.0', latest: '6.5.0', updateAvailable: true };
+  assert.equal(checkDescribesEntry(entry, stored), true);
+});
+
+test('checkDescribesEntry refuses a verdict written for a different pin', () => {
+  // The entry has since moved to 6.5.0 (a re-import from the client's config),
+  // and the stored verdict still describes the 6.1.0 launch.
+  const entry = { transport: 'stdio', command: 'npx', args: ['-y', 'rea-agents@6.5.0'] };
+  const stored = { at: '2026-10-15T05:19:28.457Z', current: '6.1.0', latest: '6.5.0', updateAvailable: true };
+  assert.equal(checkDescribesEntry(entry, stored), false);
+});
+
+test('checkDescribesEntry keeps a not-checkable note and an unpinned verdict', () => {
+  const direct = { transport: 'stdio', command: 'codegraph', args: ['serve', '--mcp'] };
+  assert.equal(checkDescribesEntry(direct, { detectable: false, reason: 'not launched through a package runner' }), true);
+  const unpinned = { transport: 'stdio', command: 'npx', args: ['-y', 'rea-agents'] };
+  assert.equal(checkDescribesEntry(unpinned, { current: '6.5.0', latest: '6.5.0', updateAvailable: false }), true);
+  assert.equal(checkDescribesEntry(direct, null), false);
+});
+
+// The host writes each verdict back to the entry it was computed FROM, by
+// position. It used to match by name, so a config that defines the same server
+// twice stamped the first entry with the last verdict for that name and left the
+// others with none — the other half of the 「可更新 → 6.5.0」 report.
+test('checkAllUpdates keeps one result per entry, even when names repeat', async () => {
+  const entries = [
+    { name: 'rea-cursor', transport: 'stdio', command: 'npx', args: ['-y', 'rea-agents@6.5.0'] },
+    { name: 'rea-cursor', transport: 'stdio', command: 'npx', args: ['-y', 'rea-agents@6.1.0'] },
+  ];
+  const r = await checkAllUpdates(entries, { fetchImpl: npmFetch('6.5.0') });
+  assert.equal(r.entries.length, 2);
+  assert.deepEqual(r.entries.map((e) => e.current), ['6.5.0', '6.1.0']);
+  assert.deepEqual(r.entries.map((e) => e.updateAvailable), [false, true]);
+});
+
+// A lookup that errored is not a verdict of 「已是最新」: `latest` is null and
+// `error` says why. The panel's summary only knew `checked`/`updatable`, so a
+// machine with no registry access reported every server as up to date.
+test('checkAllUpdates counts failed lookups apart from up-to-date ones', async () => {
+  const entries = [
+    { name: 'ok', transport: 'stdio', command: 'npx', args: ['-y', 'good-mcp@1.0.0'] },
+    { name: 'off', transport: 'stdio', command: 'npx', args: ['-y', 'ghost-mcp@1.0.0'] },
+  ];
+  const flaky = async (url) => {
+    if (String(url).includes('ghost-mcp')) throw new Error('offline');
+    return { ok: true, json: async () => ({ 'dist-tags': { latest: '1.0.0' } }) };
+  };
+  const r = await checkAllUpdates(entries, { fetchImpl: flaky });
+  assert.equal(r.checked, 2);
+  assert.equal(r.updatable, 0);
+  assert.equal(r.failed, 1);
+  assert.equal(r.entries.find((e) => e.name === 'off').error, 'offline');
+  assert.equal(r.entries.find((e) => e.name === 'ok').latest, '1.0.0');
 });

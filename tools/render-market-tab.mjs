@@ -573,22 +573,26 @@ assert.ok(registryNodes.some((n) => n.type === 'button' && textOf(n) === '重新
   check.props.onClick();
   const afterCheck = walk(await render());
   assert.ok(calls.includes('POST /updates'), '检查更新 asked the host');
-  const updateBtn = findByKey(afterCheck, 'hd-primary')[0];
-  assert.ok(updateBtn, 'an available plugin update surfaces a primary button');
-  assert.equal(textOf(updateBtn), '更新 overall-mcp', 'and it is named after the plugin, not the market');
+  const updateBtn = findByKey(afterCheck, 'hd-self')[0];
+  assert.ok(updateBtn, 'an available plugin update surfaces a button beside the version chip');
+  assert.equal(textOf(updateBtn), '更新到 v0.2.0', 'and it names the version it installs');
   assert.match(String(updateBtn.props.title ?? ''), /0\.2\.0/, 'the target version is in the title');
-  console.log('page head renders: brand mark, title + version, sub-line, update-only primary ✓');
+  // One action, one place: the chip carries the self-update on both tabs, so
+  // the market tab must not grow a second filled button for the same click.
+  assert.equal(findByKey(afterCheck, 'hd-primary').length, 0,
+    'the market tab does not duplicate the self-update as a primary button');
+  console.log('page head renders: brand mark, title + version, sub-line, chip self-update ✓');
 }
 
 // --- 6b. clicking that button installs the plugin and says a restart is due --
 {
   const market = walk(await render());
-  const updateBtn = findByKey(market, 'hd-primary')[0];
+  const updateBtn = findByKey(market, 'hd-self')[0];
   assert.ok(updateBtn, 'the update button is still there to click');
   updateBtn.props.onClick();
   const afterUpdate = walk(await render());
   assert.ok(calls.includes('POST /self-update'), 'the button ran the self-update route');
-  assert.equal(findByKey(afterUpdate, 'hd-primary').length, 0, 'the button clears once installed');
+  assert.equal(findByKey(afterUpdate, 'hd-self').length, 0, 'the button clears once installed');
   const message = findByKey(afterUpdate, 'message')[0];
   assert.ok(message, 'an outcome message is shown');
   assert.match(textOf(message), /重启 DSH/, 'and it says the change lands after a restart');

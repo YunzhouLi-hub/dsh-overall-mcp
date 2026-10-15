@@ -19,9 +19,9 @@
   },
   "scripts": {
     "lint": "node --check index.js && node --check lib/scanner.js && node --check lib/catalog.js && node --check lib/about.js && node --check lib/media.js && node --check lib/updates.js && node --check lib/self-update.js && node --check lib/installs.js && node --check lib/schema-guard.js && node --check lib/http-status.js && node --check client/client.js",
-    "test": "node --test test/scanner.test.mjs test/catalog.test.mjs test/about.test.mjs test/schema-guard.test.mjs test/http-status.test.mjs test/updates.test.mjs test/media.test.mjs test/self-update.test.mjs test/installs.test.mjs",
+    "test": "node --test test/scanner.test.mjs test/catalog.test.mjs test/about.test.mjs test/schema-guard.test.mjs test/http-status.test.mjs test/updates.test.mjs test/media.test.mjs test/self-update.test.mjs test/installs.test.mjs test/index.test.mjs",
     "test:layout": "node tools/layout-probe.mjs && node tools/shot.mjs",
-    "test:probes": "node tools/render-card.mjs && node tools/render-detail.mjs && node tools/render-market-tab.mjs && node tools/probe-server-about.mjs && node tools/client-smoke.mjs && node tools/verify-css.mjs && node tools/verify-sort-paging.mjs",
+    "test:probes": "node tools/render-card.mjs && node tools/render-detail.mjs && node tools/render-market-tab.mjs && node tools/probe-server-about.mjs && node tools/probe-update-queue.mjs && node tools/client-smoke.mjs && node tools/verify-css.mjs && node tools/verify-sort-paging.mjs",
     "verify": "npm run lint && npm test && npm run test:probes && npm run test:layout"
   },
   "dsh": {

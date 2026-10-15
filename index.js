@@ -15,7 +15,7 @@ import path from 'node:path';
 import * as mcpClient from '@deepseek-ai/dsh-mcp-client';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { describeAbout, toolNamesFor, aboutSourceLabel, needsInstructionsRead } from './lib/about.js';
-import { scanHost, mergeIntoRegistry } from './lib/scanner.js';
+import { scanHost, mergeIntoRegistry, scannedSources, findOrphans, setMountHolder, clearMountHolder } from './lib/scanner.js';
 import { browseCatalog, catalogItemToEntry, fetchRepoStats } from './lib/catalog.js';
 import {
   readInstalls, writeInstalls, recordInstallIn, installKeyOf,
@@ -24,7 +24,7 @@ import {
 import { collectRepoMedia } from './lib/media.js';
 import { httpStatusFor } from './lib/http-status.js';
 import { sanitizeToolDefinition } from './lib/schema-guard.js';
-import { checkAllUpdates, checkEntryUpdate, parsePackageInvocation, pinArgs } from './lib/updates.js';
+import { checkAllUpdates, checkDescribesEntry, checkEntryUpdate, parsePackageInvocation, pinArgs } from './lib/updates.js';
 import { checkSelfUpdate, updateSelf } from './lib/self-update.js';
 
 export const name = 'overall-mcp';
@@ -42,12 +42,42 @@ function dataDir() {
   return path.join(home, 'overall-mcp');
 }
 
-async function readJson(file, fallback) {
-  try { return JSON.parse(await fs.readFile(file, 'utf8')); } catch { return fallback; }
-}
+/**
+ * Write through a temp file + rename, so a crash mid-write cannot leave a
+ * half-written document where a parseable one used to be. `lib/installs.js`
+ * already did this for the install counter; the registry — the one file whose
+ * silent loss unmounts every server — was still written in place.
+ */
 async function writeJson(file, value) {
   await fs.mkdir(path.dirname(file), { recursive: true });
-  await fs.writeFile(file, JSON.stringify(value, null, 2), 'utf8');
+  const tmp = `${file}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(value, null, 2), 'utf8');
+  await fs.rename(tmp, file);
+}
+
+/**
+ * Read the registry, keeping three cases apart that used to collapse into one
+ * `null`: no file at all (a real first run), a file that does not parse or does
+ * not look like a registry (damaged — the caller quarantines the bytes and says
+ * so), and a valid document.
+ */
+async function readRegistryDocument(file) {
+  let raw;
+  try {
+    raw = await fs.readFile(file, 'utf8');
+  } catch (err) {
+    if (err?.code === 'ENOENT') return { registry: null, damaged: null };
+    return { registry: null, damaged: String(err?.message ?? err) };
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.servers)) {
+      return { registry: null, damaged: 'JSON 里没有 servers 数组' };
+    }
+    return { registry: parsed, damaged: null };
+  } catch (err) {
+    return { registry: null, damaged: String(err?.message ?? err) };
+  }
 }
 
 /** Slugify a display name into a legal mcp-client serverName (≤32 chars). */
@@ -143,8 +173,21 @@ export async function apply(ctx) {
   const installsFile = path.join(dir, 'installs.json');
   let installs = await readInstalls(installsFile);
 
-  let registry = await readJson(registryFile, null);
-  const firstRun = registry === null;
+  const loaded = await readRegistryDocument(registryFile);
+  let registry = loaded.registry;
+  // A damaged file is not a first run: the difference matters, because treating
+  // it as one and then saving would overwrite the only copy of the user's
+  // servers with an empty document. The bytes are quarantined first, and the
+  // reason is carried into every payload so the panel can say what happened.
+  let registryLoadError = null;
+  if (loaded.damaged) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backup = `${registryFile}.corrupt-${stamp}`;
+    try { await fs.copyFile(registryFile, backup); } catch { /* keep going: reporting beats failing */ }
+    registryLoadError = `注册表文件无法解析（${loaded.damaged}），本次以空注册表启动；原文件已备份为 ${path.basename(backup)}`;
+    log?.warn?.(`overall-mcp: ${registryLoadError}`);
+  }
+  const firstRun = registry === null && loaded.damaged === null;
   if (!registry) registry = { version: REGISTRY_VERSION, servers: [] };
   // Favourite market entries, keyed exactly like the client's React key
   // (`<source>:<id|title>`) so the card and the stored state cannot disagree.
@@ -160,6 +203,27 @@ export async function apply(ctx) {
   async function save() {
     registry.version = REGISTRY_VERSION;
     await writeJson(registryFile, registry);
+  }
+
+  /**
+   * One promise chain per plugin instance, for every action that reads the whole
+   * registry, awaits something slow (a scan of the host, an `npx` mount, a
+   * registry lookup) and then writes the document back.
+   *
+   * Two such actions interleaving means the later `save()` writes a snapshot
+   * taken before the earlier one's change: a scan that started before an install
+   * — or a 「检查更新」 verdict that landed while a row was being removed — used
+   * to be able to drop it. The queue makes the read-modify-write pairs atomic
+   * with respect to each other; plain reads (the server list, the catalogue) do
+   * not hold the queue and stay parallel.
+   */
+  let mutationQueue = Promise.resolve();
+  function serialized(fn) {
+    return (...args) => {
+      const run = mutationQueue.then(() => fn(...args), () => fn(...args));
+      mutationQueue = run.then(() => {}, () => {});
+      return run;
+    };
   }
 
   /**
@@ -223,7 +287,10 @@ export async function apply(ctx) {
     }
 
     fibers.set(entry.name, fiber);
-    entry.serverName = serverName;
+    // Exactly one row per name may carry the mount marker: `fibers` is keyed by
+    // name, so the row that mounted owns the name and every sibling gives the
+    // mark up (see lib/scanner.js setMountHolder).
+    setMountHolder(registry.servers, entry.name, entry, serverName);
     entry.connectError = undefined;
     entry.providedExternally = false;
     if (timedOut) {
@@ -231,8 +298,18 @@ export async function apply(ctx) {
       // `overall_mcp_list` / page refresh shows the settled state.
       fiber.await().then(
         () => log?.info?.(`overall-mcp: ${entry.name} finished connecting in the background`),
-        (err) => {
+        async (err) => {
           entry.connectError = String(err?.message ?? err);
+          // The 8 s deadline only deferred this failure. Leaving the fiber in
+          // the map made it permanent: every retry path asks `fibers.has(name)`
+          // first (syncFiber, 停用→启用, doScan), so the row kept reporting
+          // 已连接 while no tools existed and only 更新 or a plugin restart
+          // could repair it.
+          if (fibers.get(entry.name) === fiber) {
+            fibers.delete(entry.name);
+            clearMountHolder(registry.servers, entry.name);
+            try { await fiber.dispose(); } catch { /* already gone */ }
+          }
           log?.warn?.(`overall-mcp: ${entry.name} failed to connect: ${entry.connectError}`);
         },
       );
@@ -244,6 +321,9 @@ export async function apply(ctx) {
     const fiber = fibers.get(name);
     if (!fiber) return;
     fibers.delete(name);
+    // Nothing is mounted for this name any more, so no row of it may keep
+    // claiming the mount that findOrphans() protects.
+    clearMountHolder(registry.servers, name);
     try { await fiber.dispose(); } catch { /* already gone */ }
   }
 
@@ -257,7 +337,8 @@ export async function apply(ctx) {
   }
 
   function publicList() {
-    return registry.servers.map((s) => {
+    const orphans = new Set(orphanEntries());
+    return registry.servers.map((s, slot) => {
       const enabled = s.enabled !== false;
       const connected = fibers.has(s.name);
       const providedExternally = !connected && s.providedExternally === true;
@@ -265,10 +346,24 @@ export async function apply(ctx) {
         : providedExternally ? 'provided-externally'
           : connected ? 'connected'
             : enabled ? 'idle' : 'stopped';
+      // A stored verdict describes the entry as it was written, not as it is now.
+      // If this entry's pinned version has moved since (a re-import from the
+      // client's config, a hand edit), the badge belongs to a different launch
+      // and advertising it would offer an update the entry already runs. See
+      // checkDescribesEntry().
+      const stored = s.updateCheck ?? null;
+      const describesThisEntry = checkDescribesEntry(s, stored);
       return {
         name: s.name,
+        // Position in the registry. Two rows can share a name (one client config
+        // may define the same server twice), so anything that has to act on "the
+        // row that was clicked" needs a per-row identity, not a name.
+        slot,
         transport: s.transport,
         source: s.source,
+        // The last scan read this entry's source and it no longer defines a
+        // server by this name: the row is a leftover, not a config anyone has.
+        orphan: orphans.has(s),
         enabled,
         connected,
         status,
@@ -279,8 +374,8 @@ export async function apply(ctx) {
           const invocation = parsePackageInvocation(s);
           return invocation ? { manager: invocation.manager, name: invocation.pkg, version: invocation.version } : null;
         })(),
-        updateAvailable: s.updateCheck?.updateAvailable === true,
-        update: s.updateCheck ?? null,
+        updateAvailable: describesThisEntry && stored.updateAvailable === true,
+        update: describesThisEntry ? stored : null,
         updatedAt: s.updatedAt,
         // 「这个 MCP 是干什么的」: the sentence shown after the name. Null until
         // refreshAbout() has something honest to say.
@@ -436,11 +531,15 @@ export async function apply(ctx) {
    * Every payload that carries the server list goes through here, so a row's
    * purpose line is present (or upgraded) by the time the client renders it.
    * Cheap when nothing needs refreshing: refreshAbout() then returns at once.
+   *
+   * A damaged registry file rides along as `registryError` (see
+   * `readRegistryDocument`): the panel would otherwise show an empty list that
+   * looks exactly like "you have never added a server".
    */
   async function serversPayload() {
     await refreshAbout();
     const servers = publicList();
-    return { servers };
+    return { servers, ...(registryLoadError ? { registryError: registryLoadError } : {}) };
   }
 
   // First install: scan well-known host MCP configs and import them.
@@ -450,6 +549,7 @@ export async function apply(ctx) {
       const { found, report } = await scanHost({});
       const merged = mergeIntoRegistry(registry, found);
       registry = merged.registry;
+      recordScan(report);
       await save();
       await writeJson(reportFile, { scannedAt: new Date().toISOString(), report });
       log?.info?.(`first-run scan imported ${merged.added.length} servers (skipped ${merged.skipped.length})`);
@@ -460,10 +560,28 @@ export async function apply(ctx) {
 
   // ---- shared management actions (used by model tools AND /api routes) ----
 
-  async function doScan() {
+  /**
+   * What the last scan actually read, kept on the registry so the panel can
+   * still tell a removed entry from an unread file after a restart.
+   *
+   * `mergeIntoRegistry` returns a fresh object, so this must be assigned to the
+   * merged registry rather than to the one that was passed in.
+   */
+  function recordScan(report) {
+    const { sources, unreadable } = scannedSources(report);
+    registry.scanned = { at: new Date().toISOString(), sources, unreadable };
+  }
+
+  /** Entries the last scan proved are gone (see lib/scanner.js findOrphans). */
+  function orphanEntries() {
+    return findOrphans(registry, registry.scanned);
+  }
+
+  async function doScanImpl() {
     const { found, report } = await scanHost({});
     const merged = mergeIntoRegistry(registry, found);
     registry = merged.registry;
+    recordScan(report);
     await save();
     await writeJson(reportFile, { scannedAt: new Date().toISOString(), report });
     const connected = [];
@@ -471,28 +589,53 @@ export async function apply(ctx) {
       const entry = registry.servers.find((s) => s.name === name);
       if (entry && entry.enabled !== false) connected.push({ name, ...(await connect(entry)) });
     }
-    return { added: merged.added, skipped: merged.skipped, connected, scannedFiles: report.length };
+    return {
+      added: merged.added,
+      skipped: merged.skipped,
+      connected,
+      scannedFiles: report.length,
+      orphans: orphanEntries().map((s) => s.name),
+    };
   }
 
-  async function doInstall(item) {
+  async function doInstallImpl(item, { overwrite = false } = {}) {
     const entry = catalogItemToEntry(item);
     if (!entry) throw new Error('item has no installable transport (stdio command or http url)');
     const i = registry.servers.findIndex((s) => s.name === entry.name);
-    if (i >= 0) { await disconnect(entry.name); registry.servers[i] = entry; }
-    else registry.servers.push(entry);
+    if (i >= 0) {
+      const existing = registry.servers[i];
+      // A hand-added row is the user's own configuration — `mergeIntoRegistry`
+      // refuses to overwrite it too, and an install must not be the one path
+      // that silently replaces its command, env and notes with a catalogue
+      // entry. Replacement needs an explicit `overwrite`.
+      if (!overwrite && (!existing.source || existing.source === 'manual')) {
+        throw new Error(`manual entry ${entry.name}: 这是手工添加的记录，安装不会覆盖它；请先移除它，或带 overwrite=true 明确替换`);
+      }
+      await disconnect(entry.name);
+      registry.servers[i] = entry;
+    } else registry.servers.push(entry);
     await save();
-    // Count the install *after* it is in the registry: an entry that failed
-    // validation above never reaches this line, so the counter only ever grows
-    // for installs that actually happened.
-    const installKey = installKeyOf(item, entry.name);
-    const record = recordInstallIn(installs, { key: installKey, name: entry.name });
-    if (record) await writeInstalls(installsFile, installs);
+    // Mount first, count second: a row whose mount failed is in the registry
+    // (the user can retry) but serves nothing, and counting it would make
+    // 「本市场 N 次」 claim installs that never ran.
     const conn = entry.enabled !== false ? await connect(entry) : { ok: true, deferred: true };
+    let record = null;
+    if (conn.ok !== false) {
+      const installKey = installKeyOf(item, entry.name);
+      record = recordInstallIn(installs, { key: installKey, name: entry.name });
+      if (record) await writeInstalls(installsFile, installs);
+    } else {
+      log?.warn?.(`overall-mcp: ${entry.name} was added to the registry but did not mount, so it is not counted as an install`);
+    }
     return {
       installed: entry.name,
-      localInstalls: record?.count ?? 0,
+      localInstalls: record?.count ?? localInstallsOf(installs, item, entry.name),
       servers: (await serversPayload()).servers,
       connect: conn,
+      ...(conn.ok === false ? {
+        counted: false,
+        note: `${entry.name} 已写入注册表，但挂载没有成功，因此没有计入本市场安装数；修好后可用「更新」或重新启用来重试。`,
+      } : {}),
     };
   }
 
@@ -505,13 +648,58 @@ export async function apply(ctx) {
   // one that touched such an entry says so in its reply.
   const externallyProvided = (entry) => entry?.providedExternally === true;
 
-  async function doSetEnabled(name, enabled) {
-    const entry = registry.servers.find((s) => s.name === name);
-    if (!entry) throw new Error(`unknown server: ${name}`);
+  /**
+   * Resolve one registry row for a row action.
+   *
+   * The panel addresses rows by `slot` (their position in the list it rendered)
+   * because names are not unique here. A config that defined `rea` while an
+   * entry named `rea` already existed left three `rea-cursor` rows behind
+   * (the old merge renamed a conflicting import to `name-<source>`), and every
+   * name-keyed action then hit the first match: 移除 on row 7 removed row 2, and
+   * one row's version verdict was written onto another. `from` (the version the
+   * row displayed) is a fallback for a client that rendered before slots
+   * existed. A name that still matches several rows is an error rather than a
+   * guess, because acting on the wrong row deletes real bookkeeping — every row
+   * action (enable, update, remove, and the MCP tools) goes through here, so
+   * none of them can silently take the first twin.
+   */
+  function resolveEntry(name, { slot = null, from = null } = {}) {
+    const matches = registry.servers.filter((s) => s.name === name);
+    if (matches.length === 0) throw new Error(`unknown server: ${name}`);
+    if (Number.isInteger(slot)) {
+      const at = registry.servers[slot];
+      if (at && at.name === name) return at;
+    }
+    if (from != null) {
+      const byVersion = matches.find((s) => (parsePackageInvocation(s)?.version ?? null) === from);
+      if (byVersion) return byVersion;
+    }
+    if (matches.length === 1) return matches[0];
+    throw new Error(`ambiguous server name: ${name}（${matches.length} 条同名记录）；请带上 slot`);
+  }
+
+  /**
+   * Make the fiber for one name match the registry: it exists while at least one
+   * non-disabled row with that name does.
+   *
+   * `fibers` is keyed by serverName (one mcp-client mount per name), so duplicate
+   * rows never had their own fiber — only the first one connected and the rest
+   * reported `already-provided`. Acting on "the entry" therefore cannot just
+   * disconnect the name (that would take the tools away while an enabled row
+   * still claims them) nor just connect (the name may be mounted already).
+   */
+  async function syncFiber(name) {
+    const rows = registry.servers.filter((s) => s.name === name);
+    const wanted = rows.find((s) => s.enabled !== false) ?? null;
+    if (!wanted) return disconnect(name);
+    if (!fibers.has(name)) await connect(wanted);
+  }
+
+  async function doSetEnabledImpl(name, enabled, { slot = null, from = null } = {}) {
+    const entry = resolveEntry(name, { slot, from });
     entry.enabled = enabled;
     await save();
-    if (!enabled) await disconnect(name);
-    else if (!fibers.has(name)) await connect(entry);
+    await syncFiber(name);
     // `enabled: false` still means "this plugin should not mount it"; on a
     // provided-externally entry that was already true, so nothing observable
     // changes and the reply must say so rather than read as "已停用".
@@ -528,15 +716,17 @@ export async function apply(ctx) {
   }
 
   /** Bulk enable/disable every server imported from one source (group switch). */
-  async function doSetSourceEnabled(source, enabled) {
+  async function doSetSourceEnabledImpl(source, enabled) {
     const targets = registry.servers.filter((s) => (s.source ?? 'manual') === source);
     if (targets.length === 0) throw new Error(`unknown source: ${source}`);
     for (const entry of targets) entry.enabled = enabled;
     await save();
-    for (const entry of targets) {
-      if (!enabled) await disconnect(entry.name);
-      else if (!fibers.has(entry.name)) await connect(entry);
-    }
+    // Per *name*, not per row: the same name can be claimed by rows from other
+    // sources, and its fiber must exist while ANY enabled row still wants it.
+    // The old loop disconnected every target name and reconnected only the rows
+    // this source owns, so switching one source off could take the tools away
+    // from a same-named row that still had 「启用」 on.
+    for (const name of new Set(targets.map((s) => s.name))) await syncFiber(name);
     const external = targets.filter(externallyProvided).length;
     return {
       source,
@@ -550,14 +740,22 @@ export async function apply(ctx) {
     };
   }
 
-  async function doRemove(name) {
-    const i = registry.servers.findIndex((s) => s.name === name);
-    if (i < 0) throw new Error(`unknown server: ${name}`);
-    const entry = registry.servers[i];
+  async function doRemoveImpl(name, { slot = null, from = null } = {}) {
+    const entry = resolveEntry(name, { slot, from });
     const external = externallyProvided(entry);
-    await disconnect(name);
-    registry.servers.splice(i, 1);
+    // `resolveEntry` always hands back a row of the live registry, so this is a
+    // guard against a future call path rather than a live case — but the failure
+    // it prevents is the worst one in this file: `splice(-1, 1)` deletes the LAST
+    // row of the registry instead of the intended one, silently, and the caller
+    // still gets `removed: <name>` back.
+    const at = registry.servers.indexOf(entry);
+    if (at < 0) throw new Error(`stale entry: ${name}（注册表已变化，请刷新后重试）`);
+    registry.servers.splice(at, 1);
     await save();
+    // Removing one row of a duplicated name leaves the name mounted as long as
+    // another enabled row still claims it — and unmounts it when this was the
+    // last one — instead of keying off whichever row happened to hold the fiber.
+    await syncFiber(name);
     // Removing a *provided-externally* record deletes this plugin's bookkeeping
     // only; the other mount keeps the tools alive, and the panel must not imply
     // otherwise.
@@ -570,6 +768,36 @@ export async function apply(ctx) {
       } : {}),
       ...(await serversPayload()),
     };
+  }
+
+  /**
+   * Drop the rows the last scan proved are gone.
+   *
+   * These are leftovers of the old `name-<source>` rename in the scanner:
+   * nothing on this machine defines them any more, yet they still counted as
+   * servers, answered to their name for row actions, and (the first of them)
+   * held the fiber for that name while the others sat inert. Only rows the scan
+   * *proved* orphaned are removed — a source that could not be read is never
+   * treated as empty, and a hand-added entry is never touched (see
+   * lib/scanner.js findOrphans).
+   */
+  async function doForgetOrphansImpl() {
+    const orphans = orphanEntries();
+    if (orphans.length === 0) return { removed: [], count: 0, ...(await serversPayload()) };
+    // findOrphans excludes rows that hold a mount, so no fiber can be touched
+    // here: these are pure bookkeeping rows. The one `rea-cursor` row that does
+    // serve tools is never in this list, however few config files mention it.
+    const gone = new Set(orphans);
+    const names = [...new Set(orphans.map((s) => s.name))];
+    const removed = orphans.map((s) => ({
+      name: s.name,
+      source: s.source,
+      version: parsePackageInvocation(s)?.version ?? null,
+    }));
+    registry.servers = registry.servers.filter((s) => !gone.has(s));
+    await save();
+    log?.info?.(`overall-mcp: forgot ${removed.length} orphaned ${removed.length === 1 ? 'entry' : 'entries'} (${names.join(', ')})`);
+    return { removed, count: removed.length, ...(await serversPayload()) };
   }
 
   // ---- package updates ------------------------------------------------------
@@ -591,27 +819,52 @@ export async function apply(ctx) {
 
   const doSelfUpdate = () => updateSelf({ moduleUrl: import.meta.url });
 
-  async function doCheckUpdates() {
+  async function doCheckUpdatesImpl() {
     const entries = registry.servers.filter((s) => s.enabled !== false);
     const result = await checkAllUpdates(entries);
-    for (const check of result.entries) {
-      const entry = registry.servers.find((s) => s.name === check.name);
-      if (!entry) continue;
+    // Write each verdict back to the entry it was computed FROM, positionally.
+    // Matching by name once stamped one entry with a verdict computed from a
+    // different one: a config that defines the same server twice produced four
+    // results for one name, all of them landing on the first entry, which then
+    // advertised a version it did not run while the others kept none at all.
+    result.entries.forEach((check, i) => {
+      const entry = entries[i];
+      if (!entry) return;
       entry.updateCheck = check.detectable
         ? { at: new Date().toISOString(), current: check.current, latest: check.latest, updateAvailable: check.updateAvailable, error: check.error }
         : { at: new Date().toISOString(), detectable: false, reason: check.reason };
-    }
+    });
     await save();
     return { ...result, ...(await serversPayload()) };
   }
 
-  async function doUpdate(name) {
-    const entry = registry.servers.find((s) => s.name === name);
-    if (!entry) throw new Error(`unknown server: ${name}`);
+  /**
+   * Update one registry entry.
+   *
+   * `slot` names the exact row the click came from; `from` is the version that
+   * row was showing. Either one resolves the entry when two rows share a name —
+   * without them, clicking the 6.1.0 row could update its 6.5.0 twin and answer
+   * 「无需更新」 about work nobody asked for.
+   */
+  async function doUpdateImpl(name, { slot = null, from = null } = {}) {
+    // Strict on ambiguity — the same rule every other row action uses. It used
+    // to fall back to the first match here, which meant an MCP client that only
+    // knew the name could update the wrong twin of a duplicated name and report
+    // 「无需更新」 about work nobody asked for. The panel always sends the row's
+    // slot; an agent can do the same now (`slot`/`from` on overall_mcp_update).
+    const entry = resolveEntry(name, { slot, from });
     const check = await checkEntryUpdate(entry);
     if (!check.detectable) throw new Error(`${name} is not launched through a package runner; update it manually`);
     if (check.error) throw new Error(`version lookup failed for ${check.pkg}: ${check.error}`);
     if (!check.updateAvailable) {
+      // Nothing to do — but record the answer the same way 检查更新 does.
+      // Without this the entry keeps whatever badge the PREVIOUS check left
+      // behind, so a stale 「可更新」 (and the client's 「全部更新（N）」 count
+      // built from it) outlives the update that already answered it. An
+      // unpinned runner resolves to the newest release on every launch, so
+      // there is nothing to pin and nothing to advertise either.
+      entry.updateCheck = { at: new Date().toISOString(), current: check.current, latest: check.latest, updateAvailable: false };
+      await save();
       return { name, updated: false, package: check.pkg, version: check.latest, reason: check.unpinned ? 'unpinned runner always resolves to the newest release' : 'already up to date' };
     }
     const previous = check.current;
@@ -704,7 +957,7 @@ export async function apply(ctx) {
    * for callers that do know the state they want (a script, the probe, a future
    * multi-select), which is what a POST to a named resource normally means.
    */
-  async function doToggleFavorite({ key, on } = {}) {
+  async function doToggleFavoriteImpl({ key, on } = {}) {
     if (typeof key !== 'string' || !key.trim()) throw new Error('key required');
     if (on !== undefined && typeof on !== 'boolean') throw new Error('on must be a boolean when given');
     const normalized = key.trim().slice(0, 200);
@@ -873,20 +1126,36 @@ export async function apply(ctx) {
     };
   }
 
+  // ---- the serialized faces of the mutations -------------------------------
+  // Everything below reads the registry, awaits, and writes it back; each of
+  // these is the queue's entry point (see `serialized`). Calls between them stay
+  // on the `*Impl` names, so a nested call can never wait on a queue slot its
+  // own caller is holding. `refreshAbout` is deliberately NOT queued: the read
+  // routes call it too, and it only annotates rows.
+  const doScan = serialized(doScanImpl);
+  const doInstall = serialized(doInstallImpl);
+  const doSetEnabled = serialized(doSetEnabledImpl);
+  const doSetSourceEnabled = serialized(doSetSourceEnabledImpl);
+  const doRemove = serialized(doRemoveImpl);
+  const doForgetOrphans = serialized(doForgetOrphansImpl);
+  const doCheckUpdates = serialized(doCheckUpdatesImpl);
+  const doUpdate = serialized(doUpdateImpl);
+  const doToggleFavorite = serialized(doToggleFavoriteImpl);
+
   // ---- management tools ----------------------------------------------------
   const jsonOut = { schema: { type: 'json' }, render: renderJson };
 
   const defs = [
     defineTool({
       name: 'overall_mcp_scan',
-      description: 'Rescan well-known host MCP config files (Claude Desktop/Code, Cursor, VS Code, Windsurf, Codex CLI, Gemini CLI) and import new servers into the overall MCP registry. Existing entries are never overwritten.',
+      description: 'Rescan well-known host MCP config files (Claude Desktop/Code, Cursor, VS Code, Windsurf, Codex CLI, Gemini CLI) and import new servers into the overall MCP registry. An entry keeps its name: a server imported before is updated in place when its command/args/url changed, and an entry the user added by hand is never overwritten (it is reported as skipped). The answer also lists `orphans`: registry entries whose source was read by this scan and no longer defines that name (they mount nothing but still count as servers and answer to their name). Remove them with overall_mcp_forget_orphans.',
       parameters: {},
       output: jsonOut,
       execute: () => doScan(),
     }),
     defineTool({
       name: 'overall_mcp_list',
-      description: 'List all servers in the overall MCP registry with transport, source, enabled and live connection state.',
+      description: 'List all servers in the overall MCP registry with transport, source, enabled, live connection state, and whether the entry\'s own source still defines it (orphan: true means no config file read by the last scan contains that name).',
       parameters: {},
       output: jsonOut,
       async execute() {
@@ -908,25 +1177,31 @@ export async function apply(ctx) {
     }),
     defineTool({
       name: 'overall_mcp_install',
-      description: 'Install one MCP server from catalog search results (pass the exact item object from overall_mcp_search) and connect it immediately. Its tools appear as mcp__<name>__<tool>. If another mcp-client mount already serves that DSH server name, this plugin records the entry as provided externally instead of mounting a second copy — the tools are already there.',
+      description: 'Install one MCP server from catalog search results (pass the exact item object from overall_mcp_search) and connect it immediately. Its tools appear as mcp__<name>__<tool>. If another mcp-client mount already serves that DSH server name, this plugin records the entry as provided externally instead of mounting a second copy — the tools are already there. A server name that a hand-added entry already owns is refused; pass overwrite: true to replace that record with the catalogue entry.',
       parameters: {
         item: { type: 'json', required: true, description: 'One catalog item object exactly as returned by overall_mcp_search.' },
+        overwrite: { type: 'boolean', description: 'Replace a hand-added entry that already owns this name (default false: refuse instead).' },
       },
       output: jsonOut,
-      async execute({ item }) {
-        return await doInstall(item);
+      async execute({ item, overwrite }) {
+        return await doInstall(item, { overwrite: overwrite === true });
       },
     }),
     defineTool({
       name: 'overall_mcp_set_enabled',
-      description: 'Enable or disable one registry server. Enabling mounts and connects it; disabling unmounts the copy this plugin mounted and disconnects it, so its mcp__<name>__ tools disappear. An entry overall_mcp_list reports as status "provided-externally" is served by a different mcp-client mount that this plugin never mounted: disabling only records the intent, and those tools stay available (the reply carries stillProvided).',
+      description: 'Enable or disable one registry server. Enabling mounts and connects it; disabling unmounts the copy this plugin mounted and disconnects it, so its mcp__<name>__ tools disappear. An entry overall_mcp_list reports as status "provided-externally" is served by a different mcp-client mount that this plugin never mounted: disabling only records the intent, and those tools stay available (the reply carries stillProvided). A name defined more than once is refused unless `slot` picks the row (disabling the wrong row stops real tools).',
       parameters: {
         name: { type: 'string', required: true },
         enabled: { type: 'boolean', required: true },
+        slot: { type: 'integer', description: 'Position of the row in the overall_mcp_list answer, to pick one of several same-named entries.' },
+        from: { type: 'string', description: 'Version the row displayed (fallback for a client that rendered before slots existed).' },
       },
       output: jsonOut,
-      async execute({ name, enabled }) {
-        return await doSetEnabled(name, enabled);
+      async execute({ name, enabled, slot, from }) {
+        return await doSetEnabled(name, enabled, {
+          slot: Number.isInteger(slot) ? slot : null,
+          from: typeof from === 'string' && from !== '' ? from : null,
+        });
       },
     }),
     defineTool({
@@ -964,25 +1239,42 @@ export async function apply(ctx) {
     }),
     defineTool({
       name: 'overall_mcp_update',
-      description: 'Update one registry server to its latest published version (repins the package argument) and reconnect it.',
+      description: 'Update one registry server to its latest published version (repins the package argument) and reconnect it. When several registry entries share a name, pass `slot` (the row position from overall_mcp_list) or `from` (the version that row showed) to name the row; otherwise the name being ambiguous is an error rather than a guess.',
       parameters: {
         name: { type: 'string', required: true },
+        slot: { type: 'integer', description: 'Position of the row in the overall_mcp_list answer, to pick one of several same-named entries.' },
+        from: { type: 'string', description: 'Version the row displayed (fallback for a client that rendered before slots existed).' },
       },
       output: jsonOut,
-      async execute({ name }) {
-        return await doUpdate(name);
+      async execute({ name, slot, from }) {
+        return await doUpdate(name, {
+          slot: Number.isInteger(slot) ? slot : null,
+          from: typeof from === 'string' && from !== '' ? from : null,
+        });
       },
     }),
     defineTool({
       name: 'overall_mcp_remove',
-      description: 'Remove one server from this plugin\'s registry. When this plugin mounted it, the mount is disconnected and its tools disappear. A server that overall_mcp_list reports as status "provided-externally" keeps working: only this plugin\'s registry record is removed (the reply carries stillProvided).',
+      description: 'Remove one server from this plugin\'s registry. When this plugin mounted it, the mount is disconnected and its tools disappear. A server that overall_mcp_list reports as status "provided-externally" keeps working: only this plugin\'s registry record is removed (the reply carries stillProvided). A name defined more than once is refused unless `slot` (the row position from overall_mcp_list) or `from` (the version that row showed) picks the row — acting on the wrong row deletes real bookkeeping.',
       parameters: {
         name: { type: 'string', required: true },
+        slot: { type: 'integer', description: 'Position of the row in the overall_mcp_list answer, to pick one of several same-named entries.' },
+        from: { type: 'string', description: 'Version the row displayed (fallback for a client that rendered before slots existed).' },
       },
       output: jsonOut,
-      async execute({ name }) {
-        return await doRemove(name);
+      async execute({ name, slot, from }) {
+        return await doRemove(name, {
+          slot: Number.isInteger(slot) ? slot : null,
+          from: typeof from === 'string' && from !== '' ? from : null,
+        });
       },
+    }),
+    defineTool({
+      name: 'overall_mcp_forget_orphans',
+      description: 'Remove every registry entry whose own source no longer defines it (the rows overall_mcp_scan reports as `orphans`, shown in the panel as 来源已删除). These are leftovers of an old scanner rename; they mount nothing, but they still count as servers and answer to their name. Entries from a source that could not be read are never touched.',
+      parameters: {},
+      output: jsonOut,
+      execute: () => doForgetOrphans(),
     }),
   ];
 
@@ -1045,9 +1337,9 @@ export async function apply(ctx) {
         return json(await doRepoMedia(body ?? {}));
       })],
       ['/api/overall-mcp/install', ['POST'], guard(async (req) => {
-        const { item } = await readBody(req);
+        const { item, overwrite } = await readBody(req);
         if (!item || typeof item !== 'object') return json({ error: 'item required' }, 400);
-        return json(await doInstall(item));
+        return json(await doInstall(item, { overwrite: overwrite === true }));
       })],
       // Bookmark a market entry. The listing is annotated on every read, so the
       // next browse reflects the new state; the page also patches its own copy
@@ -1065,9 +1357,15 @@ export async function apply(ctx) {
         count: favorites.size,
       }))],
       ['/api/overall-mcp/set-enabled', ['POST'], guard(async (req) => {
-        const { name, enabled } = await readBody(req);
+        const { name, enabled, slot, from } = await readBody(req);
         if (typeof name !== 'string' || typeof enabled !== 'boolean') return json({ error: 'name (string) and enabled (boolean) required' }, 400);
-        return json(await doSetEnabled(name, enabled));
+        // `slot` / `from` say which row was clicked when a name has several
+        // rows; without them an ambiguous name is an error rather than a guess,
+        // because toggling the wrong row disconnects real tools.
+        return json(await doSetEnabled(name, enabled, {
+          slot: Number.isInteger(slot) ? slot : null,
+          from: typeof from === 'string' && from !== '' ? from : null,
+        }));
       })],
       ['/api/overall-mcp/set-source-enabled', ['POST'], guard(async (req) => {
         const { source, enabled } = await readBody(req);
@@ -1083,15 +1381,28 @@ export async function apply(ctx) {
       ['/api/overall-mcp/self', ['GET'], guard(async () => json(await doCheckSelfUpdate()))],
       ['/api/overall-mcp/self-update', ['POST'], guard(async () => json(await doSelfUpdate()))],
       ['/api/overall-mcp/update', ['POST'], guard(async (req) => {
-        const { name } = await readBody(req);
+        const { name, slot, from } = await readBody(req);
         if (typeof name !== 'string') return json({ error: 'name required' }, 400);
-        return json(await doUpdate(name));
+        // `slot` / `from` are optional: a caller that only knows the name still
+        // works, and one that knows which row it clicked can say so (two rows
+        // may share a name).
+        return json(await doUpdate(name, {
+          slot: Number.isInteger(slot) ? slot : null,
+          from: typeof from === 'string' && from !== '' ? from : null,
+        }));
       })],
       ['/api/overall-mcp/remove', ['POST'], guard(async (req) => {
-        const { name } = await readBody(req);
+        const { name, slot, from } = await readBody(req);
         if (typeof name !== 'string') return json({ error: 'name required' }, 400);
-        return json(await doRemove(name));
+        return json(await doRemove(name, {
+          slot: Number.isInteger(slot) ? slot : null,
+          from: typeof from === 'string' && from !== '' ? from : null,
+        }));
       })],
+      // Remove the rows the last scan proved are gone (来源已删除). One action
+      // for the whole set: they are all the same kind of leftover, and removing
+      // them one row at a time is what a name-keyed 移除 was doing wrong.
+      ['/api/overall-mcp/forget-orphans', ['POST'], guard(async () => json(await doForgetOrphans()))],
       // Diagnostic: the schemas actually registered for mcp__* tools. Lets the
       // settings page (or a maintainer) confirm a provider-hostile pattern was
       // repaired rather than shipped to the model API.
