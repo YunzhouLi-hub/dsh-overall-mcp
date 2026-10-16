@@ -142,7 +142,7 @@ test('the plugin registers the documented route and tool surface', async () => {
     // The same list client/client.js documents at the top of the file: the page
     // and the host must not drift apart silently.
     for (const route of [
-      '/api/overall-mcp/status', '/api/overall-mcp/events',
+      '/api/overall-mcp/status', '/api/overall-mcp/events', '/api/overall-mcp/auth',
       '/api/overall-mcp/servers', '/api/overall-mcp/scan', '/api/overall-mcp/catalog',
       '/api/overall-mcp/repo-stats', '/api/overall-mcp/repo-media', '/api/overall-mcp/install',
       '/api/overall-mcp/favorite', '/api/overall-mcp/favorites', '/api/overall-mcp/set-enabled',
@@ -747,6 +747,12 @@ test('the plugin reports which build it is running, and what it has been doing',
   const realFetch = globalThis.fetch;
   const stub = dockerFetchStub();
   globalThis.fetch = stub;
+  // A credential in the developer's own environment would make the assertions
+  // below depend on the machine (and fire a probe at a stubbed fetch), so the
+  // two names this plugin reads are cleared for the duration.
+  const savedEnv = { DSH_GITHUB_TOKEN: process.env.DSH_GITHUB_TOKEN, GITHUB_TOKEN: process.env.GITHUB_TOKEN };
+  delete process.env.DSH_GITHUB_TOKEN;
+  delete process.env.GITHUB_TOKEN;
   try {
     await withHost(FIXTURE, async ({ dir, call }) => {
       // The page reads this before it trusts anything: which files are loaded,
@@ -772,6 +778,9 @@ test('the plugin reports which build it is running, and what it has been doing',
       const files = new Map(before.body.data.files.map((f) => [f.name, f]));
       assert.ok(files.get('registry.json').bytes > 0, 'a data file that exists reports its size');
       assert.equal(files.get('github-index.json').bytes, null, 'an absent file says so instead of 0');
+      assert.equal(before.body.auth.source, 'anonymous');
+      assert.equal(before.body.auth.inUse, false);
+      assert.match(String(before.body.auth.note), /匿名访问/);
 
       const browse = await call('/api/overall-mcp/catalog', { body: { source: 'docker-catalog', limit: 10 } });
       assert.equal(browse.status, 200);
@@ -802,6 +811,120 @@ test('the plugin reports which build it is running, and what it has been doing',
     });
   } finally {
     globalThis.fetch = realFetch;
+  }
+});
+
+/**
+ * The credential resource: a token goes in, a mask comes out.
+ *
+ * This is the one place in the plugin where a secret is accepted, so the test
+ * asserts both halves of that contract — that the token reaches GitHub, and
+ * that it appears nowhere else (not in the response, not in the log).
+ */
+test('a pasted GitHub token is used for GitHub and echoed nowhere', async () => {
+  const realFetch = globalThis.fetch;
+  const sent = [];
+  const ok = (body, headers = {}) => ({
+    ok: true,
+    status: 200,
+    headers: { get: (name) => headers[String(name).toLowerCase()] ?? null },
+    json: async () => body,
+  });
+  const token = 'ghp_0123456789abcdefghijklmnopqrstuvwxyz';
+  let reject = false;
+  globalThis.fetch = async (url, options = {}) => {
+    const target = String(url);
+    sent.push({ url: target, authorization: (options.headers ?? {}).authorization ?? null });
+    if (reject) {
+      return { ok: false, status: 401, headers: { get: () => null }, json: async () => ({ message: 'Bad credentials' }) };
+    }
+    if (target.endsWith('/rate_limit')) {
+      return ok({ resources: { core: { limit: 5000, remaining: 4999, reset: 1791926400 } } });
+    }
+    return ok({ login: 'harness-user', company: null }, { 'x-oauth-scopes': 'read:user' });
+  };
+  const savedEnv = { DSH_GITHUB_TOKEN: process.env.DSH_GITHUB_TOKEN, GITHUB_TOKEN: process.env.GITHUB_TOKEN };
+  delete process.env.DSH_GITHUB_TOKEN;
+  delete process.env.GITHUB_TOKEN;
+  try {
+    await withHost(FIXTURE, async ({ dir, call }) => {
+      // Reading the resource is free: no credential, no request, no process.
+      const anonymous = await call('/api/overall-mcp/auth', { method: 'GET' });
+      assert.equal(anonymous.status, 200);
+      assert.equal(anonymous.body.source, 'anonymous');
+      assert.deepEqual(sent, [], 'nothing is fetched to say "anonymous"');
+
+      const empty = await call('/api/overall-mcp/auth', { method: 'POST', body: { token: '   ' } });
+      assert.equal(empty.status, 400);
+      assert.match(empty.body.error, /不能为空/);
+
+      const set = await call('/api/overall-mcp/auth', { method: 'POST', body: { token: `  ${token}  ` } });
+      assert.equal(set.status, 200);
+      assert.equal(set.body.source, 'panel');
+      assert.equal(set.body.login, 'harness-user');
+      assert.equal(set.body.inUse, true);
+      assert.deepEqual(set.body.scopes, ['read:user']);
+      assert.deepEqual(set.body.rateLimit, { limit: 5000, remaining: 4999, resetAt: '2026-10-13T21:20:00.000Z' });
+      assert.ok(set.body.masked.startsWith('ghp_01'), set.body.masked);
+      assert.equal(JSON.stringify(set.body).includes(token), false, 'the host does not echo the token back');
+      assert.deepEqual(
+        sent.map((s) => s.url),
+        ['https://api.github.com/user', 'https://api.github.com/rate_limit'],
+        'validation is two requests, to api.github.com only',
+      );
+      assert.equal(sent[0].authorization, `Bearer ${token}`);
+
+      // Stored, so it survives the process; the next read is served from the
+      // resolution the write just made instead of probing again.
+      const stored = JSON.parse(await fs.readFile(path.join(dir, 'github-auth.json'), 'utf8'));
+      assert.equal(stored.token, token);
+      const again = await call('/api/overall-mcp/auth', { method: 'GET' });
+      assert.equal(again.body.login, 'harness-user');
+      assert.equal(sent.length, 2, 'a cached resolution is not re-probed on every read');
+      const status = await call('/api/overall-mcp/status', { method: 'GET' });
+      assert.equal(status.body.auth.inUse, true);
+      assert.equal(status.body.auth.login, 'harness-user');
+      assert.equal(JSON.stringify(status.body).includes(token), false, 'nor does /status');
+
+      // The activity log records that a credential was set — by mask, never by
+      // value.
+      const logged = await waitFor(async () => {
+        const read = await call('/api/overall-mcp/events', { method: 'GET' });
+        return read.body.events.find((e) => e.kind === 'auth') ?? null;
+      });
+      assert.equal(logged.action, 'set');
+      assert.equal(logged.masked, set.body.masked);
+      assert.equal(logged.ok, true);
+      assert.equal(JSON.stringify(logged).includes(token), false, 'and the log keeps only the mask');
+
+      // A token GitHub refuses is reported and dropped rather than left to fail
+      // every subsequent request.
+      reject = true;
+      const refused = await call('/api/overall-mcp/auth', { method: 'POST', body: { token } });
+      assert.equal(refused.status, 200);
+      assert.equal(refused.body.source, 'panel');
+      assert.equal(refused.body.inUse, false);
+      assert.equal(refused.body.needsLogin, true);
+      assert.match(String(refused.body.error), /无效或已过期/);
+
+      reject = false;
+      const cleared = await call('/api/overall-mcp/auth', { method: 'DELETE' });
+      assert.equal(cleared.status, 200);
+      assert.equal(cleared.body.removed, true);
+      assert.equal(cleared.body.source, 'anonymous');
+      assert.equal(cleared.body.inUse, false);
+      await assert.rejects(() => fs.readFile(path.join(dir, 'github-auth.json'), 'utf8'), /ENOENT/);
+
+      const after = await call('/api/overall-mcp/auth', { method: 'GET' });
+      assert.equal(after.body.inUse, false);
+      assert.equal(sent.filter((s) => s.url.endsWith('/user')).length, 2, 'clearing triggers no probe');
+    });
+  } finally {
+    globalThis.fetch = realFetch;
+    if (savedEnv.DSH_GITHUB_TOKEN === undefined) delete process.env.DSH_GITHUB_TOKEN;
+    else process.env.DSH_GITHUB_TOKEN = savedEnv.DSH_GITHUB_TOKEN;
+    if (savedEnv.GITHUB_TOKEN === undefined) delete process.env.GITHUB_TOKEN;
+    else process.env.GITHUB_TOKEN = savedEnv.GITHUB_TOKEN;
   }
 });
 

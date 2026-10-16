@@ -17,6 +17,7 @@
 | ⬆️ | 版本检查与更新 | 对经 `npx`/`uvx`（含 Windows `cmd.exe /c` 包装）启动的服务器检查 npm / PyPI 最新版本，「已注册」页一条 `全部更新（N）` 串行更新并自动重连，带条目级进度与逐条明细，跑完无剩余项时变为绿色 `✓ 已完成` |
 | 🪪 | 身份行 | 页头第二行写清**这个面板此刻在跑哪份代码**：插件版本、`pid`、已运行时长、能读到的数据文件数、日志条数；磁盘上的代码比进程新时另挂一颗「⚠ 代码已更新，重启 DSH 后生效」——「还是坏的」和「还没载入」从此不是同一句话（`GET /status`） |
 | 🧾 | 动作日志 | 宿主把自己的动作写进 `events.ndjson`（浏览/各源成败/配额/扫描/普查/证据/安装是否挂上/更新/挂载/注册表修复），页头「运行日志」一键展开；只记元数据，不记密钥，最多留最近 400 行 |
+| 🔑 | GitHub 凭据与普查续跑 | 面板上可填 token（或一键取 `gh auth token`），校验通过才生效、只发给 GitHub 主机；**匿名照样能普查**，只是配额从 5000 次/小时降到 60 次/小时。一次网络失败不再终结整场普查（按仓库重试 + 退避 + 连续被拒才收工），并且下一次普查从断点继续（`GET\|POST\|DELETE /auth`） |
 
 ## 快速开始
 
@@ -273,6 +274,7 @@ Invalid schema for function 'mcp__rea-om__analyze_javascript_application':
 `GET /api/overall-mcp/servers`、`GET /api/overall-mcp/tools`（schema 取证）、
 `GET /api/overall-mcp/status`（这个进程在跑哪份代码、它在做什么，见下）、
 `GET /api/overall-mcp/events?limit=`（动作日志，见下）、
+`GET|POST|DELETE /api/overall-mcp/auth`（GitHub 凭据：读状态 / 存一个 token / 清除，见下）、
 `GET|POST /api/overall-mcp/updates`（版本检查）、`POST /api/overall-mcp/update`（更新并重连）、
 `GET|POST /api/overall-mcp/catalog?query=&source=&limit=&refresh=`、
 `GET|POST /api/overall-mcp/sources`（自定义目录源：列出 / 添加）、`POST /api/overall-mcp/sources/remove`（移除一个，见下）、
@@ -331,7 +333,47 @@ key 就是市场卡片的 React key，因为官方 Registry 的 id 随版本变�
 - **不因为一个字段而丢一行**：单个字段超过 600 字符截断、数组超过 20 项折成计数、对象在两层以上折成 `{…}`；极端到整行都序列化不了（例如含 `BigInt`）时写 `{"kind":"log","action":"unserializable"}`——这一行本身就是证据。反过来，面板的渲染器也不只为已知字段写模板：认不出来的字段会以 `key=value` 追加在同一行（`server=codegraph · mounted=true`），所以新版本宿主多记一个字段时旧面板也能看见它，而不是把它藏起来。
 - **读的是尾部**：`/events` 默认回最近 100 条（`limit` 上限 500），从旧到新排列，另报 `total` 与 `damaged`（读不动的行数，文件被外部写过时的取证）。宿主若比面板旧、根本没有这条路由，日志框里写「宿主插件还是旧版本（没有 /api/overall-mcp/events）；重启 DSH 后再看运行日志」，而不是把整页标红，也不会假装「这次运行还没有记录」——前者是版本事实，后者是对一份读不到的日志撒谎。
 
-## 扫描的宿主机位置
+## GitHub 凭据与普查续跑（第十九轮）
+
+普查（GitHub 仓库发现 + 从仓库证据恢复安装命令）在**匿名**下一直就能跑，这一点本轮没有改；改动是让它跑得完，并且在有 token 时快得多。
+
+### 凭据从哪来
+
+五级来源，**只有校验通过的 token 才成为活跃凭据**——否则一个打错的 token 会把每个请求变成 401，比匿名更差：
+
+| 顺序 | 来源 | 说明 |
+|---|---|---|
+| 1 | 面板填写的 token | 「已注册」页顶部的 GitHub 访问卡，存 `$DSH_HOME/overall-mcp/github-auth.json`（0600，临时文件 + `rename`） |
+| 2 | `DSH_GITHUB_TOKEN` | 宿主进程环境变量 |
+| 3 | `GITHUB_TOKEN` | 通用环境变量 |
+| 4 | `gh auth token` | 机器上已经登录过 GitHub CLI 时不必再填一次（Windows 上找 `gh.cmd`） |
+| 5 | 匿名 | 上面都没有、或校验失败时的最终归属 |
+
+那张卡写着当前来源、掩码后的 token（`ghp_ab…6789`）、登录名、配额余量（`4999/5000`）与下一次重置时刻，按钮是「换成我的 GitHub 登录」/「填写 token」/「清除」/「重新检测」。`gh` **只在你点「换成我的 GitHub 登录」时才问一次**（不在启动时偷偷跑子进程）；粘贴的 token 也不会被复制到别的地方。
+
+### 为什么不是 OAuth 设备码
+
+设备码流程需要一个**属于注册方**的 client_id：这个 id 印在代码里，谁都能拿去别处用，而本插件不持有、也不该转发任何人的第三方应用身份。`gh auth token` 是「这台机器上已经有一个人登录过」这一事实的诚实读法，不替用户保管凭据。
+
+### token 只发给 GitHub
+
+凭据**永不离开 `lib/github-auth.js`**（单测 `test/github-auth.test.mjs`）：调用方拿到的是掩码、登录名与配额，唯一读到明文的是 `withGithubAuth(url, headers)`，而它按**主机白名单**放行——只有 `api.github.com` 与 `raw.githubusercontent.com` 会拿到 `Authorization`。插件同时打 Docker Hub / npm / PyPI / Smithery / 官方 registry，把 GitHub token 发过去等于把凭据交给第三方。
+
+### 普查不再因为一次网络失败而终结
+
+`lib/repo-install.js` 的走查原来是「第一次失败就 `break`」。直播日志里那次是 **260 次请求 / 124 秒只覆盖 2111 行里的 77 行（3.6%）**，结束语是「第 260 次请求失败：fetch failed」——剩下的 2034 行一次都没走到。现在：
+
+- 网络错误、上游 5xx、以及被上游拒绝（403/429）都**按仓库重试**（默认 2 次：退避 400ms 起、翻倍、封顶 5 秒），重试前的等待会跳过该仓库的下一次节流等待（不再空转）；
+- 连续被拒绝 3 次才收工——有些上游是真的在要求你降速，反复撞墙比停手更糟；
+- 走查报告 `{requests, planned, attempted, remaining, retries, partial}`：`/status`、`/events` 与面板因此能说「计划 3 个仓库、走到 1 个、剩 2 个、重试 2 次」，而不是只说一句「失败」；
+- **续跑本来就有**：下一次普查只挑「还没有证据、或证据已过期」的行（`needsInstallEvidence`），所以中断后重启 DSH 再点一次「重新普查」是从断点继续，不是从头再来——本轮补的是「它为什么会中断」；
+- token 被上游拒绝（401）时宿主**立刻退回匿名**并记一行日志说明，匿名走查照旧继续，而不是整场退出。
+
+### 匿名不是残废，只是慢
+
+匿名 `api.github.com/search/repositories` 是 **10 次/分钟**、核心 API 是 **60 次/小时**；带 token 分别是 30 次/分钟与 5000 次/小时。取仓库文件（`raw.githubusercontent.com`）匿名也能做，只是配额紧。所以面板上的措辞是「匿名访问：在下面填一个 GitHub token，上限从 60 次/小时升到 5000 次/小时」，而不是「必须登录才能用」。
+
+
 
 | 应用 | 位置（按平台展开） |
 |---|---|
@@ -370,15 +412,17 @@ key 就是市场卡片的 React key，因为官方 Registry 的 id 随版本变�
 - `$DSH_HOME/overall-mcp/installs.json` — 本市场安装计数（键是目录条目的 `id`，无 id 时回退 `name:<服务器名>`；只在挂载成功之后 +1）
 - `$DSH_HOME/overall-mcp/scan-report.json` — 最近一次扫描报告
 - `$DSH_HOME/overall-mcp/events.ndjson` — 动作日志（每行一个 JSON，最近 400 行 / 256KB，见「面板身份行与动作日志」）：只记元数据，删掉不影响任何功能，只是面板里的「运行日志」变空
+- `$DSH_HOME/overall-mcp/github-auth.json` — 面板里填的那个 GitHub token（`{version, token, at}`，文件权限 `0600`，临时文件 + `rename`）。**这是唯一存着明文凭据的文件**：删掉它（或在面板上点「清除」）立刻回到匿名，环境变量与 `gh` 仍可能另行生效；读出来只用于 `api.github.com` 与 `raw.githubusercontent.com`，见「GitHub 凭据与普查续跑」一节
 - `$DSH_HOME/overall-mcp/github-install.json` — 从仓库里恢复出来的安装命令（同样是**派生数据**：删掉只是重新走一遍）：`{version, at, requests, partial, rows:[{id, install, installSource, at, lastSeen}]}`；`installSource` 记录证据来自哪个文件、包在哪个 registry 上被确认存在；文件损坏只记警告并按「没有证据」处理
 - `$DSH_HOME/overall-mcp/github-index.json` — GitHub 普查索引（派生数据，删掉只会触发一次重新普查）：`{version, at, minStars, queries, requests, complete, partial, rows}`，每行是市场条目的形状 + `firstSeen`/`lastSeen`；写盘同样走临时文件 + `rename`，文件损坏只记警告并按「没有索引」处理（不隔离、不备份）。走查**每 5 秒**把当前进度写一次（`complete:false`、`partial:"正在抓取（已收 N 行）"`），所以中途被拒绝或退出时，下一次浏览仍能看到已经收到的那些行
 - 市场列表每个来源各缓存 60 秒（只缓存原始数据，"已安装"标记每次读取时重新计算）；上游 URL 的 `ETag` 与正文另存一层，`304` 时复用而不重抓（详见上文 `/catalog` 的两层缓存）
-- GitHub Star 补充数据缓存 6 小时（失败结果同样缓存，避免反复冲击 GitHub 的未认证额度）
+- GitHub Star 补充数据缓存 6 小时（失败结果同样缓存，避免反复冲击 GitHub 的额度——有 token 时用的就是那份额度）
 
 ## 安全
 
 - 扫描只读白名单文件；stdio env 只引用变量名，不展开宿主机密值。
 - 市场条目安装前在界面/工具结果中可见启动命令与来源，由用户确认。
+- GitHub 凭据（面板填的 token / `DSH_GITHUB_TOKEN` / `GITHUB_TOKEN` / `gh auth token`）**只在 `lib/github-auth.js` 里被读到明文**，且按主机白名单只发给 `api.github.com` 与 `raw.githubusercontent.com`——Docker Hub、npm、PyPI、Smithery、官方 registry 一个字节都拿不到；面板、日志（`events.ndjson`）与 `/status` 只见掩码与登录名，见「GitHub 凭据与普查续跑」。
 - 本地插件，无对外 HTTP 面。
 
 ## 开发
@@ -495,7 +539,19 @@ node tools/fixture-bad-schema-mcp.mjs                     # 故意带 `^[^\0]*$`
 
 同上：宿主在启动时只载入一次，重启 DSH 才会载入新代码。页头的身份行就是为此加的——`插件 v…` 后面那颗「⚠ 代码已更新，重启 DSH 后生效」把「还是坏的」和「还没载入」分开说；`GET /api/overall-mcp/status` 里的 `plugin.source.stale` 是同一个判断的机器可读版本（`plugin.source.files` 列出 `index.js`、`client/client.js`、每个 `lib/*.js` 的 `mtime` 与大小，`plugin.dir` 是宿主实际载入的目录——用 `link:` 装在工作区时，这个目录不是 `node_modules` 里那份）。
 
-**市场里某条显示「需手动配置」**
+**普查跑到一半停了（日志里写着「第 N 次请求失败」）**
+
+那是 GitHub 侧的配额或网络抖动，不是插件坏了。匿名额度是搜索 10 次/分钟、核心 API 60 次/小时；一次完整普查要读几千个仓库的文件，匿名基本跑不完。
+
+- 在「已注册」页顶部的 GitHub 访问卡里填一个 token（或点「换成我的 GitHub 登录」，机器上登录过 `gh` 就不用填），额度变成 5000 次/小时；
+- **不填也能继续**：再点一次「重新普查」是从断点继续——已经有证据的行会被跳过（`needsInstallEvidence`），所以每次点都会往前推一点；
+- 走到哪了看 `GET /status` 或 `/events` 的普查那一行：`planned / attempted / remaining / retries` 四个数把「计划多少、走到多少、还剩多少、重试了几次」分开说（第十九轮起；此前只有一句「失败」）。
+
+**填了 token，面板还是显示「匿名访问」**
+
+只有**校验通过**的 token 才会成为活跃凭据（用 `GET /user` 验一次），打错的 token 立刻退回匿名，这样至少不会把每个请求变成 401。看那张卡的状态行：`error` 会写明是「401（token 无效或已过期）」还是网络不通。另外宿主代码在启动时载入一次，新填的 token 不需要重启（路由是同一个进程），但**本轮新加的 `/auth` 路由**要重启 DSH 之后才存在。
+
+
 
 该来源只提供仓库地址（社区 Awesome 清单即如此），无法安全推断启动命令。点「仓库」按该项目的 README 自行配置；官方 Registry 与 Smithery 的条目通常可直接「安装」。
 

@@ -2449,6 +2449,12 @@ window.__ModuleLoader__.load({
 			const [eventLog, setEventLog] = useState(null);
 			const [logOpen, setLogOpen] = useState(false);
 			const [logBusy, setLogBusy] = useState(false);
+			// The GitHub credential. Held as a draft here and nowhere else: the
+			// page never reads the token back from the host (it cannot — only a
+			// mask comes back), so the box is empty until somebody types into it.
+			const [authBusy, setAuthBusy] = useState(false);
+			const [authDraft, setAuthDraft] = useState("");
+			const [authNote, setAuthNote] = useState("");
 
 			// The servers the host's last 检查更新 marked as updatable. Derived
 			// rather than stored, and derived from the *listing* rather than from
@@ -2567,6 +2573,101 @@ window.__ModuleLoader__.load({
 			}
 
 			/**
+			 * Hand the host a GitHub token.
+			 *
+			 * This is the one place the panel sends a secret, so it sends it once
+			 * and forgets it: the box is cleared whether or not GitHub accepted
+			 * it, because a rejected token left in the field invites saving it
+			 * again. What comes back is a mask, and that is what the panel shows
+			 * from then on.
+			 */
+			async function saveGithubToken() {
+				const token = authDraft.trim();
+				if (!token || authBusy) return;
+				setAuthBusy(true);
+				setAuthNote("");
+				try {
+					const saved = await api("/auth", { method: "POST", body: JSON.stringify({ token }) });
+					setAuthDraft("");
+					const masked = saved?.masked ? `${saved.masked}` : "该凭据";
+					setAuthNote(saved?.error
+						? `GitHub 拒绝了它：${saved.error}`
+						: `已启用 ${saved?.login ? `${saved.login} 的` : ""}凭据（${masked}）`);
+					await loadStatus();
+					if (logOpen) loadEvents();
+				} catch (err) {
+					setAuthNote(`保存失败：${String(err.message || err)}`);
+				} finally {
+					setAuthBusy(false);
+				}
+			}
+
+			/**
+			 * Ask the host to look for a local `gh` login.
+			 *
+			 * Spawning that process is a discovery, not a page load, which is why
+			 * it is a button and why the route has to be told to do it (`?gh=1`).
+			 */
+			async function discoverGithubLogin() {
+				if (authBusy) return;
+				setAuthBusy(true);
+				setAuthNote("");
+				try {
+					const found = await api("/auth?gh=1");
+					setAuthNote(found?.inUse
+						? `已用本机 gh 登录：${found.login ?? found.masked ?? "已认证"}`
+						: found?.note || "本机没有可用的 gh 登录（未安装 gh，或它还没登录）");
+					await loadStatus();
+					if (logOpen) loadEvents();
+				} catch (err) {
+					setAuthNote(`检测失败：${String(err.message || err)}`);
+				} finally {
+					setAuthBusy(false);
+				}
+			}
+
+			/** Remove a stored credential and go back to 60 requests an hour. */
+			async function clearGithubToken() {
+				if (authBusy) return;
+				setAuthBusy(true);
+				setAuthNote("");
+				try {
+					const cleared = await api("/auth", { method: "DELETE" });
+					setAuthNote(cleared?.removed ? "已移除本插件保存的 token" : "本插件没有保存过 token");
+					await loadStatus();
+					if (logOpen) loadEvents();
+				} catch (err) {
+					setAuthNote(`移除失败：${String(err.message || err)}`);
+				} finally {
+					setAuthBusy(false);
+				}
+			}
+
+			/**
+			 * Carry the census on from where it stopped.
+			 *
+			 * A walk that hit the anonymous rate limit leaves the rest of its
+			 * plan unread; the host already knows which rows still lack evidence
+			 * (that is what `needsInstallEvidence` is), so asking for another
+			 * walk resumes rather than restarts — and with a token in place the
+			 * remaining rows are read at 5000 requests an hour instead of 60.
+			 */
+			async function resumeCensus() {
+				if (authBusy) return;
+				setAuthBusy(true);
+				try {
+					const state = await api("/install-evidence", { method: "POST", timeoutMs: 15000 });
+					setAuthNote(state?.walking ? "普查继续中…" : "没有需要补的仓库了");
+					await loadStatus();
+					if (logOpen) loadEvents();
+				} catch (err) {
+					setAuthNote(`继续普查失败：${String(err.message || err)}`);
+				} finally {
+					setAuthBusy(false);
+				}
+			}
+
+			/**
 			 * One line per event, in the order a person reads it: when, what kind
 			 * of thing, then only the fields that kind actually carries.
 			 *
@@ -2582,7 +2683,8 @@ window.__ModuleLoader__.load({
 				// Everything the fields below already say, so the tail does not
 				// repeat it.
 				const known = new Set(["at", "kind", "action", "source", "target", "query", "items",
-					"ms", "waitMs", "cached", "notModified", "files", "rows", "error", "note"]);
+					"ms", "waitMs", "cached", "notModified", "files", "rows", "error", "note",
+					"masked", "login"]);
 				if (event.action) parts.push(event.action);
 				if (event.source) parts.push(event.source);
 				if (event.target) parts.push(event.target);
@@ -2596,6 +2698,10 @@ window.__ModuleLoader__.load({
 				if (typeof event.rows === "number") parts.push(`${event.rows} 行`);
 				if (event.error) parts.push(`✗ ${event.error}`);
 				if (event.note) parts.push(event.note);
+				// A credential line names the mask and the account. The host has
+				// no token to print even if this page asked for one.
+				if (event.masked) parts.push(event.masked);
+				if (event.login) parts.push(event.login);
 				// Whatever this version of the panel does not know by name still
 				// shows up: the log exists to explain a failure nobody planned
 				// for, so a field added by a newer host must not become
@@ -3400,6 +3506,28 @@ window.__ModuleLoader__.load({
 			const running = subLineText(hostStatus);
 			const staleSource = hostStatus?.plugin?.source?.stale === true;
 
+			// The credential line for the GitHub box. `source` is the host's
+			// answer to "where did this come from" — a token the panel stored, an
+			// environment variable, a local gh login, or nothing at all.
+			const auth = hostStatus?.auth ?? null;
+			const authLine = !auth
+				? "宿主插件还是旧版本，读不到凭据状态"
+				: auth.source === "anonymous"
+					? "匿名访问 · 60 次/小时"
+					: [
+						`已认证${auth.login ? `：${auth.login}` : ""}`,
+						auth.masked,
+						auth.rateLimit
+							? `剩余 ${compactCount(auth.rateLimit.remaining)}/${compactCount(auth.rateLimit.limit)}`
+							: null,
+						auth.source === "env" ? "来自环境变量" : auth.source === "gh" ? "来自本机 gh" : null,
+					].filter(Boolean).join(" · ");
+			// A census that stopped early is the one thing a credential would have
+			// changed, so the box offers to carry it on from where it stopped.
+			const censusPartial = typeof hostStatus?.evidence?.partial === "string"
+				? hostStatus.evidence.partial
+				: "";
+
 			// The one outlined control that belongs beside the sub-line rather
 			// than in the run of text buttons on the first row.
 			const logButton = createElement("button", {
@@ -3665,6 +3793,76 @@ window.__ModuleLoader__.load({
 								: null,
 						])
 						: null,
+					// GitHub 访问 — the census and the market's GitHub sources both
+					// read github.com, and anonymously that is 60 requests an hour
+					// for the whole machine. It sits in 已注册 because that is
+					// where its effect shows (普查 rows still missing an install
+					// command), and it is always visible rather than folded into
+					// 目录源: a credential nobody can find is the same as none.
+					createElement("div", { key: "authbox", style: styles.sourceBox }, [
+						createElement("div", { key: "head", style: styles.sourceHead }, [
+							createElement("span", { key: "t", style: styles.sourceLabel }, "GitHub 访问"),
+							createElement("span", {
+								key: "s", style: styles.hint,
+								title: auth?.checkedAt ? `上次校验：${auth.checkedAt}` : undefined,
+							}, authLine),
+							createElement("span", { key: "spacer", style: styles.spacer }),
+							createElement("button", {
+								key: "gh", type: "button", className: "omkt-btn omkt-btn-outline",
+								style: styles.sourceMiniBtn, disabled: authBusy,
+								title: "让宿主机执行 `gh auth token`，用你本机已经登录的账号；凭据由宿主进程持有，本页面只看到掩码",
+								onClick: discoverGithubLogin,
+							}, authBusy ? "处理中…" : "检测本机登录"),
+							auth && auth.source !== "anonymous"
+								? createElement("button", {
+									key: "del", type: "button", className: "omkt-btn omkt-btn-outline",
+									style: { ...styles.sourceMiniBtn, ...styles.sourceMiniBtnDanger },
+									disabled: authBusy,
+									title: auth.source === "env"
+										? "这份来自你启动 DSH 时的环境变量，本插件只能移除自己保存的那份"
+										: "删掉 github-auth.json，回到每小时 60 次请求",
+									onClick: clearGithubToken,
+								}, "移除")
+								: null,
+						]),
+						createElement("div", { key: "row", style: styles.sourceRow }, [
+							createElement("input", {
+								key: "in", className: "omkt-input", style: styles.sourceInput,
+								type: "password", value: authDraft, spellCheck: false, autoComplete: "off",
+								placeholder: "粘贴 GitHub token（ghp_… 或 github_pat_…）",
+								onChange: (e) => setAuthDraft(e.target.value),
+								onKeyDown: (e) => { if (e.key === "Enter") saveGithubToken(); },
+							}),
+							createElement("button", {
+								key: "save", type: "button", className: "omkt-btn omkt-btn-outline",
+								style: styles.sourceMiniBtn,
+								disabled: authBusy || !authDraft.trim(),
+								onClick: () => saveGithubToken(),
+							}, authBusy ? "处理中…" : "保存"),
+						]),
+						createElement("div", { key: "tip", style: { ...styles.hint, paddingTop: 2 } },
+							"不填也能跑：匿名每小时 60 次请求，填一个只读 token 后 5000 次/小时。token 存在本机数据目录的 github-auth.json（只有本插件读它），只发给 api.github.com 与 raw.githubusercontent.com；页面拿到的永远只是掩码。"),
+						auth?.error
+							? createElement("div", { key: "autherr", style: styles.error }, `⚠ ${auth.error}`)
+							: null,
+						authNote ? createElement("div", { key: "note", style: styles.hint }, authNote) : null,
+						// A walk that stopped because the upstream pushed back is
+						// the only stop a credential would have helped — so the
+						// reason and the way to carry on sit together.
+						censusPartial
+							? createElement("div", { key: "census", style: styles.sourceRow }, [
+								createElement("span", { key: "m", style: styles.jobMsg, title: censusPartial },
+									`普查没有读完：${censusPartial}`),
+								createElement("span", { key: "spacer", style: styles.spacer }),
+								createElement("button", {
+									key: "resume", type: "button", className: "omkt-btn omkt-btn-outline",
+									style: styles.sourceMiniBtn, disabled: authBusy,
+									title: "从上次停下的地方接着读剩下的仓库，不会从头再来",
+									onClick: resumeCensus,
+								}, "继续普查"),
+							])
+							: null,
+					]),
 					servers ? createElement("div", { key: "filters", style: styles.filters }, [
 						createElement("select", {
 							key: "source", className: `omkt-select${sourceFilter ? " omkt-select-on" : ""}`,

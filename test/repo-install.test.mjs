@@ -250,10 +250,102 @@ test('an upstream refusal is named as one, and the walk keeps what it already fo
     },
     verifyPackage: async () => true,
     minIntervalMs: 0,
+    sleep: async () => {},
   });
   assert.equal(walk.rows.find((r) => r.id === 'github:acme/one').install.command, 'npx');
   assert.equal(walk.complete, false);
   assert.match(walk.partial, /上游要求降速：HTTP 429/);
+  // Retried before giving up, and the note says so: a refusal that survives
+  // three attempts is a decision, not a blip.
+  assert.match(walk.partial, /重试 2 次仍失败/);
+  assert.equal(walk.retries, 2);
+});
+
+test('a dropped connection is retried, and the walk carries on past it', async () => {
+  const texts = new Map([
+    [raw('acme/flaky', 'package.json'), JSON.stringify({ name: 'acme-flaky', bin: 'x' })],
+    [raw('acme/next', 'package.json'), JSON.stringify({ name: 'acme-next', bin: 'x' })],
+  ]);
+  let dropped = 0;
+  const walk = await crawlInstallEvidence({
+    rows: [
+      { id: 'github:acme/flaky', repository: 'acme/flaky' },
+      { id: 'github:acme/next', repository: 'acme/next' },
+    ],
+    fetchText: async (url) => {
+      // Exactly the failure this walk died of in the field: request 260 of a
+      // live census answered `fetch failed`, and one lost connection ended the
+      // pass for the remaining 2034 repositories.
+      if (url.includes('acme/flaky') && dropped === 0) {
+        dropped += 1;
+        const err = new Error('fetch failed');
+        err.code = 'network';
+        throw err;
+      }
+      return texts.get(url) ?? null;
+    },
+    verifyPackage: async () => true,
+    minIntervalMs: 0,
+    sleep: async () => {},
+  });
+  assert.equal(walk.retries, 1);
+  assert.equal(walk.complete, true, walk.partial ?? 'no partial');
+  assert.equal(walk.partial, null);
+  assert.equal(walk.rows.find((r) => r.id === 'github:acme/flaky').install.command, 'npx');
+  assert.equal(walk.rows.find((r) => r.id === 'github:acme/next').install.args[1], 'acme-next');
+});
+
+test('the walk reports how much of the plan it got through', async () => {
+  const walk = await crawlInstallEvidence({
+    rows: [
+      { id: 'github:acme/one', repository: 'acme/one' },
+      { id: 'github:acme/two', repository: 'acme/two' },
+      { nope: true },
+      { id: 'github:acme/three', repository: 'acme/three' },
+    ],
+    fetchText: async () => null,
+    verifyPackage: async () => true,
+    minIntervalMs: 0,
+    maxRequests: 2,
+  });
+  assert.equal(walk.planned, 3, 'a row without an identity is not part of the plan');
+  assert.equal(walk.attempted, 1);
+  assert.equal(walk.remaining, 2);
+  assert.equal(walk.requests, 2);
+});
+
+test('the wait widens after a failure and eases out after a success', async () => {
+  const waits = [];
+  const texts = new Map([
+    [raw('acme/flaky', 'package.json'), JSON.stringify({ name: 'acme-flaky', bin: 'x' })],
+    [raw('acme/steady', 'package.json'), JSON.stringify({ name: 'acme-steady', bin: 'x' })],
+  ]);
+  let dropped = 0;
+  await crawlInstallEvidence({
+    rows: [
+      { id: 'github:acme/flaky', repository: 'acme/flaky' },
+      { id: 'github:acme/steady', repository: 'acme/steady' },
+    ],
+    fetchText: async (url) => {
+      if (url.includes('acme/flaky') && dropped === 0) {
+        dropped += 1;
+        const err = new Error('fetch failed');
+        err.code = 'network';
+        throw err;
+      }
+      return texts.get(url) ?? null;
+    },
+    verifyPackage: async () => true,
+    minIntervalMs: 100,
+    backoffMs: 400,
+    sleep: async (ms) => { waits.push(ms); },
+  });
+  // The first request pays no interval at all. The retry pays the base plus the
+  // 400ms penalty (500), the read that follows it pays half that penalty (300),
+  // and the one after that a quarter (200) — a penalty that halves per success
+  // instead of vanishing, which is what keeps a flaky host from being hammered
+  // by a walk that resets on every single answer.
+  assert.deepEqual(waits.slice(0, 3), [500, 300, 200]);
 });
 
 test('a damaged evidence file is reported, and a missing one is simply "nothing yet"', async () => {  const missing = await readEvidenceDocument('nope.json', async () => { const err = new Error('nope'); err.code = 'ENOENT'; throw err; });

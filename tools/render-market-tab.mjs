@@ -185,7 +185,13 @@ const STATUS = {
     ],
   },
   census: { rows: 0, at: null, complete: false, partial: false, walking: false, loaded: false, damaged: false },
-  evidence: { requests: 0, at: null, damaged: false },
+  // A census that stopped at the anonymous rate limit: the panel has to say so,
+  // because 15 of 77 rows read looks exactly like a finished walk otherwise.
+  evidence: {
+    rows: 15, withCommand: 3, at: '2026-01-01T09:30:00.000Z', walking: false,
+    requests: 60,
+    partial: '第 60 次请求失败：rate limit exceeded（匿名访问：在已注册标签页里填一个 GitHub token，上限从 60 次/小时升到 5000 次/小时）',
+  },
   quota: { remaining: 60, limit: 60, resetMs: 0 },
   events: { bytes: 512, at: '2026-01-01T10:00:02.000Z', lines: 2, damaged: 1, lastAt: '2026-01-01T10:00:02.000Z' },
   errors: { registry: '', sources: '' },
@@ -200,6 +206,21 @@ const EVENTS = {
 };
 
 let captured = null;
+// The two states of the GitHub credential, and the token the panel is given.
+// The host answers with a mask and never with the token, so the page can only
+// ever show what is in these objects.
+const TOKEN = 'ghp_0123456789abcdefghijklmnopqrstuvwxyz';
+const ANONYMOUS = {
+  source: 'anonymous', inUse: false, masked: null, login: null,
+  note: '匿名访问：每小时 60 次请求，GitHub 按出口 IP 计算',
+  checkedAt: '2026-01-01T09:00:00.000Z',
+};
+const AUTHENTICATED = {
+  source: 'panel', inUse: true, masked: 'ghp_01…wxyz', login: 'harness-user',
+  scopes: ['read:user'], rateLimit: { limit: 5000, remaining: 4999, resetAt: '2026-01-01T11:00:00.000Z' },
+  storedAt: '2026-01-01T10:00:00.000Z', checkedAt: '2026-01-01T10:00:00.000Z',
+};
+let liveAuth = ANONYMOUS;
 // A host older than the panel has no /events route at all. Flipped for the
 // first half of section 6c, which is the only way to reach that branch: the
 // page only re-reads the log when the box is opened.
@@ -243,6 +264,33 @@ globalThis.fetch = async (url, init) => {
     }
     calls.push('GET /sources');
     return ok({ sources: liveSources, max: 8, error: '' });
+  }
+  // The GitHub credential: one path, three methods, and a reply that carries the
+  // credential's own state (never the token).
+  if (path.startsWith('/auth')) {
+    const method = init?.method ?? 'GET';
+    if (method === 'POST') {
+      const body = JSON.parse(init?.body ?? '{}');
+      calls.push(`POST /auth token=${body.token}`);
+      if (!String(body.token ?? '').trim()) {
+        return { ok: false, status: 400, json: async () => ({ error: 'token 不能为空', status: 400 }) };
+      }
+      liveAuth = { ...AUTHENTICATED, storedAt: '2026-01-01T10:00:00.000Z' };
+      return ok(liveAuth);
+    }
+    if (method === 'DELETE') {
+      calls.push('DELETE /auth');
+      liveAuth = ANONYMOUS;
+      return ok({ ...liveAuth, removed: true });
+    }
+    calls.push('GET /auth');
+    return ok(liveAuth);
+  }
+  // A walk the panel asks for rather than one it waits on: the reply is the
+  // state right after the request, with `walking` naming what is in flight.
+  if (path.startsWith('/install-evidence')) {
+    calls.push('POST /install-evidence');
+    return ok({ ...STATUS.evidence, walking: init?.method === 'POST', partial: null, damaged: false });
   }
   // The install that reached the registry and did not mount — the reply the
   // panel must not summarise as success.
@@ -288,7 +336,7 @@ globalThis.fetch = async (url, init) => {
   // Which build this panel is talking to, and what that build has been doing.
   if (path.startsWith('/status')) {
     calls.push('GET /status');
-    return ok(STATUS);
+    return ok({ ...STATUS, auth: liveAuth });
   }
   if (path.startsWith('/events')) {
     calls.push('GET /events');
@@ -955,6 +1003,79 @@ assert.ok(registryNodes.some((n) => n.type === 'button' && textOf(n) === '重新
   assert.equal(mod.__test.subLineText({ plugin: { version: '0.1.0' } }), TAGLINE,
     'half an answer (no host block) keeps the tagline');
   console.log('identity line + action log: names the build, folds out what it did ✓');
+}
+
+// --- 6d. the GitHub credential, and the census it unblocks -----------------
+// Anonymous GitHub is 60 requests an hour for the whole machine, and a census
+// that stops there is indistinguishable from a finished one unless the page says
+// otherwise. The box has to show where the credential came from, take one, and
+// offer the single action a credential changes: carrying the walk on from where
+// it stopped.
+{
+  const market = walk(await render());
+  const regTabs = walk(findByKey(market, 'tabs')[0]).filter((n) => n.type === 'button');
+  regTabs.find((n) => textOf(n).startsWith('已注册')).props.onClick();
+  const registry = walk(await render());
+  const box = findByKey(registry, 'authbox')[0];
+  assert.ok(box, 'the registry tab carries the GitHub access box');
+  const boxText = textOf(box);
+  assert.ok(boxText.includes('GitHub 访问'), `the box names itself — got: ${boxText}`);
+  assert.ok(boxText.includes('匿名访问 · 60 次/小时'), `and says where the credential stands — got: ${boxText}`);
+  assert.ok(boxText.includes('不填也能跑'), 'the hint says anonymity is a supported state, not a broken one');
+  assert.ok(boxText.includes('普查没有读完'), `a partial census is admitted in the box — got: ${boxText}`);
+  assert.equal(findByKey(registry, 'autherr').length, 0, 'no error line before anything went wrong');
+
+  // The one secret the panel accepts: rendered as a password, and held as a
+  // draft the host never sees until 保存.
+  const field = walk(box).find((n) => n.type === 'input');
+  assert.ok(field, 'the box has a token field');
+  assert.equal(field.props.type, 'password', 'the token is not rendered in clear text');
+  assert.equal(field.props.value, '', 'and the box starts empty: the host has no token to hand back');
+  field.props.onChange({ target: { value: TOKEN } });
+  const typed = walk(await render());
+  const saveBtn = buttonByText(walk(findByKey(typed, 'authbox')[0]), '保存');
+  assert.ok(saveBtn, 'a 保存 button appears beside the field');
+  assert.equal(saveBtn.props.disabled, false, 'a typed token can be submitted');
+  const beforeAuth = calls.length;
+  saveBtn.props.onClick();
+  await settle();
+  const authCalls = calls.slice(beforeAuth).join(' ');
+  assert.ok(authCalls.includes(`POST /auth token=${TOKEN}`), `saving posts the token (got: ${authCalls})`);
+  assert.ok(authCalls.includes('GET /status'), 'and re-reads the status it just changed');
+  const saved = walk(await render());
+  const savedText = textOf(findByKey(saved, 'authbox')[0]);
+  assert.ok(savedText.includes('已认证：harness-user'), `the line names the account — got: ${savedText}`);
+  assert.ok(savedText.includes(AUTHENTICATED.masked), 'and shows only the mask');
+  assert.match(savedText, /剩余 [\d.]+k?\/[\d.]+k?/, 'plus what the credential bought');
+  assert.equal(walk(findByKey(saved, 'authbox')[0]).find((n) => n.type === 'input').props.value, '',
+    'the draft is cleared, accepted or not');
+  assert.ok(!savedText.includes(TOKEN), 'the token itself never lands in the page');
+  assert.ok(textOf(findByKey(saved, 'note')[0]).includes('已启用'), 'the outcome is reported beside the box');
+  // 移除 appears only once there is something to remove, and its title says which
+  // credential it is about to drop.
+  const remove = buttonByText(walk(findByKey(saved, 'authbox')[0]), '移除');
+  assert.ok(remove, 'an authenticated box offers 移除');
+  assert.match(String(remove.props.title ?? ''), /github-auth\.json/, 'and says what it deletes');
+
+  const beforeClear = calls.length;
+  remove.props.onClick();
+  await settle();
+  const cleared = walk(await render());
+  assert.ok(calls.slice(beforeClear).join(' ').includes('DELETE /auth'), 'removing asks the host to drop it');
+  assert.ok(textOf(findByKey(cleared, 'authbox')[0]).includes('匿名访问 · 60 次/小时'),
+    'and the box goes back to anonymous');
+
+  // 继续普查 resumes rather than restarts: the route it posts to is the one the
+  // host already uses to decide which rows still lack evidence.
+  const beforeResume = calls.length;
+  buttonByText(walk(findByKey(cleared, 'authbox')[0]), '继续普查').props.onClick();
+  await settle();
+  const resumed = walk(await render());
+  assert.ok(calls.slice(beforeResume).join(' ').includes('POST /install-evidence'),
+    'carrying the census on posts for a walk');
+  assert.ok(textOf(findByKey(resumed, 'authbox')[0]).includes('普查继续中'),
+    'and the box says the walk is running');
+  console.log('GitHub access: anonymous cost, a pasted token, and the census it resumes ✓');
 }
 
 // --- 6b. clicking that button installs the plugin and says a restart is due --

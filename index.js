@@ -45,6 +45,7 @@ import { sanitizeToolDefinition } from './lib/schema-guard.js';
 import { checkAllUpdates, checkDescribesEntry, checkEntryUpdate, parsePackageInvocation, pinArgs } from './lib/updates.js';
 import { checkSelfUpdate, updateSelf } from './lib/self-update.js';
 import { appendEvents, emit, eventFileFacts, readEvents, setEventSink } from './lib/events.js';
+import { clearToken, deactivateGithubAuth, githubAuthStatus, resolveGithubAuth, storeToken, withGithubAuth } from './lib/github-auth.js';
 
 export const name = 'overall-mcp';
 export const inject = ['tools'];
@@ -207,6 +208,26 @@ export async function apply(ctx) {
   // invisible ones. Writes are fire-and-forget: `appendEvents` never rejects.
   const eventsFile = path.join(dir, 'events.ndjson');
   setEventSink((event) => { void appendEvents(eventsFile, [event]); });
+  /**
+   * GitHub credentials (lib/github-auth.js explains the whole design).
+   *
+   * Resolved in the background, and only from the sources that cost nothing to
+   * ask — a pasted token or the environment. `gh auth token` is deliberately
+   * left for the panel's own request: it spawns a process, and startup is not
+   * the moment to spawn one to answer a question nobody has asked. Until a
+   * credential lands, requests go out anonymously, which is a working state.
+   */
+  const refreshGithubAuth = async ({ force = false, useGh = false } = {}) => {
+    try {
+      return await resolveGithubAuth({ dir, force, useGh });
+    } catch (err) {
+      // Resolution failure means "no credential", never "no plugin": the census
+      // and the market run anonymously, exactly as they did before.
+      log?.warn?.(`overall-mcp: GitHub credential resolution failed: ${String(err?.message ?? err)}`);
+      return githubAuthStatus();
+    }
+  };
+  void refreshGithubAuth();
   // Installs made from this panel, counted locally (lib/installs.js). The
   // sources publish their own usage figures; neither counts our installs, and
   // the user asked for them (「下载量以后从我们市场下载的也要统计一下」).
@@ -1277,6 +1298,10 @@ export async function apply(ctx) {
       withCommand: rows.filter((row) => row.install).length,
       at: doc?.at ?? null,
       walking: evidenceCrawl !== null,
+      // Carried so the panel can say why a walk stopped and offer to carry on
+      // from there: without it, a partial census reads as a finished one.
+      requests: doc?.requests ?? null,
+      partial: doc?.partial ?? null,
     };
   }
 
@@ -1288,14 +1313,38 @@ export async function apply(ctx) {
    * contract); a refusal is thrown so the walk stops and says who refused.
    */
   async function readRepoFile(url) {
-    const res = await fetch(url, { headers: { 'user-agent': USER_AGENT, accept: 'text/plain' } });
+    let res;
+    try {
+      res = await fetch(url, { headers: withGithubAuth(url, { 'user-agent': USER_AGENT, accept: 'text/plain' }) });
+    } catch (err) {
+      // A dropped connection says nothing about the repository, and the walk
+      // cannot tell the two apart unless the failure is labelled: `network` is
+      // what it retries, `http` is what stops it.
+      const failure = new Error(String(err?.message ?? err));
+      failure.code = 'network';
+      throw failure;
+    }
     if (res.status === 404 || res.status === 410) return null;
+    if (res.status === 401) {
+      // A stored token that GitHub no longer accepts is worse than none: every
+      // request would fail the same way and the walk would stop over a file
+      // that is perfectly readable anonymously. Drop the credential and let the
+      // walk's retry go out without it.
+      deactivateGithubAuth('GitHub 拒绝了这个 token（HTTP 401），已改用匿名访问');
+      const err = new Error('HTTP 401');
+      err.code = 'refused';
+      throw err;
+    }
     if (res.status === 403 || res.status === 429) {
       const err = new Error(`HTTP ${res.status}`);
       err.code = 'refused';
       throw err;
     }
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      const err = new Error(`HTTP ${res.status}`);
+      err.code = res.status >= 500 ? 'upstream' : 'http';
+      throw err;
+    }
     const text = await res.text();
     return text.length > EVIDENCE_MAX_BYTES ? null : text;
   }
@@ -1305,11 +1354,24 @@ export async function apply(ctx) {
     const url = registry === 'npm'
       ? `https://registry.npmjs.org/${encodeURIComponent(name)}`
       : `https://pypi.org/pypi/${encodeURIComponent(name)}/json`;
-    const send = (method) => fetch(url, { method, headers: { 'user-agent': USER_AGENT, accept: 'application/json' } });
+    const send = async (method) => {
+      try {
+        return await fetch(url, { method, headers: { 'user-agent': USER_AGENT, accept: 'application/json' } });
+      } catch (err) {
+        const failure = new Error(String(err?.message ?? err));
+        failure.code = 'network';
+        throw failure;
+      }
+    };
     const res = await send('HEAD');
     if (res.status === 403 || res.status === 429) {
       const err = new Error(`HTTP ${res.status}`);
       err.code = 'refused';
+      throw err;
+    }
+    if (res.status >= 500) {
+      const err = new Error(`HTTP ${res.status}`);
+      err.code = 'upstream';
       throw err;
     }
     // Some registries answer HEAD badly rather than answering it.
@@ -1351,19 +1413,33 @@ export async function apply(ctx) {
           if (requests % 200 === 0) log?.info?.(`overall-mcp: install evidence at ${requests} requests`);
         },
       });
-      const doc = evidenceDocumentOf({ at: walk.at, rows: walk.rows, requests: walk.requests, partial: walk.partial });
+      // What the user can act on, said once: a pass that stopped because the
+      // upstream pushed back is the only stop a credential would have helped.
+      const hint = walk.partial && !githubAuthStatus().inUse
+        ? '（匿名访问：在已注册标签页里填一个 GitHub token，上限从 60 次/小时升到 5000 次/小时）'
+        : '';
+      const doc = evidenceDocumentOf({
+        at: walk.at,
+        rows: walk.rows,
+        requests: walk.requests,
+        partial: walk.partial ? `${walk.partial}${hint}` : null,
+      });
       await writeJson(evidenceFile, doc);
       evidenceDoc = doc;
       evidenceLoaded = true;
       evidenceDamaged = null;
       const withCommand = doc.rows.filter((row) => row.install).length;
-      log?.info?.(`overall-mcp: install evidence ${doc.rows.length} rows, ${withCommand} with a command (${walk.requests} requests)`);
+      log?.info?.(`overall-mcp: install evidence ${doc.rows.length} rows, ${withCommand} with a command (${walk.requests} requests, ${walk.retries} retries)`);
       emit({
         kind: 'evidence',
         action: 'stop',
         requests: walk.requests,
+        retries: walk.retries,
         rows: doc.rows.length,
         withCommand,
+        planned: walk.planned,
+        attempted: walk.attempted,
+        remaining: walk.remaining,
         ...(doc.partial ? { partial: doc.partial } : {}),
       });
       return doc;
@@ -1536,6 +1612,9 @@ export async function apply(ctx) {
         damaged: evidenceDamaged ?? null,
       },
       quota: githubSearchQuota(),
+      // Which credential the GitHub requests are going out with, and how much
+      // quota it has left. Token-free by construction (lib/github-auth.js).
+      auth: githubAuthStatus(),
       events: await eventFileFacts(eventsFile),
       errors: { registry: registryLoadError, sources: sourcesLoadError },
     };
@@ -1997,6 +2076,47 @@ export async function apply(ctx) {
       // already exited; these two are the answer to "which build is this, and
       // what happened?" (see lib/events.js).
       ['/api/overall-mcp/status', ['GET'], guard(async () => json(await statusPayload()))],
+      // The GitHub credential, as a separate resource rather than a corner of
+      // /status. One entry per path: the host keys registrations by path, so a
+      // second entry for `/auth` would replace this one instead of adding a
+      // method (the test harness maps routes the same way).
+      //
+      // Reading it is free; `?gh=1` additionally asks `gh auth token`, which
+      // spawns a process — that is a discovery the panel requests explicitly
+      // (`重新检测本机登录`), never a side effect of opening a page.
+      ['/api/overall-mcp/auth', ['GET', 'POST', 'DELETE'], guard(async (req) => {
+        if (req.method === 'POST') {
+          const body = await readBody(req);
+          const token = typeof body.token === 'string' ? body.token.trim() : '';
+          if (!token) return json({ error: 'token 不能为空', status: 400 }, 400);
+          try {
+            const stored = await storeToken(dir, token);
+            const status = await refreshGithubAuth({ force: true });
+            emit({
+              kind: 'auth',
+              action: 'set',
+              source: status.source,
+              masked: status.masked,
+              login: status.login,
+              ok: !status.error,
+              ...(status.error ? { error: status.error } : {}),
+            });
+            return json({ ...status, storedAt: stored.at });
+          } catch (err) {
+            const message = String(err?.message ?? err);
+            emit({ kind: 'auth', action: 'set', ok: false, error: message });
+            return json({ error: `保存 token 失败：${message}`, status: 500 }, 500);
+          }
+        }
+        if (req.method === 'DELETE') {
+          const removed = await clearToken(dir);
+          const status = await refreshGithubAuth({ force: true });
+          emit({ kind: 'auth', action: 'clear', removed, source: status.source });
+          return json({ ...status, removed });
+        }
+        const useGh = new URL(req.url).searchParams.get('gh') === '1';
+        return json(await refreshGithubAuth({ useGh, force: useGh }));
+      })],
       ['/api/overall-mcp/events', ['GET'], guard(async (req) => {
         const url = new URL(req.url);
         const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 100, 1), 500);
