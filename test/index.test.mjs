@@ -593,6 +593,103 @@ test('a stale census is served immediately, and the walk behind it starts withou
   });
 });
 
+// ---------------------------------------------------------------------------
+// Install evidence (lib/repo-install.js) as the host uses it: a discovery row
+// whose repository publishes a package gets a real command, attributed to the
+// file it was read from — and the panel never waits for the walk that finds it.
+// ---------------------------------------------------------------------------
+
+/** One evidence row as the walk stores it. */
+function evidenceRow(id, { kind = 'package.json', registry = 'npm', name = 'acme-calendar-mcp', install, at, reason = null } = {}) {
+  return {
+    id,
+    at: at ?? new Date().toISOString(),
+    kind,
+    registry,
+    name,
+    install: install ?? (kind === 'none' ? null : { transport: 'stdio', command: 'npx', args: ['-y', name] }),
+    reason,
+  };
+}
+
+function evidenceDocument(rows, { at } = {}) {
+  return JSON.stringify({ version: 1, at: at ?? new Date().toISOString(), requests: 7, partial: null, rows }, null, 2);
+}
+
+test('a repository that publishes a package turns its row into an installable one, with the source named', async () => {
+  const rows = [censusRow('acme/calendar-mcp', { stars: 900 }), censusRow('acme/mystery-mcp', { stars: 800 })];
+  const files = {
+    'github-index.json': censusDocument(rows, { at: new Date().toISOString() }),
+    'install-evidence.json': evidenceDocument([
+      evidenceRow('github:acme/calendar-mcp'),
+      evidenceRow('github:acme/mystery-mcp', { kind: 'none', reason: '仓库里没有可识别的清单文件' }),
+    ]),
+  };
+  await withFetchStub(async () => { throw new Error('no network in this test'); }, async () => {
+    await withHost(FIXTURE, async ({ call }) => {
+      const all = await call('/api/overall-mcp/catalog', { body: { source: 'github-mcp', limit: 100 } });
+      const [calendar, mystery] = all.body.items;
+      assert.equal(calendar.id, 'github:acme/calendar-mcp');
+      assert.deepEqual(calendar.install, { transport: 'stdio', command: 'npx', args: ['-y', 'acme-calendar-mcp'] });
+      assert.equal(calendar.installable, true, 'a recovered command is an install button');
+      assert.equal(calendar.transport, 'stdio');
+      assert.equal(calendar.installSource.kind, 'package.json');
+      assert.equal(calendar.installSource.registry, 'npm');
+      assert.equal(calendar.installSource.name, 'acme-calendar-mcp');
+      assert.match(calendar.installSource.text, /命令来自仓库 package\.json；npm 上已确认这个包存在/);
+      // A repository that answered with nothing stays a discovery row.
+      assert.equal(mystery.install, null);
+      assert.equal(mystery.installable, false);
+      assert.equal(mystery.installSource, undefined);
+    }, { files });
+  });
+});
+
+test('opening the market starts the evidence walk, and what it recovers is on disk before the next read', async () => {
+  const rows = [censusRow('acme/calendar-mcp', { stars: 900 }), censusRow('acme/mystery-mcp', { stars: 800 })];
+  const files = { 'github-index.json': censusDocument(rows, { at: new Date().toISOString() }) };
+  const asked = [];
+  const stub = async (url, init = {}) => {
+    const target = String(url);
+    asked.push(target);
+    if (target.includes('raw.githubusercontent.com/acme/calendar-mcp/HEAD/package.json')) {
+      return { ok: true, status: 200, text: async () => JSON.stringify({ name: 'acme-calendar-mcp', bin: { 'acme-calendar-mcp': 'cli.js' } }) };
+    }
+    if (target.startsWith('https://registry.npmjs.org/')) return { ok: true, status: 200, text: async () => '{}' };
+    if (target.includes('raw.githubusercontent.com')) return { ok: false, status: 404, text: async () => 'Not Found' };
+    throw new Error(`unexpected request in this test: ${target} (${init.method ?? 'GET'})`);
+  };
+  await withFetchStub(stub, async () => {
+    await withHost(FIXTURE, async ({ dir, call }) => {
+      const before = await call('/api/overall-mcp/install-evidence', { method: 'GET' });
+      assert.equal(before.body.rows, 0);
+      assert.equal(before.body.walking, false);
+
+      const started = await call('/api/overall-mcp/install-evidence', { method: 'POST' });
+      assert.equal(started.status, 200);
+      assert.equal(started.body.walking, true, 'the walk is in flight, not awaited');
+
+      const written = await waitFor(async () => {
+        const text = await fs.readFile(path.join(dir, 'install-evidence.json'), 'utf8').catch(() => '');
+        return /acme-calendar-mcp/.test(text) ? text : null;
+      });
+      const doc = JSON.parse(written);
+      const calendar = doc.rows.find((row) => row.id === 'github:acme/calendar-mcp');
+      assert.equal(calendar.kind, 'package.json');
+      assert.deepEqual(calendar.install, { transport: 'stdio', command: 'npx', args: ['-y', 'acme-calendar-mcp'] });
+      assert.equal(doc.rows.find((row) => row.id === 'github:acme/mystery-mcp').kind, 'none');
+      assert.ok(asked.some((u) => u.includes('registry.npmjs.org')), 'the package was confirmed before the command was written down');
+
+      const after = await call('/api/overall-mcp/install-evidence', { method: 'GET' });
+      assert.equal(after.body.rows, 2);
+      assert.equal(after.body.withCommand, 1);
+      // …and the recovered command reaches the listing.
+      const all = await call('/api/overall-mcp/catalog', { body: { source: 'github-mcp', limit: 100 } });
+      assert.equal(all.body.items[0].install.args[1], 'acme-calendar-mcp');
+    }, { files });
+  });
+});
+
 /** Poll a condition until it is truthy, or fail with the last value. */
 async function waitFor(check, { timeoutMs = 3000, everyMs = 20 } = {}) {
   const deadline = Date.now() + timeoutMs;

@@ -103,6 +103,9 @@ const MARKET = {
       at: new Date().toISOString(), cached: false, stale: false, notModified: 0, items: 2,
       note: '本地索引 1758 行・3 小时前；本次列出 2 条',
       index: { rows: 1758, matched: 2, at: new Date().toISOString(), ageMs: 3 * 3600_000, stale: false, complete: true, partial: null },
+      // How many of those repositories the recovery walk turned into installable
+      // rows — a different number from the census size, so the line states both.
+      install: { rows: 400, withCommand: 320, at: new Date().toISOString(), walking: false },
     },
     'docker-catalog': { error: 'HTTP 403' },
   },
@@ -440,6 +443,9 @@ assert.ok(sourceText.includes('其中 1 个已安装'), 'per-source line names t
   assert.ok(rowText.includes('3 小时前'), 'and how old it is');
   assert.ok(rowText.includes('本次列出 2 条'), 'and how much of it this listing took');
   assert.ok(rowText.includes('Docker MCP Catalog 不可用：HTTP 403'), `a failed source shows why (got ${rowText})`);
+  // How many rows the recovery walk turned into installable rows is a second
+  // number, not a restatement of the census: the line has to carry both.
+  assert.ok(rowText.includes('已从仓库恢复 320 条安装命令'), `recovered install commands are counted (got ${rowText})`);
   assert.ok(textOf(srcSelect).includes('GitHub MCP'), 'and the new source is offered as a filter');
   assert.ok(rowText.includes('最多 8 个'), 'the cap and the https rule are stated where the URL is typed');
 

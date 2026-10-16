@@ -122,6 +122,30 @@ const samples = [
     },
     expect: { links: ['GitHub 仓库'], text: ['Go', '33.6k', '2.1k'] },
   },
+  {
+    // A GitHub row whose command was recovered from the repository itself. The
+    // panel has to show the command AND say where it came from: a command read
+    // out of a package.json is not a registry-published install, and a user who
+    // cannot tell them apart cannot judge the command in front of them.
+    name: 'github search row (command recovered from the repository)',
+    item: {
+      id: 'github:acme/mcp-markdownify-server', title: 'mcp-markdownify-server', source: 'github-mcp', author: 'acme',
+      description: 'Markdown conversion MCP server.', transport: 'stdio',
+      install: { transport: 'stdio', command: 'npx', args: ['-y', 'mcp-markdownify-server'] },
+      installSource: {
+        kind: 'package-json', registry: 'npm', name: 'mcp-markdownify-server',
+        at: '2026-10-16T00:00:00Z',
+        text: '命令来自仓库 package.json；npm 上已确认这个包存在',
+      },
+      repository: 'https://github.com/acme/mcp-markdownify-server', tags: ['mcp'],
+      stars: 4200, language: 'JavaScript', installable: true, installed: false,
+    },
+    expect: {
+      links: ['GitHub 仓库'],
+      cmd: 'npx -y mcp-markdownify-server',
+      text: ['命令来自仓库 package.json'],
+    },
+  },
 ];
 
 for (const { name, item, expect } of samples) {

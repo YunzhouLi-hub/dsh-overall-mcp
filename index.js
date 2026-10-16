@@ -17,11 +17,15 @@ import { BlockAssembler } from '@deepseek-ai/dsh-llm';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { describeAbout, toolNamesFor, aboutSourceLabel, needsInstructionsRead } from './lib/about.js';
 import { scanHost, mergeIntoRegistry, scannedSources, findOrphans, setMountHolder, clearMountHolder } from './lib/scanner.js';
-import { browseCatalog, catalogItemToEntry, fetchRepoStats, searchGithubRepos } from './lib/catalog.js';
+import { browseCatalog, catalogItemToEntry, fetchRepoStats, searchGithubRepos, USER_AGENT } from './lib/catalog.js';
 import {
   BASE_QUERIES, INDEX_FILE, INDEX_TTL_MS,
   crawlGithubRepos, indexDocumentOf, indexFreshness, mergeIndexRows, needsGithubCrawl, readIndexDocument,
 } from './lib/github-index.js';
+import {
+  EVIDENCE_FILE, applyInstallEvidence, crawlInstallEvidence, evidenceDocumentOf, needsInstallEvidence,
+  readEvidenceDocument,
+} from './lib/repo-install.js';
 import { createCatalogCache } from './lib/catalog-cache.js';
 import {
   SOURCES_MAX, addSourceTo, readSourcesDocument, removeSourceFrom, sourcesDocumentOf,
@@ -1090,6 +1094,10 @@ export async function apply(ctx) {
       githubIndexLoaded = true;
       githubIndexDamaged = null;
       log?.info?.(`overall-mcp: github index ${doc.rows.length} rows in ${walk.requests} requests (complete=${walk.complete})`);
+      // A census that just grew is the cheapest moment to ask the repositories
+      // themselves how they are run: the two walks share no quota (search API
+      // vs raw.githubusercontent), and this one is deliberately not awaited.
+      maybeCrawlInstallEvidence({ force });
       return doc;
     })()
       .catch((err) => {
@@ -1098,6 +1106,143 @@ export async function apply(ctx) {
       })
       .finally(() => { githubCrawl = null; });
     return githubCrawl;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Install evidence recovered from the repository itself (lib/repo-install.js)
+  //
+  // The GitHub source is a *discovery* source: a repository listing says what a
+  // project is and never how to run it, so its rows ship `install: null` and the
+  // panel asks the reader to configure it by hand. But the author did write the
+  // command down — in `server.json`, `package.json`, `pyproject.toml` or the
+  // README — so this walk reads those files, confirms the package really exists
+  // on npm / PyPI, and only then turns a row into an installable one carrying its
+  // provenance ("命令来自仓库 package.json"). It reads raw.githubusercontent.com,
+  // which is a CDN rather than the rate-limited API, so its pacing is politeness
+  // rather than a quota; the walk is resumable and bounded by time and requests.
+  // ---------------------------------------------------------------------------
+  const evidenceFile = path.join(dir, EVIDENCE_FILE);
+  let evidenceDoc = null;
+  let evidenceLoaded = false;
+  let evidenceDamaged = null;
+  let evidenceCrawl = null;
+  const evidenceAbort = new AbortController();
+
+  /** Read the evidence once per process; the walk below keeps it current. */
+  async function readEvidence() {
+    if (!evidenceLoaded) {
+      const { doc, damaged } = await readEvidenceDocument(evidenceFile, (file, enc) => fs.readFile(file, enc));
+      evidenceDoc = doc;
+      evidenceDamaged = damaged;
+      evidenceLoaded = true;
+      if (damaged) log?.warn?.(`overall-mcp: ${damaged}`);
+    }
+    return evidenceDoc;
+  }
+
+  /** `id -> evidence row`, so annotating a 2 MB listing is one map lookup per row. */
+  async function evidenceById() {
+    const doc = await readEvidence();
+    return new Map((doc?.rows ?? []).map((row) => [row.id, row]));
+  }
+
+  /** How the recovery is going, for the panel's source line. */
+  async function evidenceSummary() {
+    const doc = await readEvidence();
+    const rows = doc?.rows ?? [];
+    return {
+      rows: rows.length,
+      withCommand: rows.filter((row) => row.install).length,
+      at: doc?.at ?? null,
+      walking: evidenceCrawl !== null,
+    };
+  }
+
+  /** A manifest bigger than this is a generated dump, not evidence. */
+  const EVIDENCE_MAX_BYTES = 512 * 1024;
+
+  /**
+   * One raw file. `null` means "the repository does not have it" (the walk's own
+   * contract); a refusal is thrown so the walk stops and says who refused.
+   */
+  async function readRepoFile(url) {
+    const res = await fetch(url, { headers: { 'user-agent': USER_AGENT, accept: 'text/plain' } });
+    if (res.status === 404 || res.status === 410) return null;
+    if (res.status === 403 || res.status === 429) {
+      const err = new Error(`HTTP ${res.status}`);
+      err.code = 'refused';
+      throw err;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    return text.length > EVIDENCE_MAX_BYTES ? null : text;
+  }
+
+  /** Is the package really published? A command that 404s is not a button. */
+  async function packageExists({ registry, name }) {
+    const url = registry === 'npm'
+      ? `https://registry.npmjs.org/${encodeURIComponent(name)}`
+      : `https://pypi.org/pypi/${encodeURIComponent(name)}/json`;
+    const send = (method) => fetch(url, { method, headers: { 'user-agent': USER_AGENT, accept: 'application/json' } });
+    const res = await send('HEAD');
+    if (res.status === 403 || res.status === 429) {
+      const err = new Error(`HTTP ${res.status}`);
+      err.code = 'refused';
+      throw err;
+    }
+    // Some registries answer HEAD badly rather than answering it.
+    if (res.status === 405 || res.status === 501) return (await send('GET')).ok;
+    return res.ok;
+  }
+
+  /**
+   * Walk the repositories the census knows about and that still need a look, in
+   * the census's own order (most stars first), so a stop lands on the rows that
+   * matter least. Never awaited by a request — like the census walk this is
+   * derived data: an unfinished one changes nothing except the next attempt.
+   */
+  function maybeCrawlInstallEvidence({ force = false } = {}) {
+    if (evidenceCrawl) return evidenceCrawl;
+    const census = githubIndexDoc;
+    if (!census?.rows?.length) return null;
+    const held = evidenceDoc;
+    const window = force ? { retryNoneMs: 0, refreshPlanMs: 0 } : {};
+    const byId = new Map((held?.rows ?? []).map((row) => [row.id, row]));
+    const rows = census.rows
+      .filter((row) => typeof row.repository === 'string' && row.repository
+        && needsInstallEvidence(row, byId.get(row.id), window))
+      .map((row) => ({ id: row.id, repository: row.repository, stars: row.stars }));
+    if (!rows.length) return null;
+    evidenceCrawl = (async () => {
+      log?.info?.(`overall-mcp: recovering install commands for ${rows.length} repositories`);
+      const walk = await crawlInstallEvidence({
+        rows,
+        previous: held?.rows ?? [],
+        fetchText: readRepoFile,
+        verifyPackage: packageExists,
+        // `node --test` waits for the event loop to drain, so a pacing timer must
+        // never be the thing keeping the process alive.
+        sleep: (ms) => new Promise((resolve) => { const timer = setTimeout(resolve, ms); timer.unref?.(); }),
+        signal: evidenceAbort.signal,
+        onProgress: ({ requests }) => {
+          if (requests % 200 === 0) log?.info?.(`overall-mcp: install evidence at ${requests} requests`);
+        },
+      });
+      const doc = evidenceDocumentOf({ at: walk.at, rows: walk.rows, requests: walk.requests, partial: walk.partial });
+      await writeJson(evidenceFile, doc);
+      evidenceDoc = doc;
+      evidenceLoaded = true;
+      evidenceDamaged = null;
+      const withCommand = doc.rows.filter((row) => row.install).length;
+      log?.info?.(`overall-mcp: install evidence ${doc.rows.length} rows, ${withCommand} with a command (${walk.requests} requests)`);
+      return doc;
+    })()
+      .catch((err) => {
+        log?.warn?.(`overall-mcp: install evidence walk failed: ${String(err?.message ?? err)}`);
+        return null;
+      })
+      .finally(() => { evidenceCrawl = null; });
+    return evidenceCrawl;
   }
 
   /** Keep a `key -> { at }` map bounded by dropping its oldest entries. */
@@ -1181,11 +1326,25 @@ export async function apply(ctx) {
     // stale one starts here and is deliberately not awaited.
     const githubIndex = await githubIndexPayload();
     if (!source || source === 'github-mcp') maybeCrawlGithubIndex({ force: refresh });
+    // Rows the census cannot install by itself get their command from their own
+    // repository when that walk has already recovered one. The listing is
+    // annotated here rather than in the source, so the cached census stays a
+    // faithful copy of what GitHub answered and the evidence stays swappable.
+    // The walk itself is *not* started here: reading the market must not cost
+    // thousands of requests, so it starts from the census walk or an explicit
+    // POST — the panel asks for one when the market page opens.
+    const evidence = await evidenceById();
     // The listing is cached RAW: the installed flag depends on the registry and
     // is recomputed on every read, so installing/removing never shows a stale badge.
     const result = await browseCatalog({
       query: q, limit, source, customSources, cache: catalogCache, force: refresh, githubIndex,
     });
+    // The GitHub row count is the census; how many of those rows came back with a
+    // command from their own repository is a second number the panel has to be
+    // able to tell apart, so it travels on the source record.
+    if (result.sources['github-mcp'] && evidence.size) {
+      result.sources['github-mcp'].install = await evidenceSummary();
+    }
     // The panel says how old the listing is; with several sources that can
     // differ, so the age reported is the oldest one still standing.
     const oldest = Object.values(result.sources)
@@ -1193,7 +1352,11 @@ export async function apply(ctx) {
       .filter((at) => typeof at === 'string')
       .sort()[0];
     return {
-      items: result.items.map(annotateItem),
+      // Evidence first: `annotateItem` derives `installable` from the row's
+      // install, so a recovered command has to be on the row before it runs.
+      items: result.items
+        .map((item) => applyInstallEvidence(item, evidence.get(item.id)))
+        .map(annotateItem),
       errors: result.errors,
       counts: result.counts,
       sources: result.sources,
@@ -1603,6 +1766,28 @@ export async function apply(ctx) {
         const refresh = body.refresh === true || url.searchParams.get('refresh') === '1';
         return json(await doBrowse({ query, source, limit, refresh }));
       })],
+      // The install evidence behind the GitHub rows: what has been recovered,
+      // and a POST to start (or force) a walk. The panel asks for a walk when it
+      // opens the market, so a reader who never opens it never pays for it.
+      ['/api/overall-mcp/install-evidence', ['GET', 'POST'], guard(async (req) => {
+        const body = req.method === 'POST' ? await readBody(req) : {};
+        const url = new URL(req.url);
+        const force = body.force === true || url.searchParams.get('force') === '1';
+        // The walk can only read repositories it knows about, and the census is
+        // the list of them — so a POST before the first browse still works.
+        await readGithubIndex();
+        // Reading the status never starts work; only a POST asks for a walk.
+        const walking = req.method === 'POST' && maybeCrawlInstallEvidence({ force }) !== null;
+        const doc = await readEvidence();
+        const state = await evidenceSummary();
+        return json({
+          ...state,
+          requests: doc?.requests ?? 0,
+          partial: doc?.partial ?? null,
+          damaged: evidenceDamaged,
+          walking: walking || state.walking,
+        });
+      })],
       ['/api/overall-mcp/repo-stats', ['GET', 'POST'], guard(async (req) => {
         let body = {};
         if (req.method === 'POST') body = await readBody(req);
@@ -1728,6 +1913,9 @@ export async function apply(ctx) {
   }
 
   ctx.effect(() => () => {
+    // A walk in flight reads the network; it stops with the plugin rather than
+    // outliving it (it writes what it found, so nothing is lost by stopping).
+    evidenceAbort.abort();
     for (const dispose of disposers) dispose();
     for (const fiber of fibers.values()) {
       Promise.resolve(fiber.dispose()).catch(() => {});

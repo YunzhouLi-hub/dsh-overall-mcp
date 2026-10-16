@@ -26,6 +26,7 @@
 //   GET  /api/overall-mcp/servers
 //   GET  /api/overall-mcp/scan
 //   GET/POST /api/overall-mcp/catalog           { query?, source?, limit?, refresh? }
+//   GET/POST /api/overall-mcp/install-evidence   { force? } — POST starts a walk
 //   GET/POST /api/overall-mcp/repo-stats        { refresh? }
 //   GET/POST /api/overall-mcp/repo-media        { repo }
 //   POST /api/overall-mcp/install               { item, overwrite? }
@@ -1403,7 +1404,7 @@ window.__ModuleLoader__.load({
 					? `stdio · ${installRunner ?? "本地命令"}`
 					: "远程 · 免安装";
 			const installTitle = item.install
-				? [installTransport, item.install.command, item.install.url].filter(Boolean).join(" ")
+				? [installTransport, item.install.command, item.install.url, item.installSource?.text].filter(Boolean).join(" · ")
 				: installChip;
 			const CHIP_ALREADY_SHOWN = new Set(["托管", "本地", "npm", "pypi"]);
 			const tags = [...(item.tags ?? []), ...((enriched?.topics ?? []).slice(0, 3))]
@@ -2204,6 +2205,12 @@ window.__ModuleLoader__.load({
 								}, copyState === "ok" ? "已复制" : copyState === "fail" ? "复制失败，请手动选中" : "复制"),
 							]),
 							createElement("code", { key: "c", style: styles.cmd }, installCmd),
+							// Where the command came from. A command recovered from a
+							// repository is not a registry-published install, and the
+							// difference has to travel with the command itself.
+							item.installSource?.text
+								? createElement("div", { key: "p", style: styles.hint }, item.installSource.text)
+								: null,
 						])
 						: null,
 
@@ -2481,6 +2488,25 @@ window.__ModuleLoader__.load({
 				}
 			}
 
+			/**
+			 * Ask the host to look for install commands where the listing has none.
+			 *
+			 * The GitHub census knows thousands of repositories and none of them
+			 * says how to run it, so the host walks the repositories themselves —
+			 * a background job that costs thousands of requests and takes minutes.
+			 * It starts when a reader actually opens the market (here) rather than
+			 * on plugin load, and this page does not wait for it: the next visit
+			 * finds the recovered commands on the rows. At most one ask per mount.
+			 */
+			const evidenceAsked = { done: false };
+			function askForInstallEvidence() {
+				if (evidenceAsked.done) return;
+				evidenceAsked.done = true;
+				// Never fails the tab, never blocks it: the walk is the host's job
+				// and a refusal there is reported next time the market is read.
+				api("/install-evidence", { method: "POST", timeoutMs: 15000 }).catch(() => {});
+			}
+
 			async function loadMarket(options = {}) {
 				setMarketBusy(true); setMarketError("");
 				try {
@@ -2500,6 +2526,7 @@ window.__ModuleLoader__.load({
 					setMarketPage(0);
 					enrichStars(body.items ?? [], options.refresh === true);
 					enrichMedia(body.items ?? [], options.refresh === true);
+					askForInstallEvidence();
 				} catch (err) {
 					const text = String(err.message || err);
 					// A bare 404 means the host bundle running in this window predates
@@ -3642,7 +3669,14 @@ window.__ModuleLoader__.load({
 											// part of what exists (Docker Hub's anonymous page
 											// cap). The row count alone would overstate it.
 											const note = st?.note ? `（${st.note}）` : "";
-											return `${label} ${market?.counts?.[id] ?? 0}${st?.stale ? "（旧）" : ""}${at ? `（${at}）` : ""}${note}`;
+											// The census count and the recovered-command
+											// count are different facts: the first is how
+											// many repositories exist, the second is how
+											// many came back with a way to run them.
+											const recovered = st?.install?.withCommand
+												? `（已从仓库恢复 ${st.install.withCommand} 条安装命令${st.install.walking ? "，还在继续" : ""}）`
+												: "";
+											return `${label} ${market?.counts?.[id] ?? 0}${st?.stale ? "（旧）" : ""}${at ? `（${at}）` : ""}${note}${recovered}`;
 										}).join(" · ")}`),
 									...customSourceRows.map((s) => {
 										const st = market?.sources?.[s.id];
