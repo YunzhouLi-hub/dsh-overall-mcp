@@ -18,7 +18,7 @@ import { BlockAssembler } from '@deepseek-ai/dsh-llm';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { describeAbout, toolNamesFor, aboutSourceLabel, needsInstructionsRead } from './lib/about.js';
 import { scanHost, mergeIntoRegistry, collapseDuplicateRows, scannedSources, findOrphans, setMountHolder, clearMountHolder } from './lib/scanner.js';
-import { browseCatalog, catalogItemToEntry, fetchRepoStats, githubSearchQuota, searchGithubRepos, USER_AGENT } from './lib/catalog.js';
+import { browseCatalog, catalogItemToEntry, CENSUS_SOURCE, fetchRepoStats, githubSearchQuota, searchGithubRepos, USER_AGENT } from './lib/catalog.js';
 import {
   BASE_QUERIES, INDEX_FILE, INDEX_TTL_MS,
   crawlGithubRepos, indexDocumentOf, indexFreshness, mergeIndexRows, needsGithubCrawl, readIndexDocument,
@@ -1960,12 +1960,20 @@ export async function apply(ctx) {
     // repositories off disk instead of 200 off the network. The crawl behind a
     // stale one starts here and is deliberately not awaited.
     const githubIndex = await githubIndexPayload();
+    // The census view reads `github-mcp` and only the index half of it. It is
+    // told about a walk that is already running — otherwise it would answer
+    // "there is no census yet" while one is being built three lines away — but it
+    // never *starts* one: starting a census is an explicit action on the GitHub
+    // access card, not a side effect of choosing a filter in the market.
+    const censusView = source === CENSUS_SOURCE;
     // A walk just started (or is running) and has produced nothing yet. The
     // browse is told, so the GitHub source answers "正在建立索引" instead of
     // spending the *same* 10-per-minute search budget the walk is spending —
     // which is how this source used to report itself as unavailable.
     const walk = (!source || source === 'github-mcp') ? maybeCrawlGithubIndex({ force: refresh }) : null;
-    const githubWalk = !githubIndex && walk ? (githubWalkProgress ?? { requests: 0, rows: 0 }) : null;
+    const githubWalk = !githubIndex && (censusView || walk)
+      ? (githubWalkProgress ?? (censusView ? null : { requests: 0, rows: 0 }))
+      : null;
     // Rows the census cannot install by itself get their command from their own
     // repository when that walk has already recovered one. The listing is
     // annotated here rather than in the source, so the cached census stays a
@@ -2026,6 +2034,10 @@ export async function apply(ctx) {
       cached: Object.values(result.sources).every((s) => s.cached === true),
       notModified: Object.values(result.sources).reduce((sum, s) => sum + (s.notModified ?? 0), 0),
       fetchedAt: new Date(oldest ?? Date.now()).toISOString(),
+      // A view says whose rows it borrowed, so the panel can label a number it
+      // would otherwise attribute to the upstream alone. Absent for every real
+      // source read, which is every read that existed before this.
+      ...(result.aliasOf ? { aliasOf: result.aliasOf } : {}),
       servers: (await serversPayload()).servers,
     };
   }

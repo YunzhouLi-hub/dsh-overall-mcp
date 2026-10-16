@@ -633,6 +633,49 @@ test('a fresh census answers the panel from disk, with no request at all', async
   });
 });
 
+test('the census view names its upstream instead of becoming a seventh source', async () => {
+  const rows = [
+    censusRow('acme/calendar-mcp', { stars: 90, description: 'A calendar MCP server.' }),
+    censusRow('acme/other-mcp', { stars: 500 }),
+  ];
+  const files = { 'github-index.json': censusDocument(rows, { at: new Date().toISOString() }) };
+  let requests = 0;
+  await withFetchStub(async () => { requests += 1; throw new Error('no network in this test'); }, async () => {
+    await withHost(FIXTURE, async ({ call }) => {
+      const view = await call('/api/overall-mcp/catalog', { body: { source: 'census', limit: 100 } });
+      assert.equal(view.status, 200);
+      assert.equal(view.body.errors.length, 0);
+      // The panel has to be able to say whose rows these are, and the line above
+      // 「共 N 条」 must still add up: one upstream, one number.
+      assert.equal(view.body.aliasOf, 'github-mcp');
+      assert.deepEqual(Object.keys(view.body.counts), ['github-mcp']);
+      assert.equal(view.body.items.length, 2);
+      assert.deepEqual(view.body.items.map((i) => i.title), ['other-mcp', 'calendar-mcp']);
+      assert.match(view.body.sources['github-mcp'].note, /没发请求$/);
+      assert.equal(requests, 0, 'a filter is a read: not one request');
+    }, { files });
+  });
+});
+
+test('a census view with no census says so, and starting one is still an explicit act', async () => {
+  let requests = 0;
+  await withFetchStub(async () => { requests += 1; throw new Error('offline: no network in this test'); }, async () => {
+    await withHost(FIXTURE, async ({ call }) => {
+      const view = await call('/api/overall-mcp/catalog', { body: { source: 'census', limit: 100 } });
+      assert.equal(view.status, 200);
+      assert.deepEqual(view.body.items, []);
+      assert.match(view.body.sources['github-mcp'].note, /还没有普查索引/);
+      assert.equal(requests, 0, 'the view does not answer "no census" by walking one');
+
+      // The other half of that promise, and the one a background crawl would
+      // break: filtering the market left no walk running behind the answer.
+      const state = await call('/api/overall-mcp/census', { method: 'GET' });
+      assert.equal(state.body.walking, false);
+      assert.equal(state.body.rows, 0);
+    });
+  });
+});
+
 test('a stale census is served immediately, and the walk behind it starts without blocking', async () => {
   const at = new Date(Date.now() - 40 * 3600_000).toISOString();
   const rows = [censusRow('acme/calendar-mcp', { stars: 90 }), censusRow('acme/other-mcp', { stars: 500 })];

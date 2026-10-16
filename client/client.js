@@ -59,7 +59,7 @@ window.__ModuleLoader__.load({
 		// probe also checks CHANGELOG.md's newest section is this version, since
 		// a release note that stops at an older build tells a reader what
 		// changed in code they are not running.
-		const CLIENT_VERSION = "0.4.0";
+		const CLIENT_VERSION = "0.5.0";
 		// The bundle's npm package name — what the profile lists in its
 		// `dsh.profile.bundles` and what its bundle page is keyed by. The
 		// bundle cannot read package.json at runtime, so `tools/client-smoke.mjs`
@@ -193,6 +193,7 @@ window.__ModuleLoader__.load({
 			"catalog:official-registry": "官方 Registry",
 			"catalog:smithery": "Smithery",
 			"catalog:docker-catalog": "Docker MCP Catalog",
+			"catalog:github-mcp": "GitHub MCP",
 			"catalog:awesome-remote": "Awesome 远程",
 			"catalog:awesome-list": "Awesome 清单",
 		};
@@ -236,7 +237,21 @@ window.__ModuleLoader__.load({
 			"github-mcp": "GitHub",
 			"awesome-remote": "远程",
 			"awesome-list": "Awesome",
+			// Only ever used by a filter's title: the counters line is keyed by the
+			// upstream a view read, and that key is `github-mcp`.
+			census: "普查",
 		};
+
+		/**
+		 * The one entry in the market's 来源 filter that is not an upstream.
+		 *
+		 * `census` is a *view* of GitHub: the same rows, read from the local index
+		 * and never from the live search (see `CENSUS_SOURCE` in `lib/catalog.js`).
+		 * It stays out of MARKET_SOURCES deliberately — that list is also the 内置
+		 * inventory inside the 目录源 box, where a view has no upstream of its own to
+		 * report and would show up as 「未参与」 for ever.
+		 */
+		const CENSUS_OPTION = ["census", "本地普查（索引）"];
 
 		// Theme-adaptive palette. The DSH shell owns the real tokens
 		// (--dsw-alias-*); the literals are fallbacks for a shell older than this
@@ -3511,7 +3526,10 @@ window.__ModuleLoader__.load({
 			// is the same request the built-in five use.
 			const customSourceRows = catalogSources?.sources ?? [];
 			const marketSourceOptions = [
-				...MARKET_SOURCES,
+				// The census view sits next to the source it reads, so the two read as
+				// one choice with two scopes rather than as two catalogues that happen
+				// to hold the same repositories.
+				...MARKET_SOURCES.flatMap((row) => (row[0] === "github-mcp" ? [row, CENSUS_OPTION] : [row])),
 				...customSourceRows.map((s) => [s.id, s.label]),
 			];
 			// Custom ids are long and machine-made (`custom:raw-github…`); the
@@ -4306,7 +4324,16 @@ window.__ModuleLoader__.load({
 										// 「共 N 条」 and made the panel's own arithmetic look
 										// broken. The overlap is stated once, just below.
 										const shown = typeof st?.merged === "number" ? st.merged : n;
-										return `${shortSourceName(s)} ${compactCount(shown)}${marks.length ? `（${marks.join(" ")}）` : ""}`;
+										// The reader may have asked for a *view* of this source
+										// (`?source=census`): the number is still the upstream's
+										// — one upstream, one number, so 「共 N 条」 keeps adding
+										// up — but the name on it is the one they chose. The
+										// option's own label is used, so the filter and this line
+										// cannot drift apart.
+										const name = market.aliasOf === s && marketSource
+											? (marketSourceOptions.find(([value]) => value === marketSource)?.[1] ?? shortSourceName(s))
+											: shortSourceName(s);
+										return `${name} ${compactCount(shown)}${marks.length ? `（${marks.join(" ")}）` : ""}`;
 									}).join(" · "),
 								`其中 ${installedCount} 个已安装`,
 								market.deduped

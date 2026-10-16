@@ -20,6 +20,7 @@
 | 🔑 | GitHub credentials and census resume | A token can be pasted in the panel (or taken from `gh auth token`); it takes effect only after validation and is sent only to GitHub hosts. **Anonymous still works** — the budget is just 60/h instead of 5,000/h. One network failure no longer ends a census (per-repository retry with backoff, stop after repeated rejections), and the next run resumes from where it stopped (`GET\|POST\|DELETE /auth`) |
 | ⏯️ | Start and stop the census yourself | The GitHub access card on the *Registered* tab states where the census stands (how many rows, when it last read, who stopped it) and offers the verb that matches: *start* (no waiting for the cache to expire) or *stop* with live progress. Stopping is safe — rows are written as they arrive, the next run resumes from the missing repositories, and a stopped run will not spend budget on install evidence afterwards (`GET\|POST /census`, round 22) |
 | 🔧 | Start and stop the recovery walk yourself | The same card carries a **second walk** (reading repository evidence to recover install commands) with its own state line and its own verb: `tried 78 / 2.1k repositories` while running, *resume recovery* when rows are left. It used to start by itself when the market opened and could only be ended by unloading the plugin — and a full pass is 150ms × more than two thousand repositories (`GET\|POST /install-evidence`, round 23) |
+| 🗂️ | Read the local census as a source | The source filter offers *local census (index)* right beside *GitHub*: same index on disk, but **not one request spent**, and an old index is not quietly re-walked. It is not a seventh source — counts still belong to GitHub (one upstream, one number) — it just makes "I am reading the list I already have" a choice you can make (`?source=census`, round 24) |
 | 🧮 | Every number and time states its meaning | Per-source counts use the same ruler as "N total" (deduplicated, with `deduped` shown separately); "listing read at" is local read time while "upstream updated" is the repository's last push; when sorting by usage, a card with no usage data says so instead of silently sorting by quality; inferred categories carry "(inferred)" on the card, in the detail panel and in the category dropdown |
 
 ## Quick start
@@ -165,7 +166,7 @@ The same `npx -y rea-agents@6.5.0 mcp` command once appeared as **five rows** (f
 `GET|POST|DELETE /auth`, `GET|POST /census` (read status / `{action:'start'|'stop'}`),
 `GET|POST /install-evidence` (the recovery walk: read status / `{action:'start'|'stop', force?}`),
 `GET|POST /updates`, `POST /update`,
-`GET|POST /catalog?query=&source=&limit=&refresh=`,
+`GET|POST /catalog?query=&source=&limit=&refresh=` (`source=census` is the view over the local census index, see round 24),
 `GET|POST /sources`, `POST /sources/remove`, `POST /scan`,
 `POST /install`, `POST /set-enabled`, `POST /set-source-enabled`, `POST /remove`,
 `POST /forget-orphans`, `POST /favorite`, `GET /favorites`,
@@ -189,7 +190,7 @@ Two layers (`lib/catalog-cache.js`): the **URL layer** (per-URL `ETag` + body, `
 
 ## Identity line and action log (round 18)
 
-Host plugin code is loaded **once, at DSH startup**, and no version number can answer "which code is this panel running". The header's second line now reads `GET /status`: `plugin v0.4.0 · pid 4242 · up 3h 12m · 5 data files · 2 log lines`. `/status` separates three groups because they fail differently — `plugin` (id/version from `package.json`/directory actually loaded/`loadedAt`, plus each source file's `mtime` and size and a `stale` flag when disk is newer), `host` (pid, startedAt, uptime, node, electron, platform, arch) and `data` (the directory, every file's bytes and time, plus `census`/`evidence`/`quota`/`errors`). When `stale` is set the header draws `⚠ code updated, restart DSH` — that state and "the bug is still there" look identical otherwise.
+Host plugin code is loaded **once, at DSH startup**, and no version number can answer "which code is this panel running". The header's second line now reads `GET /status`: `plugin v0.5.0 · pid 4242 · up 3h 12m · 5 data files · 2 log lines`. `/status` separates three groups because they fail differently — `plugin` (id/version from `package.json`/directory actually loaded/`loadedAt`, plus each source file's `mtime` and size and a `stale` flag when disk is newer), `host` (pid, startedAt, uptime, node, electron, platform, arch) and `data` (the directory, every file's bytes and time, plus `census`/`evidence`/`quota`/`errors`). When `stale` is set the header draws `⚠ code updated, restart DSH` — that state and "the bug is still there" look identical otherwise.
 
 `GET /events?limit=` reads the tail of `events.ndjson` (default 100, max 500, oldest first, with `total` and `damaged`). It records **actions, not conversations**: which source answered how many rows in how long, quota exhaustion, scan results, census progress, install/mount outcome, registry repair. Only metadata — server names, source ids, counts, durations, error text — and never a credential. An older host without the route says so instead of pretending "nothing has been recorded this run".
 
@@ -254,6 +255,18 @@ Stopping happens **between two requests**, not after two thousand: the walk chec
 In the panel, a second line sits under the census line and swaps its own verb with its own state: *resume recovery* while rows are left (the walk skips what it already tried), *stop recovery* with live progress while it runs. The two lines keep separate verbs because the two walks share no budget and no clock — calling both of them "census" is exactly how a reader came to press the wrong button. The line also states the unfinished pass (`not finished: stopped at 900 rows: …`), which is the reason the verb is worth pressing.
 
 Reading never changes state: `GET /census?action=…` and `GET /install-evidence?action=…` are both a **400** (`action must be sent as a POST`, a new `lib/http-status.js` rule), and so is an unknown verb (`unknown evidence action`). An innocent prefetch should not be the difference between a running recovery and a stopped one.
+
+## The local census is a source you can read (round 24)
+
+Rounds 22 and 23 handed the reader the verbs for both walks. What was still missing was the cheapest thing of all: **looking at the index they built**. The market page had one GitHub source, and it already read the local census file — so "I just asked GitHub" and "I am reading the list this machine already has" looked identical in the panel, even though the second one costs nothing.
+
+`/catalog?source=census` is that view, and it is a **view, not a seventh source**. `lib/catalog.js` exports it as `CENSUS_SOURCE`; `browseCatalog` normalises the pass to `github-mcp`, so counts still land in the one `github-mcp` key and the reply carries `aliasOf:'github-mcp'` only to say "these rows were borrowed". The reason is arithmetic, not taste: those ~1.8k rows were already counted as `github-mcp`, so a source of its own would make "N total" count them twice — and the source list is a public contract. **One upstream, one number** still holds.
+
+The view reads the index and **spends nothing**. With `indexOnly` set, `fetchGithubMcp` takes the index branch and returns immediately: with no index yet it answers "no census index on this machine: start one from the GitHub access card and this will read it directly, spending no requests", and it never falls through to the "index is old, walk it while I am here" path — under the view `githubWalk` is pinned to `null`. An index older than 24 hours only decides whether it is *marked* old, not whether it can be read: looking at a list must not turn into up to 48 requests.
+
+In the panel the filter offers *local census (index)* right beside *GitHub* (same dropdown; `MARKET_SOURCES` is untouched because those are the count keys), and the numbers line is relabelled by the choice — `local census (index) 1.8k` instead of `GitHub 1.8k`. The number does not move: the name comes from the option's own label, so the filter and the line cannot drift apart. Cache entries are separate too (the key gains a `|census` suffix), so reading the view and then GitHub cannot pass one off as the other. The view changes no state at all: it starts no census, advances no recovery walk, and does not count as "somebody looked at GitHub".
+
+Command line equivalent: `POST /catalog {"source":"census","query":"filesystem","limit":50}` — same `aliasOf`, `transient` and `counts` the panel sees.
 
 ## Host locations scanned
 
@@ -405,6 +418,15 @@ Same cause: the host loads once. `plugin.source.stale` in `GET /status` is the m
 **Why does a group switch take several seconds?**
 
 Because every row in that source really does spawn a `dsh-mcp-client` subprocess and complete a handshake; it is not a boolean. Before round 20 this was serial, worst case `members × 8s` (40 seconds measured for five members); now at most four are in flight, so five members take about two waves. "switching…" is that work's progress, not a hang. The same round guarantees **one mount per name**: duplicate same-name rows used to each attempt a mount and the loser was recorded as "provided by another mcp-client", an artefact of the concurrency itself.
+
+**I only want the repositories this machine already censused, without spending requests**
+
+Pick *local census (index)* in the market page's source filter (right beside *GitHub*):
+
+- It reads the local census index and **spends no requests**; an old index is not quietly re-walked — refreshing it is the *start* verb on the GitHub card.
+- It is **not a new source**: counts still belong to GitHub (one upstream, one number), and only the name on the numbers line follows your choice (`local census (index) 1.8k`), so the filter and the line cannot disagree.
+- With no index yet it says so and points at *start* on the GitHub card; the view is read-only and will not start anything for you.
+- Command line equivalent: `POST /catalog {"source":"census"}` (round 24).
 
 **I want to run the install-command recovery now, or stop it**
 

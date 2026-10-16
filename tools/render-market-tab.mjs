@@ -295,6 +295,10 @@ globalThis.fetch = async (url, init) => {
       refresh = body.refresh === true;
     } catch { source = ''; }
     calls.push(`POST /catalog${source ? ` source=${source}` : ''}${refresh ? ' refresh' : ''}`);
+    // A view answers under its upstream's key — the listing below carries one
+    // number, `github-mcp` — and names the upstream it borrowed. That pair is the
+    // whole shape `?source=census` sends, so the panel is exercised on it.
+    if (source === 'census') return ok({ ...MARKET, aliasOf: 'github-mcp' });
     return ok(MARKET);
   }
   // The user's own sources: GET lists them, POST adds one, /remove drops one.
@@ -958,6 +962,37 @@ function containsNode(root, target) {
   console.log('filters: 分类 narrows in place, 全部市场 re-queries the host ✓');
 
   groupSelect.props.onChange({ target: { value: '' } });
+  srcSelect.props.onChange({ target: { value: '' } });
+  await render();
+}
+
+// --- 4d-2. the census view: one upstream, named as the reader asked ---------
+// `census` is not a seventh source. It is the GitHub read under a name that says
+// "the local index, not a live search", so the line above 「共 N 条」 has to keep
+// ONE number for it — labelled by the choice the reader made rather than by the
+// upstream it borrowed, or the filter said 本地普查 and the line answered GitHub.
+{
+  const srcSelect = loadedNodes.find((n) => n.type === 'select'
+    && directChildren(n).some((o) => o.type === 'option' && o.props?.value === 'census'));
+  assert.ok(srcSelect, 'the source select offers the census view');
+  const options = directChildren(srcSelect);
+  const values = options.map((o) => o.props?.value);
+  const at = values.indexOf('github-mcp');
+  assert.deepEqual(values.slice(at, at + 2), ['github-mcp', 'census'],
+    'the view sits beside the source it reads');
+  assert.equal(textOf(options.find((o) => o.props?.value === 'census')), '本地普查（索引）');
+
+  const before = calls.length;
+  srcSelect.props.onChange({ target: { value: 'census' } });
+  const viewed = walk(await render());
+  const asked = calls.slice(before).join(' ');
+  assert.ok(asked.includes('source=census'), `the view is its own request (asked: ${asked || 'nothing'})`);
+
+  const srcline = textOf(findByKey(viewed, 'srcline')[0]);
+  assert.ok(srcline.includes('本地普查（索引）'), `the number is named by the choice (got ${srcline})`);
+  assert.ok(!/GitHub \d/.test(srcline), `and not by the upstream it borrowed (got ${srcline})`);
+  console.log('the census view: one number for the rows, named as the reader asked ✓');
+
   srcSelect.props.onChange({ target: { value: '' } });
   await render();
 }

@@ -8,7 +8,7 @@ import {
   forgetGithubSearchQuota, githubSearchQuota,
   functionalGroupOf, inferGroupOf, groupSourceOf,
 } from '../lib/catalog.js';
-import { CATALOG_SOURCES } from '../lib/catalog.js';
+import { CATALOG_SOURCES, CENSUS_SOURCE } from '../lib/catalog.js';
 import { createCatalogCache } from '../lib/catalog-cache.js';
 
 // The companion list of *hosted* endpoints: `- [Title](home) \`url\`` with an
@@ -1241,6 +1241,63 @@ test('the index note reports its age in the same voice as the Docker note', () =
   assert.equal(githubIndexNote({ rows: [] }, { listed: 0 }), '本地索引 0 行・时间未知；本次列出 0 条');
   assert.equal(describeAge(90_000), '1 分钟前');
   assert.equal(describeAge(undefined), '时间未知');
+});
+
+test('the census view is the index or nothing: a filter never spends the walk budget', async () => {
+  let requests = 0;
+  const fetchImpl = async (url) => { requests += 1; return okFetch(url); };
+
+  // No census yet. The source answers this by asking GitHub; the view must not —
+  // its queries would come out of the same 10-per-minute window the walk that has
+  // to finish the census is already spending.
+  const empty = await fetchGithubMcp({ fetchImpl, indexOnly: true });
+  assert.equal(requests, 0, 'an absent census is a state to report, not three search queries');
+  assert.deepEqual(empty.items, []);
+  assert.match(empty.note, /本机还没有普查索引/);
+  assert.equal(empty.transient, true, '«nothing yet» is not a listing, so it is not remembered as one');
+
+  const rows = Array.from({ length: 12 }, (_, i) => githubItemOf(ghRepo(`acme/server-${i}`, 500 - i, ['mcp']), { includeRaw: false }));
+  const read = await fetchGithubMcp({
+    fetchImpl, indexOnly: true, limit: 5,
+    githubIndex: { rows, at: new Date().toISOString(), ageMs: 60_000 },
+  });
+  assert.equal(requests, 0);
+  assert.equal(read.items.length, 5);
+  assert.equal(read.index.rows, 12);
+  assert.match(read.note, /本次列出 5 条，没发请求$/);
+
+  // The same source read as a source: this one does fall back to the live search,
+  // which is exactly the difference the view exists to draw.
+  await fetchGithubMcp({ fetchImpl, limit: 3 });
+  assert.equal(requests, 3);
+});
+
+test('a view keeps one counts key and its own cache entry', async () => {
+  const rows = Array.from({ length: 6 }, (_, i) => githubItemOf(ghRepo(`acme/census-${i}`, 300 - i, ['mcp']), { includeRaw: false }));
+  const githubIndex = { rows, at: new Date().toISOString() };
+  const cache = createCatalogCache();
+  const fetchImpl = taggedFetch({});
+
+  const view = await browseCatalog({ source: CENSUS_SOURCE, cache, fetchImpl, githubIndex });
+  assert.deepEqual(Object.keys(view.counts), ['github-mcp'], 'a view is the GitHub read: it adds no seventh number to the line');
+  assert.equal(view.aliasOf, 'github-mcp');
+  assert.equal(view.items.length, rows.length);
+  assert.equal(fetchImpl.calls.length, 0, 'and it reads the index, not the network');
+  assert.match(view.sources['github-mcp'].note, /没发请求/);
+
+  // What was remembered belongs to the view, not to the source: a live read with
+  // no index in hand has to ask GitHub rather than be handed the census.
+  const live = await browseCatalog({ source: 'github-mcp', cache, fetchImpl });
+  assert.ok(fetchImpl.calls.length > 0, 'the live source is not served the view\'s listing');
+  assert.equal(live.aliasOf, undefined, 'a plain source read is not a view');
+
+  // …and the view is remembered as itself, with the census rows it read.
+  const afterLive = fetchImpl.calls.length;
+  const again = await browseCatalog({ source: CENSUS_SOURCE, cache, fetchImpl, githubIndex });
+  assert.equal(fetchImpl.calls.length, afterLive);
+  assert.equal(again.sources['github-mcp'].cached, true);
+  assert.equal(again.items.length, rows.length);
+  assert.equal(again.items[0].repository, 'https://github.com/acme/census-0');
 });
 
 test('an indexed row carries no raw payload and no invented installer', () => {
