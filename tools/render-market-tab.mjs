@@ -254,6 +254,22 @@ let liveCensus = {
   loaded: true,
   damaged: null,
 };
+// The recovery walk, as /status reports it and as the two verbs change it. The
+// numbers are the shape the docs quote (77 of 2111 read before a stop), so the
+// row says something a reader can check against install-evidence.json.
+let liveEvidence = {
+  rows: 77,
+  withCommand: 54,
+  at: '2026-01-01T09:40:00.000Z',
+  requests: 260,
+  partial: '已手动停止（已试 77 个仓库，下次接着走）',
+  walking: false,
+  progress: null,
+  ended: { reason: 'user', at: '2026-01-01T09:40:00.000Z' },
+  plan: { at: '2026-01-01T09:40:00.000Z', planned: 2111, attempted: 77, remaining: 2034, retries: 3, requests: 260, stopped: 'user' },
+  complete: false,
+  damaged: null,
+};
 // A host older than the panel has no /events route at all. Flipped for the
 // first half of section 6c, which is the only way to reach that branch: the
 // page only re-reads the log when the box is opened.
@@ -319,12 +335,6 @@ globalThis.fetch = async (url, init) => {
     calls.push('GET /auth');
     return ok(liveAuth);
   }
-  // A walk the panel asks for rather than one it waits on: the reply is the
-  // state right after the request, with `walking` naming what is in flight.
-  if (path.startsWith('/install-evidence')) {
-    calls.push('POST /install-evidence');
-    return ok({ ...STATUS.evidence, walking: init?.method === 'POST', partial: null, damaged: false });
-  }
   // The census, and the two verbs the reader owns. The reply is the state right
   // after the call: `started` says *this* call started a walk, `walking` says
   // one is running, and `stopping` says there was one to stop.
@@ -341,6 +351,34 @@ globalThis.fetch = async (url, init) => {
     }
     calls.push('GET /census');
     return ok({ ...liveCensus, started: false, stopping: false });
+  }
+  // The recovery walk behind the GitHub rows, with the same three shapes: a GET
+  // reads, `start` begins (and says whether *this* call was the one that did),
+  // `stop` ends what is running.
+  if (path.startsWith('/install-evidence')) {
+    if (init?.method === 'POST') {
+      const body = JSON.parse(init?.body ?? '{}');
+      calls.push(`POST /install-evidence action=${body.action ?? 'start'}`);
+      if (body.action === 'stop') {
+        liveEvidence = {
+          ...liveEvidence,
+          walking: false,
+          progress: null,
+          ended: { reason: 'user', at: '2026-01-01T10:06:00.000Z' },
+          partial: '已手动停止（已试 78 个仓库，下次接着走）',
+        };
+        return ok({ ...liveEvidence, stopping: true, started: false });
+      }
+      liveEvidence = {
+        ...liveEvidence,
+        walking: true,
+        partial: null,
+        progress: { requests: 261, attempted: 78, planned: 2111 },
+      };
+      return ok({ ...liveEvidence, started: true, stopping: false });
+    }
+    calls.push('GET /install-evidence');
+    return ok({ ...liveEvidence, started: false, stopping: false });
   }
   // The install that reached the registry and did not mount — the reply the
   // panel must not summarise as success.
@@ -386,7 +424,7 @@ globalThis.fetch = async (url, init) => {
   // Which build this panel is talking to, and what that build has been doing.
   if (path.startsWith('/status')) {
     calls.push('GET /status');
-    return ok({ ...STATUS, auth: liveAuth, census: liveCensus });
+    return ok({ ...STATUS, auth: liveAuth, census: liveCensus, evidence: liveEvidence });
   }
   if (path.startsWith('/events')) {
     calls.push('GET /events');
@@ -1116,6 +1154,17 @@ assert.ok(registryNodes.some((n) => n.type === 'button' && textOf(n) === '重新
 // offer the single action a credential changes: carrying the walk on from where
 // it stopped.
 {
+  // A half-read index is the state this box exists to admit: the walk is paced,
+  // anonymous GitHub is 60 requests an hour, and a reader coming back to it has
+  // to be able to tell a stopped pass from a finished one. The fixture starts
+  // finished, so this section puts the unfinished walk on disk itself.
+  liveCensus = {
+    ...liveCensus,
+    rows: 900,
+    complete: false,
+    partial: '停在 900 行：第 42 次请求失败：fetch failed',
+    ended: { reason: 'user', at: '2026-01-01T09:35:00.000Z' },
+  };
   const market = walk(await render());
   const regTabs = walk(findByKey(market, 'tabs')[0]).filter((n) => n.type === 'button');
   regTabs.find((n) => textOf(n).startsWith('已注册')).props.onClick();
@@ -1126,7 +1175,8 @@ assert.ok(registryNodes.some((n) => n.type === 'button' && textOf(n) === '重新
   assert.ok(boxText.includes('GitHub 访问'), `the box names itself — got: ${boxText}`);
   assert.ok(boxText.includes('匿名访问 · 60 次/小时'), `and says where the credential stands — got: ${boxText}`);
   assert.ok(boxText.includes('不填也能跑'), 'the hint says anonymity is a supported state, not a broken one');
-  assert.ok(boxText.includes('普查没有读完'), `a partial census is admitted in the box — got: ${boxText}`);
+  assert.ok(boxText.includes('没读完'),
+    `a partial census is admitted in the box — got: ${boxText}`);
   assert.equal(findByKey(registry, 'autherr').length, 0, 'no error line before anything went wrong');
 
   // The one secret the panel accepts: rendered as a password, and held as a
@@ -1169,17 +1219,13 @@ assert.ok(registryNodes.some((n) => n.type === 'button' && textOf(n) === '重新
   assert.ok(textOf(findByKey(cleared, 'authbox')[0]).includes('匿名访问 · 60 次/小时'),
     'and the box goes back to anonymous');
 
-  // 继续普查 resumes rather than restarts: the route it posts to is the one the
-  // host already uses to decide which rows still lack evidence.
-  const beforeResume = calls.length;
-  buttonByText(walk(findByKey(cleared, 'authbox')[0]), '继续普查').props.onClick();
-  await settle();
-  const resumed = walk(await render());
-  assert.ok(calls.slice(beforeResume).join(' ').includes('POST /install-evidence'),
-    'carrying the census on posts for a walk');
-  assert.ok(textOf(findByKey(resumed, 'authbox')[0]).includes('普查继续中'),
-    'and the box says the walk is running');
-  console.log('GitHub access: anonymous cost, a pasted token, and the census it resumes ✓');
+  // Carrying the census on is no longer a separate button with its own idea of
+  // what "resume" meant: it is the census line's own verb, and section 6e is
+  // where it is pressed. What this section still owes the reader is that the box
+  // keeps saying the walk is unfinished — the reason the verb is worth pressing.
+  assert.ok(textOf(findByKey(cleared, 'authbox')[0]).includes('上次是手动停止的'),
+    'and the box still says the last census ended early');
+  console.log('GitHub access: anonymous cost, a pasted token, and the unfinished census it admits ✓');
 }
 
 // --- 6e. the census itself: a state line, and the two verbs a reader owns --
@@ -1189,6 +1235,10 @@ assert.ok(registryNodes.some((n) => n.type === 'button' && textOf(n) === '重新
 // answer "is one running?", and the button beside it has to be the verb that
 // matches the answer.
 {
+  // 6d left the index half-read on purpose, because that is what its box is
+  // about. A finished walk is what *this* section describes, so the census goes
+  // back to the way a completed pass leaves it.
+  liveCensus = { ...liveCensus, rows: 1758, complete: true, partial: null, ended: null };
   const market = walk(await render());
   const regTabs = walk(findByKey(market, 'tabs')[0]).filter((n) => n.type === 'button');
   regTabs.find((n) => textOf(n).startsWith('已注册')).props.onClick();
@@ -1234,6 +1284,80 @@ assert.ok(registryNodes.some((n) => n.type === 'button' && textOf(n) === '重新
   assert.ok(buttonByText(walk(findByKey(stopped, 'censusline')[0]), '开始普查'),
     'and the button goes back to the verb that matches the state');
   console.log('the census: one state line, and the verb that matches it ✓');
+}
+
+// --- 6f. the recovery walk: its own line, its own verbs ---------------------
+// The second background walk, and the one that reads two thousand repositories
+// at 150ms each. It used to be started by opening the market and stopped by
+// unloading the plugin; now it has the same pair of verbs the census has, on its
+// own line, and the line has to say which of the two it is (including when the
+// last pass stopped early, which is why a reader would press start again).
+{
+  const market = walk(await render());
+  const regTabs = walk(findByKey(market, 'tabs')[0]).filter((n) => n.type === 'button');
+  regTabs.find((n) => textOf(n).startsWith('已注册')).props.onClick();
+  // Rendering the market is what fires the panel's own fire-and-forget ask, so
+  // the fixture is walking by now. The reader this section is about has just
+  // stopped a pass: put the walk back the way a stop leaves it, which is the
+  // state whose verb the row has to offer.
+  liveEvidence = {
+    ...liveEvidence,
+    walking: false,
+    progress: null,
+    partial: '已手动停止（已试 77 个仓库，下次接着走）',
+    ended: { reason: 'user', at: '2026-01-01T09:40:00.000Z' },
+    plan: { ...liveEvidence.plan, attempted: 77, remaining: 2034, requests: 260, stopped: 'user' },
+  };
+  const registry = walk(await render());
+  assert.ok(findByKey(registry, 'authbox')[0], 'the GitHub box is where these verbs live');
+  const row = findByKey(registry, 'evidenceline')[0];
+  assert.ok(row, 'the GitHub box carries a recovery row of its own');
+  const rowText = textOf(row);
+  assert.match(rowText, /查过 77 个仓库/, `the row counts what has been looked at — got: ${rowText}`);
+  assert.ok(rowText.includes('恢复出 54 条安装命令'), `and how many commands came back — got: ${rowText}`);
+  assert.ok(rowText.includes('上次是手动停止的'),
+    `the host's reason is shown rather than the walk's flat "已中止" — got: ${rowText}`);
+  assert.ok(rowText.includes('没读完'),
+    `and the unfinished pass is stated, because it is the reason the button is worth pressing — got: ${rowText}`);
+  // The census above already ended, so the *only* thing 开始普查 in this box means
+  // is the census; the recovery line must name its own verb or the two collide.
+  // The label is 接着恢复 while the walk still has rows left to try — the walk
+  // itself skips what it has, so "接着" is the honest word for it.
+  const start = buttonByText(walk(row), '接着恢复');
+  assert.ok(start, 'a stopped walk with rows left offers 接着恢复');
+  assert.ok(buttonByText(walk(registry), '开始普查'), 'and the census keeps its own verb');
+  assert.equal(buttonByText(walk(row), '停止恢复'), undefined, 'a stopped walk does not offer a stop');
+
+  const beforeStart = calls.length;
+  start.props.onClick();
+  await settle();
+  const startCalls = calls.slice(beforeStart).join(' ');
+  assert.ok(startCalls.includes('POST /install-evidence action=start'), `starting posts the verb (got: ${startCalls})`);
+  assert.ok(startCalls.includes('GET /status'), 'and re-reads the state it just changed');
+  const walking = walk(await render());
+  const walkingRow = findByKey(walking, 'evidenceline')[0];
+  const walkingText = textOf(walkingRow);
+  assert.match(walkingText, /正在恢复安装命令：已试 78 \/ 2\.1k 个仓库/,
+    `a running walk reports progress against its own plan — got: ${walkingText}`);
+  assert.ok(!walkingText.includes('没读完'), 'a running walk does not also read as unfinished');
+  assert.ok(textOf(findByKey(walking, 'note')[0]).includes('开始恢复安装命令'),
+    'and the outcome is reported in the box');
+  const stop = buttonByText(walk(walkingRow), '停止恢复');
+  assert.ok(stop, 'a running walk offers 停止恢复 instead');
+  assert.equal(stop.props.disabled, false, 'stopping is available while it runs');
+
+  const beforeStop = calls.length;
+  stop.props.onClick();
+  await settle();
+  assert.ok(calls.slice(beforeStop).join(' ').includes('POST /install-evidence action=stop'), 'stopping posts its verb');
+  const stopped = walk(await render());
+  const stoppedRow = findByKey(stopped, 'evidenceline')[0];
+  const stoppedText = textOf(stoppedRow);
+  assert.ok(stoppedText.includes('上次是手动停止的'), `the stop is recorded with its reason — got: ${stoppedText}`);
+  assert.ok(stoppedText.includes('已试 78 个仓库'),
+    `and the walk's own count of what it tried survives into the line — got: ${stoppedText}`);
+  assert.ok(buttonByText(walk(stoppedRow), '接着恢复'), 'and the button goes back to the verb that matches the state');
+  console.log('the recovery walk: one line, its own verbs, and a stop that says where it got ✓');
 }
 
 // --- 6b. clicking that button installs the plugin and says a restart is due --

@@ -59,7 +59,7 @@ window.__ModuleLoader__.load({
 		// probe also checks CHANGELOG.md's newest section is this version, since
 		// a release note that stops at an older build tells a reader what
 		// changed in code they are not running.
-		const CLIENT_VERSION = "0.3.0";
+		const CLIENT_VERSION = "0.4.0";
 		// The bundle's npm package name — what the profile lists in its
 		// `dsh.profile.bundles` and what its bundle page is keyed by. The
 		// bundle cannot read package.json at runtime, so `tools/client-smoke.mjs`
@@ -2701,24 +2701,38 @@ window.__ModuleLoader__.load({
 			}
 
 			/**
-			 * Carry the census on from where it stopped.
+			 * Ask the host to carry the install-command recovery on, or to end
+			 * the pass running.
 			 *
-			 * A walk that hit the anonymous rate limit leaves the rest of its
-			 * plan unread; the host already knows which rows still lack evidence
-			 * (that is what `needsInstallEvidence` is), so asking for another
-			 * walk resumes rather than restarts — and with a token in place the
-			 * remaining rows are read at 5000 requests an hour instead of 60.
+			 * The walk reads a repository's manifest files to turn a GitHub row
+			 * into a row with a runnable command; it is the longest thing this
+			 * plugin does (150ms between rows, up to 25 minutes and 6000 requests
+			 * per pass), and until this function existed the only way to end one
+			 * was to unload the plugin — the `dispose` path aborted it, no caller
+			 * did.
 			 */
-			async function resumeCensus() {
+			async function evidenceAction(action) {
 				if (authBusy) return;
 				setAuthBusy(true);
 				try {
-					const state = await api("/install-evidence", { method: "POST", timeoutMs: 15000 });
-					setAuthNote(state?.walking ? "普查继续中…" : "没有需要补的仓库了");
+					const state = await api("/install-evidence", {
+						method: "POST", body: JSON.stringify({ action }), timeoutMs: 15000,
+					});
+					if (action === "stop") {
+						setAuthNote(state?.stopping ? "正在停止恢复安装命令…" : "没有在跑的恢复");
+					} else if (state?.started) {
+						setAuthNote("开始恢复安装命令，每个仓库 0.15 秒");
+					} else if (state?.skipped === "no-census") {
+						setAuthNote("还没有普查索引，先做一次普查");
+					} else if (state?.skipped === "nothing-to-do") {
+						setAuthNote("没有需要补的仓库了");
+					} else {
+						setAuthNote("恢复已经在跑了");
+					}
 					await loadStatus();
 					if (logOpen) loadEvents();
 				} catch (err) {
-					setAuthNote(`继续普查失败：${String(err.message || err)}`);
+					setAuthNote(`恢复安装命令失败：${String(err.message || err)}`);
 				} finally {
 					setAuthBusy(false);
 				}
@@ -2857,7 +2871,11 @@ window.__ModuleLoader__.load({
 				evidenceAsked.done = true;
 				// Never fails the tab, never blocks it: the walk is the host's job
 				// and a refusal there is reported next time the market is read.
-				api("/install-evidence", { method: "POST", timeoutMs: 15000 }).catch(() => {});
+				// The verb is explicit even though a bare POST still means "start"
+				// (older panels send that, and the route keeps accepting it).
+				api("/install-evidence", {
+					method: "POST", body: JSON.stringify({ action: "start" }), timeoutMs: 15000,
+				}).catch(() => {});
 			}
 
 			async function loadMarket(options = {}) {
@@ -3594,16 +3612,13 @@ window.__ModuleLoader__.load({
 							: null,
 						auth.source === "env" ? "来自环境变量" : auth.source === "gh" ? "来自本机 gh" : null,
 					].filter(Boolean).join(" · ");
-			// A census that stopped early is the one thing a credential would have
-			// changed, so the box offers to carry it on from where it stopped.
-			const censusPartial = typeof hostStatus?.evidence?.partial === "string"
-				? hostStatus.evidence.partial
-				: "";
-			// The census itself: how many rows the local index holds, whether a
-			// walk is running right now (and how far it has got), and how the last
-			// one ended. `/status` is the only place that can say the last two —
-			// the index file says "正在抓取" while a walk runs and "已手动停止"
-			// after a stop, and never says which request the walk is on.
+			// The two background walks this plugin runs, described separately.
+			// One builds the local GitHub census (search API, one request every
+			// 6.5s, at most 48); the other turns census rows into rows that carry
+			// a runnable command (raw.githubusercontent, one request every 150ms,
+			// up to 25 minutes and 6000 requests). They share no budget and no
+			// clock — calling both "普查" is how a reader came to press the wrong
+			// button and then wonder why the other one kept going.
 			const census = hostStatus?.census ?? null;
 			const censusWalk = census?.progress ?? null;
 			const censusLine = !census
@@ -3618,8 +3633,41 @@ window.__ModuleLoader__.load({
 						census.rows ? `普查索引 ${compactCount(census.rows)} 行` : "还没有普查索引",
 						census.at ? `${census.complete ? "读完于" : "上次读到"} ${sourceClock(census.at)}` : null,
 						census.ended?.reason === "user" ? "上次是手动停止的" : null,
+						typeof census.partial === "string" && census.partial ? `没读完：${clipReason(census.partial, 40)}` : null,
 						census.damaged ? `文件损坏：${census.damaged}` : null,
 					].filter(Boolean).join(" · ");
+
+			// The recovery walk, in the same shape: what is on disk, whether a
+			// pass is running, how far through its own plan it is, and — the file
+			// cannot say this — whether it was a reader or the host unload that
+			// ended the last one.
+			const evidence = hostStatus?.evidence ?? null;
+			const evidenceWalk = evidence?.progress ?? null;
+			const evidencePlan = evidence?.plan ?? null;
+			const evidencePartial = typeof evidence?.partial === "string" ? evidence.partial : "";
+			const evidenceLine = !evidence
+				? "宿主插件还是旧版本，读不到恢复安装命令的状态"
+				: evidence.walking
+					? [
+						`正在恢复安装命令：已试 ${compactCount(evidenceWalk?.attempted ?? evidencePlan?.attempted ?? 0)} / ${compactCount(evidenceWalk?.planned ?? evidencePlan?.planned ?? 0)} 个仓库`,
+						evidenceWalk?.id ? `正在读 ${String(evidenceWalk.id).replace(/^github:/, "")}` : null,
+						evidenceWalk?.requests ? `${compactCount(evidenceWalk.requests)} 次请求` : null,
+						"可以随时停止",
+					].filter(Boolean).join(" · ")
+					: [
+						evidence.rows ? `查过 ${compactCount(evidencePlan?.attempted ?? evidence.rows)} 个仓库` : "还没有查过仓库",
+						evidence.withCommand ? `恢复出 ${compactCount(evidence.withCommand)} 条安装命令` : null,
+						evidence.at ? `${evidence.complete ? "读完于" : "上次读到"} ${sourceClock(evidence.at)}` : null,
+						evidence.ended?.reason === "user" ? "上次是手动停止的" : null,
+						evidencePartial ? `没读完：${evidencePartial}` : null,
+						evidence.damaged ? `文件损坏：${evidence.damaged}` : null,
+					].filter(Boolean).join(" · ");
+			// What the button says: the two other labels are the same verb
+			// ("start") because the walk itself skips rows that already have
+			// evidence — "接着恢复" is only honest when there is something left.
+			const evidenceButton = evidence?.walking
+				? "停止恢复"
+				: (evidencePartial || (evidencePlan?.remaining ?? 0) > 0 ? "接着恢复" : "开始恢复");
 
 			// The one outlined control that belongs beside the sub-line rather
 			// than in the run of text buttons on the first row.
@@ -3969,20 +4017,37 @@ window.__ModuleLoader__.load({
 									}, "开始普查"),
 							])
 							: null,
-						// A walk that stopped because the upstream pushed back is
-						// the only stop a credential would have helped — so the
-						// reason and the way to carry on sit together.
-						censusPartial
-							? createElement("div", { key: "census", style: styles.sourceRow }, [
-								createElement("span", { key: "m", style: styles.jobMsg, title: censusPartial },
-									`普查没有读完：${censusPartial}`),
+						// The recovery walk, with its own verbs. Same reasoning as
+						// the census line, and one more: this is the walk that reads
+						// two thousand repositories at 150ms each, so the reader who
+						// started it is the one who most needs to be able to end it.
+						// The partial text ("上次没读完：…") rides in this line rather
+						// than in a row of its own, because it is the same subject.
+						evidence
+							? createElement("div", { key: "evidenceline", style: styles.sourceRow }, [
+								createElement("span", {
+									key: "m", style: styles.jobMsg,
+									title: evidence.walking
+										? "恢复安装命令按 0.15 秒一个请求走，一轮最多 25 分钟 / 6000 个请求；每读到一个仓库就落盘，停止不会丢掉已恢复的"
+										: "恢复出的命令存在本机数据目录的 install-evidence.json；每条都带出处，且都去 npm / PyPI 确认过包存在",
+								}, evidenceLine),
 								createElement("span", { key: "spacer", style: styles.spacer }),
-								createElement("button", {
-									key: "resume", type: "button", className: "omkt-btn omkt-btn-outline",
-									style: styles.sourceMiniBtn, disabled: authBusy,
-									title: "从上次停下的地方接着读剩下的仓库，不会从头再来",
-									onClick: resumeCensus,
-								}, "继续普查"),
+								evidence.walking
+									? createElement("button", {
+										key: "stop", type: "button", className: "omkt-btn omkt-btn-outline",
+										style: { ...styles.sourceMiniBtn, ...styles.sourceMiniBtnDanger },
+										disabled: authBusy,
+										title: "停止恢复；已读到的仓库会保留，下次接着读剩下的",
+										onClick: () => evidenceAction("stop"),
+									}, "停止恢复")
+									: createElement("button", {
+										key: "start", type: "button", className: "omkt-btn omkt-btn-outline",
+										style: styles.sourceMiniBtn, disabled: authBusy,
+										title: evidencePartial
+											? "从上次停下的地方接着读剩下的仓库，不会从头再来"
+											: "把还没有安装命令的行补上（已恢复的仓库不重读）",
+										onClick: () => evidenceAction("start"),
+									}, evidenceButton),
 							])
 							: null,
 					]),

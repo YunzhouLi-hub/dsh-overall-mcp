@@ -876,7 +876,172 @@ test('opening the market starts the evidence walk, and what it recovers is on di
       // …and the recovered command reaches the listing.
       const all = await call('/api/overall-mcp/catalog', { body: { source: 'github-mcp', limit: 100 } });
       assert.equal(all.body.items[0].install.args[1], 'acme-calendar-mcp');
+
+      // Leave nothing in flight. The walk paces itself 150ms per repository, so
+      // it outlives the assertions above — and the next case installs its own
+      // fetch stub, which a walk from *this* host would then read through (that
+      // leak showed up as one unexplained raw request in the recovery-verbs case).
+      await waitFor(async () => {
+        const status = await call('/api/overall-mcp/status', { method: 'GET' });
+        return status.body?.evidence?.walking === false ? true : null;
+      });
     }, { files });
+  });
+});
+
+test('the recovery walk is a GET that starts nothing, and stop ends it where it is', async () => {
+  // The second background walk, and the one that most needs a stop: it reads
+  // two thousand repositories at 150ms each. Same contract as the census verbs
+  // (a GET only reads, a stop keeps what was already recovered), plus the two
+  // things this walk owns: `force` is not what the button means, and a stop a
+  // reader asked for is not a stop a credential would have prevented.
+  const rows = [
+    censusRow('acme/calendar-mcp', { stars: 900 }),
+    censusRow('acme/mystery-mcp', { stars: 800 }),
+    censusRow('acme/silent-mcp', { stars: 700 }),
+  ];
+  const files = { 'github-index.json': censusDocument(rows, { at: new Date().toISOString() }) };
+  let rawReads = 0;
+  const stub = async (url, init = {}) => {
+    const target = String(url);
+    // One repository with a manifest, one that never answers. Everything the
+    // walk asks the first repository for is answered (a 404 for the files it
+    // does not have is an answer); the second one hangs until it is aborted.
+    if (target.includes('raw.githubusercontent.com/acme/calendar-mcp/')) {
+      rawReads += 1;
+      if (!target.endsWith('/HEAD/package.json')) return { ok: false, status: 404, text: async () => 'Not Found' };
+      return { ok: true, status: 200, text: async () => JSON.stringify({ name: 'acme-calendar-mcp', bin: { 'acme-calendar-mcp': 'cli.js' } }) };
+    }
+    if (target.startsWith('https://registry.npmjs.org/')) {
+      rawReads += 1;
+      return { ok: true, status: 200, text: async () => '{}' };
+    }
+    if (target.includes('raw.githubusercontent.com')) {
+      // The second repository never answers on its own, so the walk is still in
+      // flight when the stop arrives — and the stop reaches the request itself,
+      // because the walk hands its signal down to the reader. The fallback timer
+      // only keeps a run from hanging if that wiring ever breaks.
+      rawReads += 1;
+      return new Promise((resolve, reject) => {
+        const signal = init?.signal;
+        const settle = setTimeout(() => {
+          signal?.removeEventListener('abort', onAbort);
+          resolve({ ok: false, status: 404, text: async () => 'Not Found' });
+        }, 500);
+        settle.unref?.();
+        function onAbort() {
+          clearTimeout(settle);
+          const err = new Error('The operation was aborted.');
+          err.name = 'AbortError';
+          reject(err);
+        }
+        if (signal?.aborted) onAbort();
+        else signal?.addEventListener('abort', onAbort, { once: true });
+      });
+    }
+    throw new Error(`unexpected request in this test: ${target}`);
+  };
+  await withFetchStub(stub, async () => {
+    await withHost(FIXTURE, async ({ dir, call }) => {
+      const before = await call('/api/overall-mcp/install-evidence', { method: 'GET' });
+      assert.equal(before.status, 200);
+      assert.equal(before.body.rows, 0);
+      assert.equal(before.body.walking, false, 'reading the recovery starts nothing');
+      // A read reports state, not the outcome of a verb: `started`/`stopping`
+      // belong to the call that asked for one, so their absence here is the
+      // contract rather than a missing field.
+      assert.equal(before.body.started, undefined);
+      assert.equal(before.body.stopping, undefined);
+
+      const bogus = await call('/api/overall-mcp/install-evidence', { body: { action: 'stpo' } });
+      assert.equal(bogus.status, 400);
+      assert.match(String(bogus.body.error), /unknown evidence action/);
+      assert.equal(rawReads, 0, 'a rejected verb reads nothing upstream either');
+
+      const started = await call('/api/overall-mcp/install-evidence', { body: { action: 'start' } });
+      assert.equal(started.body.started, true);
+      assert.equal(started.body.walking, true, 'the walk is in flight, not awaited');
+
+      // Wait for the walk to be *in* the first repository rather than for the
+      // file: this walk writes once, when it ends, so the file is what proves a
+      // stop lost nothing — not what proves a stop is possible.
+      const during = await waitFor(async () => {
+        const res = await call('/api/overall-mcp/install-evidence', { method: 'GET' });
+        return res.body.progress?.attempted >= 1 ? res.body : null;
+      });
+      assert.equal(during.walking, true);
+      assert.equal(during.started, undefined, 'reading is not starting');
+      assert.equal(during.rows, 0, 'a walk that has not ended has written no document yet');
+
+      // Asking again while it walks does not begin a second one.
+      const again = await call('/api/overall-mcp/install-evidence', { body: { action: 'start' } });
+      assert.equal(again.body.started, false);
+      assert.equal(again.body.walking, true);
+      assert.equal(again.body.skipped, undefined, 'a walk that is already running is not a skip');
+
+      const readsBeforeStop = rawReads;
+      const stopped = await call('/api/overall-mcp/install-evidence', { body: { action: 'stop' } });
+      assert.equal(stopped.body.stopping, true);
+      await waitFor(async () => {
+        const res = await call('/api/overall-mcp/install-evidence', { method: 'GET' });
+        return res.body.walking === false ? true : null;
+      });
+      assert.equal(rawReads, readsBeforeStop, 'stopping is not a request of its own');
+
+      const after = await call('/api/overall-mcp/install-evidence', { method: 'GET' });
+      assert.equal(after.body.ended.reason, 'user');
+      assert.equal(after.body.rows, 1, 'the row recovered before the stop is still there');
+      assert.equal(after.body.withCommand, 1);
+      assert.equal(after.body.complete, false, 'a stopped walk is not a finished recovery');
+      assert.match(String(after.body.partial), /已手动停止/);
+      assert.doesNotMatch(String(after.body.partial), /token/, 'a stop the reader asked for is not answered with "get a token"');
+
+      const nothing = await call('/api/overall-mcp/install-evidence', { body: { action: 'stop' } });
+      assert.equal(nothing.body.stopping, false, 'a second stop has nothing left to stop');
+      assert.equal(nothing.body.walking, false);
+
+      // What a stop costs: nothing that was already recovered. The document the
+      // stopped pass wrote holds the one command it had confirmed, and says the
+      // pass is unfinished so the next "start" carries on from there.
+      const held = JSON.parse(await fs.readFile(path.join(dir, 'install-evidence.json'), 'utf8'));
+      const calendar = held.rows.find((row) => row.id === 'github:acme/calendar-mcp');
+      assert.equal(calendar.kind, 'package.json');
+      assert.deepEqual(calendar.install, { transport: 'stdio', command: 'npx', args: ['-y', 'acme-calendar-mcp'] });
+      assert.equal(held.rows.some((row) => row.id === 'github:acme/mystery-mcp'), false, 'the repository it was reading when stopped is not inventing an answer');
+      assert.equal(held.partial != null, true, 'the unfinished pass is written down for the next one');
+    }, { files });
+  });
+});
+
+test('the recovery button does not re-read rows that already have an answer', async () => {
+  // `force` is the difference between "carry on" and "do it all again": without
+  // it, a row whose last look found nothing is left alone until its window
+  // passes, and a census with nothing left to check says so instead of walking.
+  const rows = [censusRow('acme/calendar-mcp', { stars: 900 }), censusRow('acme/mystery-mcp', { stars: 800 })];
+  const files = {
+    'github-index.json': censusDocument(rows, { at: new Date().toISOString() }),
+    'install-evidence.json': evidenceDocument([
+      evidenceRow('github:acme/calendar-mcp'),
+      evidenceRow('github:acme/mystery-mcp', { kind: 'none', reason: '仓库里没有可识别的清单文件' }),
+    ]),
+  };
+  await withFetchStub(async (url) => { throw new Error(`no network in this test: ${url}`); }, async () => {
+    await withHost(FIXTURE, async ({ call }) => {
+      const answer = await call('/api/overall-mcp/install-evidence', { body: { action: 'start' } });
+      assert.equal(answer.body.started, false);
+      assert.equal(answer.body.walking, false);
+      assert.equal(answer.body.skipped, 'nothing-to-do');
+      assert.equal(answer.body.rows, 2, 'the rows that already have an answer are still reported');
+      assert.equal(answer.body.withCommand, 1);
+    }, { files });
+
+    // …and a host with no census at all says that, rather than "done".
+    await withHost(FIXTURE, async ({ call }) => {
+      const answer = await call('/api/overall-mcp/install-evidence', { body: { action: 'start' } });
+      assert.equal(answer.body.started, false);
+      assert.equal(answer.body.skipped, 'no-census');
+      assert.equal(answer.body.rows, 0);
+    });
   });
 });
 

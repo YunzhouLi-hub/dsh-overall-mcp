@@ -1461,7 +1461,16 @@ export async function apply(ctx) {
   let evidenceLoaded = false;
   let evidenceDamaged = null;
   let evidenceCrawl = null;
-  const evidenceAbort = new AbortController();
+  // The handle a reader stops *this* walk with, how the last one ended early,
+  // and how far the one in flight has got. All three are per-walk for the same
+  // reason the census's are: an AbortController is spent once signalled, so a
+  // second walk reusing one would be born aborted. `reason` stays null until
+  // something asks it to end, so "why did it stop" is answered where the asking
+  // happened rather than inferred from the walk's own flat "已中止".
+  let evidenceStop = null;
+  let evidenceEnded = null;
+  let evidenceProgress = null;
+  let evidenceLast = null;
 
   /** Read the evidence once per process; the walk below keeps it current. */
   async function readEvidence() {
@@ -1481,8 +1490,17 @@ export async function apply(ctx) {
     return new Map((doc?.rows ?? []).map((row) => [row.id, row]));
   }
 
-  /** How the recovery is going, for the panel's source line. */
-  async function evidenceSummary() {
+  /**
+   * How the recovery is going, for the panel's source line and the route: what
+   * the file holds, whether a walk is running, how far through its plan that
+   * walk is, and how the last one ended when it ended early.
+   *
+   * The file alone cannot say the last four. It says "正在抓取" while a walk
+   * runs and carries the last `partial` after one stops, but it never says which
+   * repository is being read right now, how many of the plan have been tried, or
+   * whether it was a reader or the host unload that ended it.
+   */
+  async function evidenceState() {
     const doc = await readEvidence();
     const rows = doc?.rows ?? [];
     return {
@@ -1491,9 +1509,16 @@ export async function apply(ctx) {
       at: doc?.at ?? null,
       walking: evidenceCrawl !== null,
       // Carried so the panel can say why a walk stopped and offer to carry on
-      // from there: without it, a partial census reads as a finished one.
+      // from there: without it, a partial recovery reads as a finished one.
       requests: doc?.requests ?? null,
       partial: doc?.partial ?? null,
+      progress: evidenceProgress,
+      ended: evidenceEnded,
+      // The last pass's own plan, so "77 of 2111" survives a reload: the file
+      // holds the rows but not how many the walk set out to read.
+      plan: evidenceLast,
+      complete: doc ? doc.partial == null : false,
+      damaged: evidenceDamaged ?? null,
     };
   }
 
@@ -1504,11 +1529,20 @@ export async function apply(ctx) {
    * One raw file. `null` means "the repository does not have it" (the walk's own
    * contract); a refusal is thrown so the walk stops and says who refused.
    */
-  async function readRepoFile(url) {
+  async function readRepoFile(url, { signal } = {}) {
     let res;
     try {
-      res = await fetch(url, { headers: withGithubAuth(url, { 'user-agent': USER_AGENT, accept: 'text/plain' }) });
+      res = await fetch(url, { headers: withGithubAuth(url, { 'user-agent': USER_AGENT, accept: 'text/plain' }), signal });
     } catch (err) {
+      // A stopped walk is not a dropped connection. Both arrive here as a
+      // rejected fetch, and they mean opposite things: one says "try again",
+      // the other says "the reader asked you to stop", so the abort is labelled
+      // as what it is and the walk reports 已中止 rather than blaming the host.
+      if (signal?.aborted || err?.name === 'AbortError') {
+        const stopped = new Error('the walk was stopped');
+        stopped.code = 'aborted';
+        throw stopped;
+      }
       // A dropped connection says nothing about the repository, and the walk
       // cannot tell the two apart unless the failure is labelled: `network` is
       // what it retries, `http` is what stops it.
@@ -1542,14 +1576,19 @@ export async function apply(ctx) {
   }
 
   /** Is the package really published? A command that 404s is not a button. */
-  async function packageExists({ registry, name }) {
+  async function packageExists({ registry, name, signal }) {
     const url = registry === 'npm'
       ? `https://registry.npmjs.org/${encodeURIComponent(name)}`
       : `https://pypi.org/pypi/${encodeURIComponent(name)}/json`;
     const send = async (method) => {
       try {
-        return await fetch(url, { method, headers: { 'user-agent': USER_AGENT, accept: 'application/json' } });
+        return await fetch(url, { method, headers: { 'user-agent': USER_AGENT, accept: 'application/json' }, signal });
       } catch (err) {
+        if (signal?.aborted || err?.name === 'AbortError') {
+          const stopped = new Error('the walk was stopped');
+          stopped.code = 'aborted';
+          throw stopped;
+        }
         const failure = new Error(String(err?.message ?? err));
         failure.code = 'network';
         throw failure;
@@ -1589,8 +1628,16 @@ export async function apply(ctx) {
         && needsInstallEvidence(row, byId.get(row.id), window))
       .map((row) => ({ id: row.id, repository: row.repository, stars: row.stars }));
     if (!rows.length) return null;
+    // The handle a reader stops this walk with, created per walk: an
+    // AbortController is spent once signalled, so a second walk must not inherit
+    // the first one's — "stop, then start again" would otherwise begin a walk
+    // that is aborted before its first request.
+    const stop = { controller: new AbortController(), reason: null };
+    evidenceStop = stop;
+    evidenceEnded = null;
     evidenceCrawl = (async () => {
       log?.info?.(`overall-mcp: recovering install commands for ${rows.length} repositories`);
+      evidenceProgress = { requests: 0, attempted: 0, planned: rows.length };
       emit({ kind: 'evidence', action: 'start', rows: rows.length, force: force === true });
       const walk = await crawlInstallEvidence({
         rows,
@@ -1598,33 +1645,70 @@ export async function apply(ctx) {
         fetchText: readRepoFile,
         verifyPackage: packageExists,
         // `node --test` waits for the event loop to drain, so a pacing timer must
-        // never be the thing keeping the process alive.
-        sleep: (ms) => new Promise((resolve) => { const timer = setTimeout(resolve, ms); timer.unref?.(); }),
-        signal: evidenceAbort.signal,
-        onProgress: ({ requests }) => {
+        // never be the thing keeping the process alive. Interruptible for the
+        // same reason the census's is: this walk waits 150ms between rows and up
+        // to 5s after a failure, and "停止" should not mean "stop after 5 more
+        // seconds".
+        sleep: (ms) => new Promise((resolve) => {
+          const done = () => {
+            stop.controller.signal.removeEventListener('abort', done);
+            clearTimeout(timer);
+            resolve();
+          };
+          const timer = setTimeout(done, ms);
+          timer.unref?.();
+          stop.controller.signal.addEventListener('abort', done, { once: true });
+        }),
+        signal: stop.controller.signal,
+        onProgress: ({ requests, attempted, planned }) => {
+          evidenceProgress = { requests, attempted, planned };
           if (requests % 200 === 0) log?.info?.(`overall-mcp: install evidence at ${requests} requests`);
         },
       });
+      // Why it ended, in the walk's own words where the walk can say it and in
+      // the host's where only the host knows: `crawlInstallEvidence` reports a
+      // flat "已中止" whether a reader stopped it or the plugin unloaded, and a
+      // reader who pressed stop is owed the difference.
+      const reasonNote = stop.reason === 'user'
+        ? `已手动停止（已试 ${walk.attempted} 个仓库，下次接着走）`
+        : stop.reason === 'dispose'
+          ? `插件被卸载，已停止（已试 ${walk.attempted} 个仓库）`
+          : null;
+      const body = reasonNote ?? walk.partial;
       // What the user can act on, said once: a pass that stopped because the
-      // upstream pushed back is the only stop a credential would have helped.
-      const hint = walk.partial && !githubAuthStatus().inUse
+      // upstream pushed back is the only stop a credential would have helped —
+      // and a stop a reader asked for is not that.
+      const hint = body && !stop.reason && !githubAuthStatus().inUse
         ? '（匿名访问：在已注册标签页里填一个 GitHub token，上限从 60 次/小时升到 5000 次/小时）'
         : '';
       const doc = evidenceDocumentOf({
         at: walk.at,
         rows: walk.rows,
         requests: walk.requests,
-        partial: walk.partial ? `${walk.partial}${hint}` : null,
+        partial: body ? `${body}${hint}` : null,
       });
       await writeJson(evidenceFile, doc);
       evidenceDoc = doc;
       evidenceLoaded = true;
       evidenceDamaged = null;
+      // The plan this pass set out with. The file keeps the rows but not how
+      // many the walk meant to read, so "已试 77 / 2111" would otherwise be
+      // forgotten the moment the process reloads the file.
+      evidenceLast = {
+        at: walk.at,
+        planned: walk.planned,
+        attempted: walk.attempted,
+        remaining: walk.remaining,
+        retries: walk.retries,
+        requests: walk.requests,
+        stopped: stop.reason ?? null,
+      };
       const withCommand = doc.rows.filter((row) => row.install).length;
       log?.info?.(`overall-mcp: install evidence ${doc.rows.length} rows, ${withCommand} with a command (${walk.requests} requests, ${walk.retries} retries)`);
       emit({
         kind: 'evidence',
-        action: 'stop',
+        action: stop.reason ? 'stopped' : 'stop',
+        ...(stop.reason ? { reason: stop.reason } : {}),
         requests: walk.requests,
         retries: walk.retries,
         rows: doc.rows.length,
@@ -1641,8 +1725,79 @@ export async function apply(ctx) {
         emit({ kind: 'evidence', action: 'failed', error: String(err?.message ?? err) });
         return null;
       })
-      .finally(() => { evidenceCrawl = null; });
+      .finally(() => {
+        evidenceEnded = stop.reason ? { reason: stop.reason, at: new Date().toISOString() } : null;
+        evidenceCrawl = null;
+        evidenceProgress = null;
+        if (evidenceStop === stop) evidenceStop = null;
+      });
     return evidenceCrawl;
+  }
+
+  /**
+   * End the install-command walk in flight, if one is walking.
+   *
+   * @param reason - 'user' (panel button or route) or 'dispose' (host unload).
+   * @returns true when a walk was actually asked to stop.
+   */
+  function stopEvidence(reason = 'user') {
+    const stop = evidenceStop;
+    if (!stop) return false;
+    // First reason wins, exactly as for the census: a reader's stop must not be
+    // rewritten as "unloaded" when the plugin disposes a moment later.
+    if (!stop.reason) stop.reason = reason;
+    emit({ kind: 'evidence', action: 'stopping', reason: stop.reason, ...(evidenceProgress ?? {}) });
+    stop.controller.abort();
+    return true;
+  }
+
+  /**
+   * The recovery verbs, in one place so the route and any future caller agree.
+   *
+   * @param action - 'start' (walk now, fresh or not) | 'stop' | null (read).
+   */
+  async function doEvidence({ action = null, force = false } = {}) {
+    // Read the list of repositories before anything starts: the walk can only
+    // read repositories the census knows about, and `maybeCrawlInstallEvidence`
+    // reads `githubIndexDoc` directly rather than waiting for a load.
+    await readGithubIndex();
+    // …and read what has already been recovered, for the same reason plus one
+    // that loses data: the walk merges into `evidenceDoc`, so a walk started
+    // before the file was read would both re-read rows that already have an
+    // answer and write a document containing only the rows *it* touched. The
+    // panel happens to read the listing first, which is why this only showed up
+    // when a caller started the walk as its very first request.
+    await readEvidence();
+    if (action === 'stop') {
+      const stopping = stopEvidence('user');
+      const state = await evidenceState();
+      return { ...state, stopping };
+    }
+    if (action === 'start') {
+      const before = evidenceCrawl;
+      // `force` here means "re-check rows whose last look found nothing", which
+      // is a different promise from "carry on with the rows that are missing":
+      // the walk already skips rows that have evidence, and the freshness window
+      // is what stops it from re-reading two thousand repositories that
+      // genuinely have no manifest every time a reader asks. So the panel's
+      // button does not force, and says "没有需要补的仓库" when that is the
+      // truth; a forced pass stays available to callers that ask for one.
+      const walk = maybeCrawlInstallEvidence({ force: force === true });
+      const state = await evidenceState();
+      // A start that did not start has to say why, and there are two reasons:
+      // no census to read from, or nothing in it still needs a look.
+      const skipped = walk !== null
+        ? null
+        : (githubIndexDoc?.rows?.length ? 'nothing-to-do' : 'no-census');
+      return {
+        ...state,
+        // "Did *this* call start a walk?" — not "is one running now?", which
+        // `walking` already answers.
+        started: walk !== null && walk !== before,
+        ...(skipped ? { skipped } : {}),
+      };
+    }
+    return evidenceState();
   }
 
   /** Keep a `key -> { at }` map bounded by dropping its oldest entries. */
@@ -1788,11 +1943,7 @@ export async function apply(ctx) {
       },
       data: { dir, files: dataFiles },
       census: await censusState(),
-      evidence: {
-        ...(await evidenceSummary()),
-        requests: evidenceDoc?.requests ?? 0,
-        damaged: evidenceDamaged ?? null,
-      },
+      evidence: await evidenceState(),
       quota: githubSearchQuota(),
       // Which credential the GitHub requests are going out with, and how much
       // quota it has left. Token-free by construction (lib/github-auth.js).
@@ -1832,7 +1983,7 @@ export async function apply(ctx) {
     // command from their own repository is a second number the panel has to be
     // able to tell apart, so it travels on the source record.
     if (result.sources['github-mcp'] && evidence.size) {
-      result.sources['github-mcp'].install = await evidenceSummary();
+      result.sources['github-mcp'].install = await evidenceState();
     }
     // The panel says how old the listing is; with several sources that can
     // differ, so the age reported is the oldest one still standing.
@@ -2345,29 +2496,40 @@ export async function apply(ctx) {
           // success (the same reason `on` must be a boolean elsewhere).
           throw new Error(`unknown census action: ${actionRaw}`);
         }
+        if (req.method === 'GET' && action) {
+          // Reading never changes state, even here: the two verbs are POSTs.
+          throw new Error(`the census action ${actionRaw} must be sent as a POST`);
+        }
         return json(await doCensus({ action: action || null }));
       })],
       // The install evidence behind the GitHub rows: what has been recovered,
-      // and a POST to start (or force) a walk. The panel asks for a walk when it
-      // opens the market, so a reader who never opens it never pays for it.
+      // and the two verbs over the walk that recovers it. The panel asks for a
+      // walk when it opens the market, so a reader who never opens it never pays
+      // for it; before this route took verbs, a walk in flight could only be
+      // ended by unloading the plugin, and the reader who started it had no way
+      // to say stop.
+      //
+      // `POST` without an `action` still means "start" (that is what the market
+      // page has always sent when it opens), so the older callers keep working.
       ['/api/overall-mcp/install-evidence', ['GET', 'POST'], guard(async (req) => {
         const body = req.method === 'POST' ? await readBody(req) : {};
         const url = new URL(req.url);
+        const actionRaw = body.action ?? url.searchParams.get('action');
+        const action = typeof actionRaw === 'string' ? actionRaw.trim().toLowerCase() : '';
+        if (action && action !== 'start' && action !== 'stop') {
+          // A verb we do not know is a caller error, not a no-op (the same
+          // reason the census route refuses one).
+          throw new Error(`unknown evidence action: ${actionRaw}`);
+        }
+        if (req.method === 'GET' && action) {
+          // Reading never changes state: a GET that stops a walk would make an
+          // innocent prefetch the difference between a running and a stopped
+          // recovery (and the same two lines guard the census route now).
+          throw new Error(`the evidence action ${actionRaw} must be sent as a POST`);
+        }
         const force = body.force === true || url.searchParams.get('force') === '1';
-        // The walk can only read repositories it knows about, and the census is
-        // the list of them — so a POST before the first browse still works.
-        await readGithubIndex();
-        // Reading the status never starts work; only a POST asks for a walk.
-        const walking = req.method === 'POST' && maybeCrawlInstallEvidence({ force }) !== null;
-        const doc = await readEvidence();
-        const state = await evidenceSummary();
-        return json({
-          ...state,
-          requests: doc?.requests ?? 0,
-          partial: doc?.partial ?? null,
-          damaged: evidenceDamaged,
-          walking: walking || state.walking,
-        });
+        const state = await doEvidence({ action: action || (req.method === 'POST' ? 'start' : null), force });
+        return json(state);
       })],
       ['/api/overall-mcp/repo-stats', ['GET', 'POST'], guard(async (req) => {
         let body = {};
@@ -2518,7 +2680,7 @@ export async function apply(ctx) {
     // Both walks get the same treatment now — before this, the census outlived
     // the plugin and kept spending a search budget nobody was reading.
     stopCensus('dispose');
-    evidenceAbort.abort();
+    stopEvidence('dispose');
     for (const dispose of disposers) dispose();
     for (const fiber of fibers.values()) {
       Promise.resolve(fiber.dispose()).catch(() => {});

@@ -19,6 +19,7 @@
 | 🧾 | Action log | The host writes its actions to `events.ndjson` (browse/per-source outcome/quota/scan/census/evidence/install/update/mount/registry repair), expandable from the header. Metadata only, never secrets, last 400 lines |
 | 🔑 | GitHub credentials and census resume | A token can be pasted in the panel (or taken from `gh auth token`); it takes effect only after validation and is sent only to GitHub hosts. **Anonymous still works** — the budget is just 60/h instead of 5,000/h. One network failure no longer ends a census (per-repository retry with backoff, stop after repeated rejections), and the next run resumes from where it stopped (`GET\|POST\|DELETE /auth`) |
 | ⏯️ | Start and stop the census yourself | The GitHub access card on the *Registered* tab states where the census stands (how many rows, when it last read, who stopped it) and offers the verb that matches: *start* (no waiting for the cache to expire) or *stop* with live progress. Stopping is safe — rows are written as they arrive, the next run resumes from the missing repositories, and a stopped run will not spend budget on install evidence afterwards (`GET\|POST /census`, round 22) |
+| 🔧 | Start and stop the recovery walk yourself | The same card carries a **second walk** (reading repository evidence to recover install commands) with its own state line and its own verb: `tried 78 / 2.1k repositories` while running, *resume recovery* when rows are left. It used to start by itself when the market opened and could only be ended by unloading the plugin — and a full pass is 150ms × more than two thousand repositories (`GET\|POST /install-evidence`, round 23) |
 | 🧮 | Every number and time states its meaning | Per-source counts use the same ruler as "N total" (deduplicated, with `deduped` shown separately); "listing read at" is local read time while "upstream updated" is the repository's last push; when sorting by usage, a card with no usage data says so instead of silently sorting by quality; inferred categories carry "(inferred)" on the card, in the detail panel and in the category dropdown |
 
 ## Quick start
@@ -162,6 +163,7 @@ The same `npx -y rea-agents@6.5.0 mcp` command once appeared as **five rows** (f
 
 `GET /servers`, `GET /tools`, `GET /status`, `GET /events?limit=`,
 `GET|POST|DELETE /auth`, `GET|POST /census` (read status / `{action:'start'|'stop'}`),
+`GET|POST /install-evidence` (the recovery walk: read status / `{action:'start'|'stop', force?}`),
 `GET|POST /updates`, `POST /update`,
 `GET|POST /catalog?query=&source=&limit=&refresh=`,
 `GET|POST /sources`, `POST /sources/remove`, `POST /scan`,
@@ -169,7 +171,7 @@ The same `npx -y rea-agents@6.5.0 mcp` command once appeared as **five rows** (f
 `POST /forget-orphans`, `POST /favorite`, `GET /favorites`,
 `GET /repo-stats?repos=owner/name,...` — all under `/api/overall-mcp/`.
 
-Status-code layering (`lib/http-status.js`, unit-tested): `unknown server`/`unknown source` → **404**; a missing parameter, `no installable transport`, `is not launched through a package runner`, a value that is present but unusable (`on must be a boolean`), an illegal verb out of an enum (`unknown census action`) → **400**; `ambiguous server name`, `stale entry`, `manual entry` → **409**; an upstream version lookup failure → **502**; everything else → **500** with a `log.warn` line (method, URL, message) — 500 means "we did not anticipate this path", which used to share 400 with "you typed something wrong".
+Status-code layering (`lib/http-status.js`, unit-tested): `unknown server`/`unknown source` → **404**; a missing parameter, `no installable transport`, `is not launched through a package runner`, a value that is present but unusable (`on must be a boolean`), an illegal verb out of an enum (`unknown census action`, `unknown evidence action`), a verb sent on a `GET` (`action must be sent as a POST`) → **400**; `ambiguous server name`, `stale entry`, `manual entry` → **409**; an upstream version lookup failure → **502**; everything else → **500** with a `log.warn` line (method, URL, message) — 500 means "we did not anticipate this path", which used to share 400 with "you typed something wrong".
 
 Bodies: `/install` is `{ item, overwrite? }`; `/update`, `/remove`, `/set-enabled` are `{ name, slot?, from? }` (409 without `slot`/`from` when the name is ambiguous); `/sources` is `{ url, label? }`; `/sources/remove` is `{ id }`.
 
@@ -187,7 +189,7 @@ Two layers (`lib/catalog-cache.js`): the **URL layer** (per-URL `ETag` + body, `
 
 ## Identity line and action log (round 18)
 
-Host plugin code is loaded **once, at DSH startup**, and no version number can answer "which code is this panel running". The header's second line now reads `GET /status`: `plugin v0.3.0 · pid 4242 · up 3h 12m · 5 data files · 2 log lines`. `/status` separates three groups because they fail differently — `plugin` (id/version from `package.json`/directory actually loaded/`loadedAt`, plus each source file's `mtime` and size and a `stale` flag when disk is newer), `host` (pid, startedAt, uptime, node, electron, platform, arch) and `data` (the directory, every file's bytes and time, plus `census`/`evidence`/`quota`/`errors`). When `stale` is set the header draws `⚠ code updated, restart DSH` — that state and "the bug is still there" look identical otherwise.
+Host plugin code is loaded **once, at DSH startup**, and no version number can answer "which code is this panel running". The header's second line now reads `GET /status`: `plugin v0.4.0 · pid 4242 · up 3h 12m · 5 data files · 2 log lines`. `/status` separates three groups because they fail differently — `plugin` (id/version from `package.json`/directory actually loaded/`loadedAt`, plus each source file's `mtime` and size and a `stale` flag when disk is newer), `host` (pid, startedAt, uptime, node, electron, platform, arch) and `data` (the directory, every file's bytes and time, plus `census`/`evidence`/`quota`/`errors`). When `stale` is set the header draws `⚠ code updated, restart DSH` — that state and "the bug is still there" look identical otherwise.
 
 `GET /events?limit=` reads the tail of `events.ndjson` (default 100, max 500, oldest first, with `total` and `damaged`). It records **actions, not conversations**: which source answered how many rows in how long, quota exhaustion, scan results, census progress, install/mount outcome, registry repair. Only metadata — server names, source ids, counts, durations, error text — and never a credential. An older host without the route says so instead of pretending "nothing has been recorded this run".
 
@@ -238,6 +240,20 @@ Stopping is safe by construction: rows are written to `github-index.json` as the
 `/status` and `/census` share one `censusState()`: `rows`/`at`/`complete`/`partial`/`requests` from the index file, `walking`/`progress` that only the running process knows (the file says "fetching", never "request 12 of 48"), and `ended: {reason, at}` recording **who** stopped it (`user` or `dispose`). That last field exists because `crawlGithubRepos` itself can only report "aborted" — distinguishing "I pressed stop" from "the plugin was unloaded" is knowledge only the host has, so the host writes it down.
 
 In the panel, the GitHub access card on the *Registered* tab carries the state line (rows, when it last read, who stopped it) and swaps its verb with the state: *start census* when idle, *stop census* with live progress while walking. An unknown verb (`{"action":"stpo"}`) is a **400**, not a state read-back that would look like success to the caller.
+
+## Install-command recovery: start it and stop it (round 23)
+
+The same card carries a **second walk**. Round 22 gave the census its own verbs; the walk that reads repository evidence to recover install commands still started by itself whenever the market page opened and could only be ended by unloading the plugin — and a full pass is 150ms per repository across more than two thousand of them (up to 6000 requests / 25 minutes). The census answers "which MCP servers are on GitHub"; this walk answers "how do I install them", and it had no button.
+
+`GET|POST /install-evidence` is the surface. `GET` reports status and triggers nothing. `POST {"action":"start"}` begins a pass or resumes the stopped one; `{"force":true}` skips the freshness check (without it, a pass that is still fresh answers `skipped:'nothing-to-do'`, and a machine with no index yet answers `skipped:'no-census'` — neither is an error). A `POST` **without** an `action` still means *start*, because that is what the market page has always sent when it opens. `POST {"action":"stop"}` aborts the run in flight and records `ended:{reason:'user'}`; with nothing running it answers `stopping:false`, which is "there was nothing to stop", not a failure.
+
+Stopping happens **between two requests**, not after two thousand: the walk checks its stop handle before each repository and threads the `signal` down through `readRepoFile`/`fetchText`, so the repository being read finishes and then the walk puts its pen down. Recovered commands are already on disk (`partial` says where it stopped: "stopped by hand (tried 78 repositories, continues next time)"), so a stop loses nothing and the next `start` resumes.
+
+`progressOf(id, kind)` in `lib/repo-install.js` lets the loop record which repository is being read and how many have been tried, so progress is reported against **the walk's own plan** (`tried 78 / 2.1k repositories`) rather than a flat "fetching". `/status` and `/install-evidence` share one `evidenceState()`: file facts (`rows`/`withCommand`/`requests`/`partial`/`plan`) plus what only the process knows (`walking`/`progress`), and `ended.reason` again distinguishes `user` from `dispose`.
+
+In the panel, a second line sits under the census line and swaps its own verb with its own state: *resume recovery* while rows are left (the walk skips what it already tried), *stop recovery* with live progress while it runs. The two lines keep separate verbs because the two walks share no budget and no clock — calling both of them "census" is exactly how a reader came to press the wrong button. The line also states the unfinished pass (`not finished: stopped at 900 rows: …`), which is the reason the verb is worth pressing.
+
+Reading never changes state: `GET /census?action=…` and `GET /install-evidence?action=…` are both a **400** (`action must be sent as a POST`, a new `lib/http-status.js` rule), and so is an unknown verb (`unknown evidence action`). An innocent prefetch should not be the difference between a running recovery and a stopped one.
 
 ## Host locations scanned
 
@@ -390,12 +406,21 @@ Same cause: the host loads once. `plugin.source.stale` in `GET /status` is the m
 
 Because every row in that source really does spawn a `dsh-mcp-client` subprocess and complete a handshake; it is not a boolean. Before round 20 this was serial, worst case `members × 8s` (40 seconds measured for five members); now at most four are in flight, so five members take about two waves. "switching…" is that work's progress, not a hang. The same round guarantees **one mount per name**: duplicate same-name rows used to each attempt a mount and the loser was recorded as "provided by another mcp-client", an artefact of the concurrency itself.
 
+**I want to run the install-command recovery now, or stop it**
+
+Same card, one line below the census: it states `tried N repositories · recovered M install commands` and offers *resume recovery* or *stop recovery*.
+
+- This walk reads `package.json` / `pyproject.toml` / `server.json` / README from each repository over `raw.githubusercontent.com` (no API budget), paced at 150ms per request, capped at 6000 requests / 25 minutes.
+- *Stop recovery* takes effect between two requests: the repository being read finishes, everything already recovered stays in `github-install.json`, and the line says `stopped by hand (tried N repositories, continues next time)`.
+- The command-line equivalent is `POST /install-evidence` with `{"action":"start"|"stop"}` (`{"force":true}` skips the freshness check); `GET` on the same route only reads status and triggers nothing.
+- A `dispose` stop (the plugin was unloaded) is recorded as a different reason than `user`, because "I pressed it" and "the host was unloaded" are not the same fact.
+
 **The census stopped halfway ("request N failed")**
 
 That is GitHub's quota or a network flap, not a broken plugin. Anonymous allows 10 searches/minute and 60 core requests/hour; a full census reads files from thousands of repositories and will not finish anonymously.
 
 - Paste a token in the GitHub access card (or press *use my GitHub login*) to raise the budget to 5,000/hour.
-- **You can also just continue**: pressing *census again* resumes from the breakpoint, because rows that already have evidence are skipped.
+- **You can also just continue**: pressing *census again* resumes from the breakpoint, because rows that already have evidence are skipped. The recovery walk below it works the same way (round 23).
 - `GET /status` (or the census line in `/events`) reports `planned / attempted / remaining / retries` — how far the walk got and how many retries it needed.
 
 **I entered a token and the panel still says "anonymous"**

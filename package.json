@@ -1,6 +1,6 @@
 {
   "name": "dsh-overall-mcp",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Overall MCP for DeepSeek Harness: first-run host-wide MCP config scan + auto-import, plus live aggregation of open MCP catalogs (official registry / Smithery / Docker MCP / awesome-remote / awesome-mcp-servers) for search and one-click install.",
   "keywords": ["deepseek-harness", "dsh", "dsh-plugin", "mcp", "model-context-protocol", "scanner", "catalog"],
   "license": "MIT",
