@@ -20,6 +20,9 @@ test('httpStatusFor maps caller-side payload problems to 400', () => {
   assert.equal(httpStatusFor(new Error('name (string) and enabled (boolean) required')), 400);
   assert.equal(httpStatusFor(new Error('item has no installable transport (stdio command or http url)')), 400);
   assert.equal(httpStatusFor(new Error('fs is not launched through a package runner; update it manually')), 400);
+  // A value that is present but unusable is the same class of mistake as a
+  // missing one: nothing was acted on, so 500 would be a false alarm.
+  assert.equal(httpStatusFor(new Error('on must be a boolean when given')), 400);
 });
 
 test('httpStatusFor maps an upstream registry failure to 502', () => {

@@ -2,7 +2,7 @@
 
 **DeepSeek Harness 插件：首次安装自动扫描宿主机全部 MCP 配置并注册；实时聚合 6 个网络开放 MCP 目录共 5000+ 条目（官方 Registry / Smithery / Docker MCP Catalog / GitHub MCP / Awesome 远程 / Awesome 本地），外加一份本机的 GitHub 普查索引（实测 1758 行），并把这些仓库里能从证据恢复出来的安装命令带上出处补进行里，以卡片形式浏览与一键接入。**
 
-简体中文
+[English](README.md) · 简体中文
 
 ## 核心特性
 
@@ -96,7 +96,7 @@ dsh plugin --profile web add ./dsh-overall-mcp
 - **收藏**：卡片页脚与详情面板都可收藏；宿主持久化到 `registry.favorites`，界面只本地改自己那份列表（为了一颗星重新拉 ~3MB 市场列表不值当下次浏览/安装/开会话会与宿主对齐）。市场筛选行有**仅看收藏 (N)**：对已加载列表做视图过滤，并在 `GET /api/overall-mcp/favorites` 报告的宿主总数大于可见数时说明差了多少（见「收藏」一节）
 - **往清单里投稿**：如果这份清单住在 GitHub 仓库里（`raw.githubusercontent.com/owner/repo/...`、`cdn.jsdelivr.net/gh/owner/repo@...`，或直接一个仓库地址），那一行右侧会出现「投稿 ↗」——它打开的是**已经预填好字段**的 `issues/new` 页面（`?title=&body=`，零令牌、零后端），提交后由仓库里的工作流校验并写回 `registry.json`。托管在别处的清单不显示这个链接（没有可投稿的地方），面板不会画一个点了没用的按钮。详见「投稿到社区清单（GitHub 上行）」
 - **页面头**（按 v4 原型，两行）：第一行 = 星座图标（一个品牌蓝中枢 + 五个 `currentColor` 卫星，深色主题自动反色）+「全局 MCP」+ 版本号（与 `package.json` 一致，`tools/client-smoke.mjs` 断言两者相等——会撒谎的版本号比不显示更糟）｜右侧主操作；第二行 = 副标题「宿主机扫描 · 市场发现 · 一键接入」｜右侧「⤓ 导出日志」。主按钮是**墨色**（`T.text` 铺底 + `T.cardBg` 作字色，深浅色主题自动翻转）而不是品牌蓝：品牌蓝留给链接、页签下划线、徽标和 gh 仓库名
-- **每个标签页最多一个主操作**：注册表页主按钮是「重新扫描宿主机」；市场页**没有主按钮**——重拉目录是「分类」那一行里 `刷新` 的活，一个常驻的填充按钮会和小按钮重复。另一页的主操作以无边框文字按钮留在同一行（「打开 MCP 市场」/「重新扫描宿主机」），两个主按钮等于没有主按钮。**本插件自己的更新不属于任何一个页签**：它跟着版本号走（页头 `全局 MCP v0.1.0` 右侧），「检查更新」报出新版时才出现，点了走 `POST /self-update`（宿主执行 `dsh plugin --profile <p> add dsh-overall-mcp@<v>`，装完提示重启 DSH 生效）——插件自身的版本判定见 `lib/self-update.js`：`link:`/本地检出（正是本仓库的开发形态）**不提供**自更新，因为那份代码就是版本来源，`npm` 上的新版本与它无关
+- **每个标签页最多一个主操作**：注册表页主按钮是「重新扫描宿主机」；市场页**没有主按钮**——重拉目录是「分类」那一行里 `刷新` 的活，一个常驻的填充按钮会和小按钮重复。另一页的主操作以无边框文字按钮留在同一行（「打开 MCP 市场」/「重新扫描宿主机」），两个主按钮等于没有主按钮。**本插件自己的更新不属于任何一个页签**：它跟着版本号走（页头 `全局 MCP v0.2.0` 右侧），「检查更新」报出新版时才出现，点了走 `POST /self-update`（宿主执行 `dsh plugin --profile <p> add dsh-overall-mcp@<v>`，装完提示重启 DSH 生效）——插件自身的版本判定见 `lib/self-update.js`：`link:`/本地检出（正是本仓库的开发形态）**不提供**自更新，因为那份代码就是版本来源，`npm` 上的新版本与它无关
 - **⤓ 导出日志**：把这一页知道的东西写成 JSON 文件（插件版本、注册表全量、市场各源条数/**每个来源各自的时间/是否命中缓存/是否 stale/是否 304/返回条数**/未变更来源数/返回条数、当前筛选与页码、两处错误）——排查问题时缺的正是这些。客户端本地拼装并下载，不新增宿主路由：宿主自己的日志不归这个插件导出
 - **只有卡片区滚动**：这一页是**固定外壳**（`height:100%` + `overflow:hidden`，自己不滚），滚动属于内部两个盒子——「已注册」的标签页主体整段可滚；「MCP 市场」里只有**卡片区**（`data-omkt="scroller"`，`flex:1 1 auto` + `min-height:0` + `overflow-y:auto`）可滚，搜索框、分类下拉、筛选行与 meta 行都是钉住的 chrome，翻页条留在滚动区下方。`tools/shot.mjs` 的框架探针把这条契约量出来：把卡片区往下拖 240px 后，页签行与搜索框的 `top` 位移必须为 0，页面外壳的 `scrollTop` 必须为 0（四种窗口宽度下实测 0/0/0）。注意 flex 的自动最小尺寸在**滚动容器**里会失效（这正是当初页签行被压成 1px 的原因），所以 chrome 行统一 `.omkt-page > *,.omkt-tabbody > *{flex-shrink:0}`，而「该让出高度」的两个盒子用内联 `flex:1 1 auto` 明确覆盖
 - **回到顶部**：监听挂在「本页内部第一个 `[data-omkt="scroller"]`，否则本页或它之上的第一个可滚动元素」（退化为 window），只在滚动超过 400px 后才出现，短页面不留一个死按钮。市场页签的滚动盒是卡片墙本身，**已注册页签的滚动盒是它的页体**（两者都带该 hook）——早先只有卡片墙带 hook，而页体是它的祖先，向上查找找不到，于是已注册页签上这个按钮从不出现。重新绑定的时机是「页签、市场列表、服务器列表任一变化」，因为卡片墙要等列表到达才存在（首次打开时若只按页签绑定，会绑到 window 且之后不再重绑）
@@ -214,7 +214,7 @@ MCP 生态目前**没有对等物**——没有站点把上千个 MCP 收录成�
 
 **「来源已删除」的行是同一个身份问题的第三面。** 那四条 `rea-cursor` 里，只有一条被 `connect()` 真正挂载（`serverName` 有值，就是 `mcp__rea-cursor__*` 这套工具背后的那份），另外三条是旧扫描器 `name-<source>` 重命名留下的惰性记录——重命名本身已在 `820641c` 里删掉，但它当年写进注册表的三条记录留了下来，而全机任何配置文件都不再包含这个名字（都固定着 6.1.0，正是报告里那三条）。它们既不会被重新导入，也不提供任何工具（fiber 按**名字**存放，`connect()` 见到已有名字就短路），却照样被算作服务器、响应行操作（按名字找第一条，正是「点最后一行、删掉第一行」的由来）。现在扫描器把这次的**证据**写进注册表（`registry.scanned`，`lib/scanner.js` 的 `scannedSources` / `findOrphans`）：读了哪些来源、各自定义了哪些名字；面板据此把这些行标成 `来源已删除`（琥珀色胶囊，不显示更新徽标——没有人会重新导入它），并把整个集合收成一条提示 + 一个动作「清理 N 条」（`POST /api/overall-mcp/forget-orphans`，一次请求处理全部）。判定**只在扫描确实读到过该来源时**才做：`not-found` 不算「空配置」，其余读取错误进 `unreadable` 也不参与——一份读不到的配置不能当成「这个服务器不存在」的证据；`source: manual` 的手工条目永不动。**正在持有挂载的行（`serverName` 非空）永远不在清理范围内**：那一行此刻就在供工具，配置文件没有它并不能成为把它拿走的理由。这个标记现在由 `connect()` / `disconnect()` 经 `setMountHolder` / `clearMountHolder` 维护，同名条目里**只有真正挂载成功的那一行**带 `serverName`——`fibers` 是按名字存放的，早先每点一次「更新」都会重挂一次，于是标记被留在刚刚重挂过的那一行上，四条同名记录里会有三条同时自称「持有挂载」，清理反倒漏掉它们。因为持有者不在清理范围内，清理既不需要断开也不需要重连任何 fiber（`syncFiber` 的循环已随之删掉），返回体只有 `{name, source, version}`。`停用` / `移除` 也带 `slot`，不再是按名字找第一条。
 
-同一个按钮还回答第二个问题：**本插件自己**（`dsh-overall-mcp`）在 npm 上有没有更新。有新版时，**版本号旁边**（页头 `全局 MCP v0.1.0` 的右侧）出现 `更新到 v<新版>` 按钮，两个标签页都在同一位置——这是唯一一件关于本页自身而不是本页内容的事，所以它属于版本号。两种安装形态给出的答案不同（`lib/self-update.js`，`test/self-update.test.mjs` 断言）：
+同一个按钮还回答第二个问题：**本插件自己**（`dsh-overall-mcp`）在 npm 上有没有更新。有新版时，**版本号旁边**（页头 `全局 MCP v0.2.0` 的右侧）出现 `更新到 v<新版>` 按钮，两个标签页都在同一位置——这是唯一一件关于本页自身而不是本页内容的事，所以它属于版本号。两种安装形态给出的答案不同（`lib/self-update.js`，`test/self-update.test.mjs` 断言）：
 
 | 安装形态 | 判定 | 面板行为 |
 | --- | --- | --- |
@@ -318,7 +318,7 @@ key 就是市场卡片的 React key，因为官方 Registry 的 id 随版本变�
 
 宿主插件的代码在 DSH 启动时只载入一次（见「常见问题」）。这带来一个用版本号答不上来的问题：**这个面板此刻到底在跑哪份代码？** 页头原来的第二行是一句写死的标语，现在它改读 `GET /api/overall-mcp/status`：
 
-`插件 v0.1.0 · pid 4242 · 已运行 3 小时 12 分 · 5 个数据文件 · 日志 2 条`
+`插件 v0.2.0 · pid 4242 · 已运行 3 小时 12 分 · 5 个数据文件 · 日志 2 条`
 
 `/status` 把三组事实分开报，因为它们的失效方式不同：
 
@@ -402,6 +402,19 @@ key 就是市场卡片的 React key，因为官方 Registry 的 id 随版本变�
 
 验证：`node --test` 284/284（新增两条宿主契约用例：启动挂载与组开关「同名只挂一次、每行都有答案」），`tools/render-market-tab.mjs` 14 节全绿（新增第 4c-2 节：无使用量数据、上游推送时间、推断分类三件事都在界面上说清了）。
 
+## 工程化与版本（第二十一轮）
+
+这一轮没有新功能。加的是**别人（以及三个月后的自己）能不能复核这份代码**：三条会被真实失败触发的契约、两支持续探测进入 CI、一个真的会红的工作流、一份英文入口，和一份更新日志。
+
+1. **收藏路由的往返契约**（`test/index.test.mjs`）。收藏此前只有渲染探针覆盖，而渲染探针喂的是桩状态：它证明面板画得对，不证明宿主真的把收藏写进了 `registry.json`。新用例走真路由与真文件：`{key:'smithery:brave', on:true}` → 200 且 `favorite:true`、`favorites:['smithery:brave']`；重复发 `on:true` 仍为 `true` 且只有一条（这就是面板为什么要发 `on` 而不是发「切换」：重发一次不能让收藏消失）；`GET /favorites` → `{favorites:['smithery:brave'], count:1}`，且**从磁盘回读**的 `registry.favorites` 与它深等（写到了文档，而不只是改了内存）；`on:false` → `false` 与空数组；**不带 `on` 的两次调用分别给出 `true`/`false`**（旧的切换语义保留，因为它已经在工具与既有调用方那里）；`on:'yes'` → **400** 且随后 `GET /favorites` 的 `count === 0`（坏输入不能留下半个状态）；缺 `key` → 400。
+2. **畸形 `on` 不再算内部故障**。`lib/http-status.js` 新增一条规则：消息里出现 `must be a boolean` 的调用方错误映射到 400（`test/http-status.test.mjs` 有断言）。`on: "yes"` 是「值给了但不可用」，与「没给」同类，此前会落到 500——而 500 的含义是「这条路径我们没预料到」。
+3. **两支持续探测进入 `test:probes`**：`tools/verify-detail-links.mjs`（逐源链接覆盖、零死链、零重复 URL）与 `tools/verify-group-row.mjs`（chip 行的显示/隐藏判定与计数之和）。两者都读**实时目录**，所以没有任何来源应答时它们 `exit 2`（不是 1）并打印「no source answered — nothing was verified (offline?)」——已用 `node --import` 把 `fetch` 打桩成全部失败实测过这条路：没有来源时它们的断言是空真的，而「0 条死链」在 0 个条目上正是这些文件存在的意义所反对的那种假绿。让 CI 把离线读成失败，是这两支探针能进 CI 的唯一诚实方式。`tools/probe-favorites.mjs` 需要活实例的 base 与 token，因此留在 `npm run test:live` 里单跑。
+4. **`verify:ci` 与 `verify` 拆开**，以及一个真的会失败的 CI：`verify:ci` = `lint && test && test:registry && test:probes`，`verify` = `verify:ci && test:layout`。`test:layout` 需要本机真实的 Chromium（`tools/layout-probe.mjs` / `tools/shot.mjs` 走 `CHROME_PATH`，默认指向 Windows 上的 Chrome），所以它留在本地。新增 `.github/workflows/verify.yml`：`push`/`pull_request`/`workflow_dispatch`，矩阵 `node 22.x` 与 `24.x`（对应 `engines` 的 `^22.19.0 || >=24.0.0`）；这个包**没有任何依赖**，所以工作流里没有安装步骤、没有锁文件、没有缓存。
+5. **版本策略与更新日志**。`package.json` 从 `0.1.0` 提到 **`0.2.0`**：此前二十轮一直是 `0.1.0`、也没有任何发布记录，而第二十轮的六处口径修正已够一次 minor。两处版本号（`package.json` 与 `client/client.js` 的 `CLIENT_VERSION`）由 `tools/client-smoke.mjs` 钉住相等，并且这一轮新增 `CHANGELOG.md` 后，同一个探针还断言**最新一节 == `package.json` 的版本**——缺文件、没有版本小节、与 `package.json` 不一致三种情况都失败（实测删掉 `CHANGELOG.md` 时 exit 1）。理由是 `CLIENT_VERSION` 是一个字面量：没有这条断言，它就会在某次升版本时悄悄落后，而面板上的版本号正是第十八轮那条身份行用来回答「你现在跑的是哪份代码」的东西。
+6. **英文入口 `README.md`**。两份文档分工不同：英文那份是入口与实际用法（快速开始、三个标签页、模型工具、API、数据、安全、常见问题），中文这份是完整工程记录——每一轮的理由、实测数字和取舍都在这里。
+
+验证：`npm test` **285/285**（新增收藏往返契约；`lib/http-status.js` 的布尔规则断言加在既有用例里，故只 +1），`npm run lint` exit 0，`npm pack --dry-run` **26 个文件** / tarball **280.1 kB** / 解包 **796.2 kB**（第二十轮时 23 个 / 229 kB；`README.md` 与 `CHANGELOG.md` 是这一轮进 `files` 的）。
+
 ## 市场数据来源（2026-10 实测）
 
 | 来源 | 端点 | 说明 |
@@ -443,11 +456,19 @@ key 就是市场卡片的 React key，因为官方 Registry 的 id 随版本变�
 ## 开发
 
 ```sh
-node --test test/*.mjs                                     # 纯逻辑测试（lib/ 零依赖）
+npm test                                                   # 纯逻辑测试（lib/ 零依赖）；脚本是显式文件列表
+npm run test:registry                                      # 复核已发布的 registry.json
+npm run test:probes                                        # 渲染探针：把真页面渲染出来并断言 DOM（含两支读实时目录的校验）
+npm run test:layout                                        # 需要本机真实 Chromium（CHROME_PATH），只在本机跑
+npm run test:live                                          # 需要活实例的 base 与 token（活实例专用）
+npm run verify:ci                                          # lint && test && test:registry && test:probes ← CI 跑这个
+npm run verify                                             # verify:ci && test:layout ← 提交前跑这个
+#   .github/workflows/verify.yml 在 push / PR / workflow_dispatch 上跑 verify:ci，矩阵 node 22.x 与 24.x；
+#   本包无任何依赖，所以工作流里没有安装步骤、没有锁文件、没有缓存
 node --test test/events.test.mjs                           # 动作日志本身：往返、按行/按字节修剪并留痕、损坏行计数、并发追加不互相截断、写不进去只回 null
 node --test test/index.test.mjs                            # 宿主契约测试：真跑 apply(ctx)，假宿主 + 临时 DSH_HOME（见下）
 #   三个宿主 peer 依赖本仓库不安装，由 test/hooks.mjs 映射到 test/stubs/；npm test 的脚本是显式文件列表，新增测试要加进去
-node tools/client-smoke.mjs                               # 客户端注册契约 smoke（模拟前端 module loader；并断言客户端版本号 == package.json）
+node tools/client-smoke.mjs                               # 客户端注册契约 smoke（模拟前端 module loader；断言客户端版本号 == package.json == CHANGELOG 最新小节）
 node tools/render-detail.mjs                              # 渲染详情页：事实表有值、链接齐全、命令可见、复制按钮真的把命令交给剪贴板（打桩 navigator.clipboard 后驱动真实按钮）
 node tools/render-card.mjs                                # 渲染卡片：标题是链接、正文不是 button、无嵌套交互元素、GitHub 标记/版本在位、命令行只在详情面板
 node tools/render-market-tab.mjs                          # 渲染整个市场页 chrome：页头两行（含身份行与折叠的运行日志）、页签计数、搜索行、筛选行、元信息行、卡片流、页脚分工，以及「仅看收藏」过滤后如实说明藏了多少条
@@ -458,7 +479,10 @@ node tools/shot.mjs                                       # 把真页面渲染�
 node tools/preview-paged.mjs "<base-url-with-?token=…>" 20 1 installs
                                                           # 按面板页的方式渲染某一页（可带 pageSize/page/sort/group，group 如"金融支付"/"__none__"）
 node tools/verify-sort-paging.mjs                         # 校验 6 种排序、3 种页宽、越界夹取、紧凑计数
-node tools/verify-detail-links.mjs                        # 校验详情页链接：逐源覆盖、零死链、零重复 URL
+node tools/verify-detail-links.mjs                        # 校验详情页链接：逐源覆盖、零死链、零重复 URL（进 test:probes）
+node tools/verify-group-row.mjs                           # 校验分类 chip 行的显示/隐藏判定与计数之和 == 条目数（进 test:probes）
+#   上面两支读实时目录：没有任何来源应答时它们 exit 2（不是 1）并打印「no source answered — nothing was verified (offline?)」，
+#   因为「0 条死链」在 0 个条目上是空真的——CI 必须把离线读成失败，而不是读成通过
 node tools/registry-submission.mjs --check --registry registry.json
                                                           # 复核已发布的清单（npm run test:registry，进 verify）
 node tools/registry-submission.mjs --body-file /tmp/issue.md
@@ -536,9 +560,9 @@ node tools/fixture-bad-schema-mcp.mjs                     # 故意带 `^[^\0]*$`
 
 ## 发布包内容（第十七轮起）
 
-`package.json` 增加了 `files` 白名单，进包的只有这 23 个（`npm pack` 实测，含 npm 强制带上的 `package.json` 与 `LICENSE`）：`index.js`、`lib/`（16 个 `.js`）、`client/client.js`、`cordis.patch.yml`、`registry.json`、`README.zh-CN.md`。实测 **76 个文件 / 1.25 MB → 23 个文件 / 0.65 MB**（tarball 410 KB → 229 KB）。
+`package.json` 增加了 `files` 白名单，进包的只有这 **26 个**（`npm pack --dry-run` 实测，含 npm 强制带上的 `package.json` 与 `LICENSE`）：`index.js`、`lib/`（**17 个** `.js`）、`client/client.js`、`cordis.patch.yml`、`registry.json`、`README.md`、`README.zh-CN.md`、`CHANGELOG.md`。第十七轮刚收窄时是 **76 个文件 / 1.25 MB → 23 个文件 / 0.65 MB**（tarball 410 KB → 229 KB）；现在 **26 个文件 / tarball 280.1 kB / 解包 796.2 kB**（`README.md` 与 `CHANGELOG.md` 是第二十一轮进白名单的，`lib/` 从 16 个涨到 17 个不需要动白名单——`lib` 是整目录）。
 
-被排除的 53 个文件（637 KB）全是开发期资产，没有任何一个是运行时读取的：`tools/`（25 个，268 KB）、`test/`（21 个，241 KB）、`prototype/`（2 个，62 KB）、`INTEGRATION-TODO.md`（59 KB）、`.github/`（3 个，6 KB）、`.gitattributes`。已核对：`index.js` 读的是数据目录下的 `registry.json`（`$DSH_HOME/overall-mcp/`），不是仓库根这一份；`tools/registry-submission.mjs` 只由 CI 在 checkout 上运行。新增 `lib/*.js` 不需要动白名单（`lib` 是整目录），但新增 `test/`、`tools/` 下的文件不影响发布体积。
+被排除的是开发期资产，没有任何一个是运行时读取的：`tools/`（33 个文件，含渲染探针产出的截图）、`test/`（22 个）、`prototype/`（2 个）、`INTEGRATION-TODO.md`、`.github/`（4 个）、`.gitattributes`。已核对：`index.js` 读的是数据目录下的 `registry.json`（`$DSH_HOME/overall-mcp/`），不是仓库根这一份；`tools/registry-submission.mjs` 只由 CI 在 checkout 上运行；`tools/verify-detail-links.mjs` 等探针只在开发与 CI 里跑。新增 `test/`、`tools/` 下的文件不影响发布体积。
 
 ## 常见问题
 

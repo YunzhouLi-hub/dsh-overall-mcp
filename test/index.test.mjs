@@ -175,10 +175,59 @@ test('the plugin registers the documented route and tool surface', async () => {
 });
 
 /**
- * The market route reads the open catalogs over the global fetch. This stub
- * answers only Docker's repository listing, with a validator, and records what
- * each request carried — enough to prove the panel's read is conditional.
+ * The favourite routes are a write/read pair, and the panel's star only ever
+ * sends the state it wants (`on`). Both shapes are pinned here because they are
+ * easy to get subtly wrong in opposite directions: `on` must be idempotent (a
+ * double click must not un-star), while a bare `key` must still toggle (that is
+ * what the old star does, and what a script passing no `on` expects). The read
+ * side has to agree with what was written *and* survive a restart, since the
+ * set lives in registry.json.
  */
+test('a favourite round-trips through the registry, and `on` is idempotent', async () => {
+  await withHost(FIXTURE, async ({ call, readRegistry }) => {
+    const KEY = 'smithery:brave';
+    const written = await call('/api/overall-mcp/favorite', { body: { key: KEY, on: true } });
+    assert.equal(written.status, 200);
+    assert.equal(written.body.favorite, true);
+    assert.deepEqual(written.body.favorites, [KEY]);
+
+    // Same call again: still starred, still one entry. A toggle-shaped route
+    // would have un-starred it here, which is why the panel sends `on`.
+    const again = await call('/api/overall-mcp/favorite', { body: { key: KEY, on: true } });
+    assert.equal(again.body.favorite, true);
+    assert.deepEqual(again.body.favorites, [KEY]);
+
+    const listed = await call('/api/overall-mcp/favorites', { method: 'GET' });
+    assert.equal(listed.status, 200);
+    assert.deepEqual(listed.body, { favorites: [KEY], count: 1 });
+    // The write reached the document, not just the in-memory set: that is the
+    // difference between "starred until DSH restarts" and starred.
+    assert.deepEqual((await readRegistry()).favorites, [KEY]);
+
+    // `on: false` must remove even though the key is absent from the *caller's*
+    // view of the world — it is a write of the desired state, not a toggle.
+    const off = await call('/api/overall-mcp/favorite', { body: { key: KEY, on: false } });
+    assert.equal(off.body.favorite, false);
+    assert.deepEqual(off.body.favorites, []);
+
+    // No `on`: the legacy toggle, both directions.
+    const toggledOn = await call('/api/overall-mcp/favorite', { body: { key: KEY } });
+    assert.equal(toggledOn.body.favorite, true);
+    const toggledOff = await call('/api/overall-mcp/favorite', { body: { key: KEY } });
+    assert.equal(toggledOff.body.favorite, false);
+
+    // A non-boolean `on` is the caller's mistake: 400, and nothing changed.
+    const bad = await call('/api/overall-mcp/favorite', { body: { key: KEY, on: 'yes' } });
+    assert.equal(bad.status, 400);
+    const stillEmpty = await call('/api/overall-mcp/favorites', { method: 'GET' });
+    assert.equal(stillEmpty.body.count, 0);
+
+    // A missing key is the same class of mistake, not an internal fault.
+    assert.equal((await call('/api/overall-mcp/favorite', { body: {} })).status, 400);
+  });
+});
+
+
 function dockerFetchStub() {
   const calls = [];
   const DOCKER = {

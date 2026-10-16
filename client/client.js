@@ -55,8 +55,11 @@ window.__ModuleLoader__.load({
 		const API = "/api/overall-mcp";
 		// Shown in the page head's version chip. The bundle cannot read
 		// package.json at runtime, so `tools/client-smoke.mjs` asserts the two
-		// stay equal — a version chip that lies is worse than no chip.
-		const CLIENT_VERSION = "0.1.0";
+		// stay equal — a version chip that lies is worse than no chip. That
+		// probe also checks CHANGELOG.md's newest section is this version, since
+		// a release note that stops at an older build tells a reader what
+		// changed in code they are not running.
+		const CLIENT_VERSION = "0.2.0";
 		// The bundle's npm package name — what the profile lists in its
 		// `dsh.profile.bundles` and what its bundle page is keyed by. The
 		// bundle cannot read package.json at runtime, so `tools/client-smoke.mjs`

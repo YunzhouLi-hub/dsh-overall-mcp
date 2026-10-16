@@ -10,6 +10,14 @@ import { browseCatalog, functionalGroupOf } from '../lib/catalog.js';
 const r = await browseCatalog({ limit: 400 });
 const items = r.items;
 
+// Nothing to check: an empty listing would fail (or vacuously pass) the
+// assertions below for a reason that has nothing to do with this rule. Exit 2 —
+// "the world was unreachable" — so it is not confused with a rule failure.
+if (items.length === 0) {
+  console.error('no source answered — nothing was verified (offline?)');
+  process.exit(2);
+}
+
 // --- the counts the chips are labelled with (mirror of the client) ---
 const counts = new Map();
 let uncategorized = 0;

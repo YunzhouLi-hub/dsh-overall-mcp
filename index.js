@@ -1598,8 +1598,8 @@ export async function apply(ctx) {
    * What code is running here, and what this process has been doing.
    *
    * The panel's version chip cannot answer the first question: it is a literal
-   * (0.1.0) that does not move between releases, and a process loads its code
-   * once at startup — a checkout edited afterwards keeps reporting the old story.
+   * compiled into the page, and a process loads its code once at startup — a
+   * checkout edited afterwards keeps reporting the old story.
    * On 2026-10-16 that cost a whole diagnostic round: 「github-mcp 源不可用」 came
    * from a host started the previous day, before the batches that fixed it
    * existed. `source.stale` is exactly that comparison, from file mtimes;

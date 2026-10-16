@@ -14,6 +14,16 @@ if (r.errors.length) {
   console.log(`source failures this run: ${r.errors.map((e) => `${e.source} (${e.message})`).join(', ')}\n`);
 }
 
+// Nothing to check. With every source down, both checks below are vacuously
+// true, so a green run would be indistinguishable from a verified one; a probe
+// that reports "0 dead ends" while holding 0 entries is the lie this whole file
+// exists to prevent. Exit 2 (not 1) so a caller can tell "the world was
+// unreachable" from "the rule is broken".
+if (r.items.length === 0) {
+  console.error('no source answered — nothing was verified (offline?)');
+  process.exit(2);
+}
+
 function repoKeyOf(item) {
   const m = String(item?.repository ?? '').match(/^https?:\/\/(?:www\.)?github\.com\/([^/\s]+)\/([^/\s#?]+)/i);
   return m ? `${m[1]}/${m[2].replace(/\.git$/i, '')}` : null;

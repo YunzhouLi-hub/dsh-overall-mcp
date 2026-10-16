@@ -120,6 +120,16 @@ if (!clientVersion) throw new Error('client exports no __test.version');
 if (clientVersion !== pkg.version) {
   throw new Error(`client version ${clientVersion} != package.json ${pkg.version}`);
 }
+// The changelog's newest section names the version it documents. A file that
+// stops at an older release is the same class of lie as a stale version chip:
+// it tells a reader what changed in a build they are not running.
+const changelog = await readFile(path.join(here, '..', 'CHANGELOG.md'), 'utf8').catch(() => null);
+if (changelog === null) throw new Error('CHANGELOG.md is missing');
+const newestSection = changelog.match(/^##\s*\[?([0-9]+\.[0-9]+\.[0-9]+)/m);
+if (!newestSection) throw new Error('CHANGELOG.md has no versioned section');
+if (newestSection[1] !== pkg.version) {
+  throw new Error(`CHANGELOG.md newest section is ${newestSection[1]}, package.json is ${pkg.version}`);
+}
 const bundleName = exportsObj.__test?.bundleName;
 if (!bundleName) throw new Error('client exports no __test.bundleName');
 if (bundleName !== pkg.name) {

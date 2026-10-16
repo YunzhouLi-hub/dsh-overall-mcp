@@ -1,0 +1,55 @@
+# Verify every push and pull request on both supported Node lines.
+#
+# `npm run verify:ci` is the whole non-visual chain: syntax checks, the unit
+# tests, the registry document's own validator, and the render probes (which
+# build the page from the real client bundle and assert on the rendered DOM).
+# It needs no dependencies — the plugin declares none at runtime, only peers a
+# DSH host provides — so there is no install step and no lockfile to cache.
+#
+# `npm run verify` adds the two visual probes (tools/layout-probe.mjs,
+# tools/shot.mjs). Those drive a real Chromium through CHROME_PATH and stay a
+# local step on purpose: a runner has no display, and downloading a browser
+# would make this matrix depend on a third-party action for no extra truth.
+#
+# Two of the render probes read the live catalogs. They exit 2 (not 1) when no
+# source answers, so "the network was unreachable" can never read as a pass.
+name: verify
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.x', '24.x']
+    name: node ${{ matrix.node }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Show the runtime under test
+        run: node --version
+
+      - name: Syntax, unit tests and the registry document
+        run: |
+          npm run lint
+          npm test
+          npm run test:registry
+
+      - name: Render probes against the real client bundle
+        run: npm run test:probes
