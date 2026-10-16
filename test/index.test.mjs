@@ -55,10 +55,13 @@ const GHOST_ITEM = {
   install: { transport: 'stdio', command: 'npx', args: ['-y', 'ghost-mcp'] },
 };
 
-async function withHost(registry, run, { llm, files } = {}) {
+async function withHost(registry, run, { llm, files, mount } = {}) {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), 'overall-mcp-contract-'));
   const dir = path.join(home, 'overall-mcp');
   await fs.mkdir(dir, { recursive: true });
+  // Every mount the plugin attempts, in order. A case that cares how a fan-out
+  // behaves (one mount per name) watches this instead of the clock.
+  const mounts = [];
   if (registry !== undefined) {
     const text = typeof registry === 'string' ? registry : JSON.stringify(registry, null, 2);
     await fs.writeFile(path.join(dir, 'registry.json'), text, 'utf8');
@@ -80,7 +83,14 @@ async function withHost(registry, run, { llm, files } = {}) {
       effect: () => () => {},
       // No mount in a unit test; a failed mount is a case the plugin must
       // contain (and, for an install, must not count as a successful one).
-      plugin: () => { throw new Error('no mcp mount in this test'); },
+      // `mount` lets one case watch the attempts (see the group-switch case).
+      plugin: (_mcpClient, config) => {
+        // ctx.plugin(mcpClient, config): the config carries the reserved
+        // `serverName`, which is the identity a duplicate-name race collides on.
+        mounts.push(config?.serverName ?? null);
+        if (mount) return mount(config);
+        throw new Error('no mcp mount in this test');
+      },
       tools: {
         register(definition) { tools.set(definition.name, definition); return () => {}; },
         schemas: () => [],
@@ -122,7 +132,7 @@ async function withHost(registry, run, { llm, files } = {}) {
       catch { return { version: 1, entries: {} }; }
     };
 
-    await run({ dir, routes, tools, call, readRegistry, readInstalls, registryText });
+    await run({ dir, routes, tools, call, readRegistry, readInstalls, registryText, mounts });
   } finally {
     // The plugin's activity log is written behind the response, so a case can
     // finish while an append is still in flight. Stop accepting events, let the
@@ -290,7 +300,10 @@ test('an install whose mount fails is kept but not counted', async () => {
   await withHost(FIXTURE, async ({ call, readRegistry, readInstalls }) => {
     const result = await call('/api/overall-mcp/install', { body: { item: GHOST_ITEM } });
     assert.equal(result.status, 200);
-    assert.equal(result.body.installed, 'ghost-mcp');
+    assert.equal(result.body.server, 'ghost-mcp');
+    // One word, one meaning: a name is `server`, and `installed` stays the
+    // market's boolean, exactly as a catalog row carries it.
+    assert.equal(result.body.installed, true);
     assert.equal(result.body.connect.ok, false, 'the mount is the failure under test');
     // The row stays: the user can fix and retry it.
     assert.ok((await readRegistry()).servers.some((s) => s.name === 'ghost-mcp'));
@@ -731,9 +744,17 @@ test('a spent search budget reads as a wait, and nothing spends from it again', 
       // Let the refusal land, then read again *with refresh*, which is the
       // strongest request the panel can make — and it must still not ask.
       await waitFor(() => (githubSearchQuota().waitMs > 0 ? true : null));
-      await new Promise((resolve) => { setTimeout(resolve, 30); });
-      const second = await call('/api/overall-mcp/catalog', {
-        body: { source: 'github-mcp', limit: 100, refresh: true },
+      // While the census walk is still registered the source line describes the
+      // walk, not the spent budget — and that is the honest answer at that
+      // moment ("something is happening"), so this case watches for the
+      // handover rather than sleeping a fixed 30ms and hoping. What it asserts
+      // is what the *settled* host says: the budget is empty, and the panel's
+      // strongest request still spends nothing.
+      const second = await waitFor(async () => {
+        const res = await call('/api/overall-mcp/catalog', {
+          body: { source: 'github-mcp', limit: 100, refresh: true },
+        });
+        return /配额已用完/.test(String(res.body.sources['github-mcp'].note ?? '')) ? res : null;
       });
       assert.equal(requests, 1, 'no request is spent from a window known to be empty');
       assert.match(String(second.body.sources['github-mcp'].note ?? ''), /配额已用完/);
@@ -926,6 +947,67 @@ test('a pasted GitHub token is used for GitHub and echoed nowhere', async () => 
     if (savedEnv.GITHUB_TOKEN === undefined) delete process.env.GITHUB_TOKEN;
     else process.env.GITHUB_TOKEN = savedEnv.GITHUB_TOKEN;
   }
+});
+
+// A group whose rows repeat one name: the fan-out (startup, group switch) must
+// mount per *name* and answer per *row*.
+const DUPLICATE_GROUP = {
+  version: 1,
+  servers: [
+    { name: 'demo-a', source: 'demo', enabled: true, transport: 'stdio', command: 'npx', args: ['-y', 'demo-a@1.0.0'] },
+    { name: 'demo-a', source: 'demo', enabled: true, transport: 'stdio', command: 'npx', args: ['-y', 'demo-a@2.0.0'] },
+    { name: 'demo-b', source: 'demo', enabled: true, transport: 'stdio', command: 'npx', args: ['-y', 'demo-b'] },
+    { name: 'demo-c', source: 'demo', enabled: true, transport: 'stdio', command: 'npx', args: ['-y', 'demo-c'] },
+  ],
+};
+
+// The mounts are bounded and concurrent now (CONNECT_CONCURRENCY), which is what
+// makes this case worth having: two rows can share a name — one client config
+// may define the same server twice — and a concurrent pair that both read
+// `fibers` before either had set one would launch two mcp-clients under the same
+// serverName. The loser's collision used to be recorded as 「另一个 mcp-client
+// 已经提供」, a claim about the host that was not true.
+test('startup mounts each name once, and every row still gets an answer', async () => {
+  await withHost(DUPLICATE_GROUP, async ({ mounts, call }) => {
+    assert.deepEqual(mounts.slice().sort(), ['demo-a', 'demo-b', 'demo-c']);
+    const list = await call('/api/overall-mcp/servers', { method: 'GET' });
+    assert.equal(list.status, 200);
+    assert.equal(list.body.servers.length, 4);
+    // The fake host refuses every mount. The failure belongs to the *name* and
+    // is recorded on the row that owns the attempt — demo-a@1.0.0, the first
+    // enabled row of that name. Its twin reads 启用但未挂载 rather than
+    // inventing a second, identical error, and *neither* may claim to be
+    // provided by another mount: that is the collision claim a concurrent pair
+    // of mounts for one serverName used to produce.
+    assert.deepEqual(list.body.servers.map((s) => s.status), ['error', 'idle', 'error', 'error']);
+    assert.ok(!list.body.servers.some((s) => s.providedExternally === true));
+  });
+});
+
+test('a group switch mounts each name once and answers every row', async () => {
+  const registry = {
+    version: 1,
+    servers: DUPLICATE_GROUP.servers.map((s) => ({ ...s, enabled: false }))
+      .concat([{ name: 'other', source: 'manual', enabled: false, transport: 'stdio', command: 'other' }]),
+  };
+  await withHost(registry, async ({ call, mounts }) => {
+    assert.deepEqual(mounts, [], 'every row starts disabled');
+    const result = await call('/api/overall-mcp/set-source-enabled', { body: { source: 'demo', enabled: true } });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.changed, 4);
+    // One mount per name (demo-a is defined twice) …
+    assert.deepEqual(mounts.slice().sort(), ['demo-a', 'demo-b', 'demo-c']);
+    // … and one answer per row, in registry order, with the manual row left
+    // alone by a switch that names another source.
+    const demo = result.body.servers.filter((s) => s.source === 'demo');
+    assert.equal(demo.length, 4);
+    assert.deepEqual(demo.map((s) => s.enabled), [true, true, true, true]);
+    // Same rule as startup: the name's failure is recorded once, on the row
+    // that owns the attempt (demo-a@1.0.0), and its twin honestly reads
+    // 启用但未挂载 instead of a duplicate error.
+    assert.deepEqual(demo.map((s) => s.status), ['error', 'idle', 'error', 'error']);
+    assert.equal(result.body.servers.find((s) => s.name === 'other').enabled, false);
+  });
 });
 
 /** Poll a condition until it is truthy, or fail with the last value. */

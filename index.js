@@ -65,6 +65,18 @@ const PLUGIN_DIR = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_NAME_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
 /** Bounded readiness wait for one mcp-client mount (see connect()). */
 const CONNECT_WAIT_MS = 8000;
+/**
+ * How many mcp-client mounts may be starting at once.
+ *
+ * A mount is a child process plus a handshake, and the wait is bounded by
+ * CONNECT_WAIT_MS — so doing them one at a time made the worst case (one group
+ * whose whole membership fails to start) `members × 8s`: the 2026-10-16 report
+ * measured a group of five taking 40 seconds with the panel sitting on
+ * 「正在切换…」. Four in flight keeps a group's switch to the order of one
+ * handshake while still bounding the process fan-out, and every result keeps its
+ * original place in the reply either way.
+ */
+const CONNECT_CONCURRENCY = 4;
 /** How long a failed-mount diagnosis may take before the install reply wins. */
 const DIAGNOSIS_TIMEOUT_MS = 20000;
 /** Diagnoses kept in memory: retrying the same broken entry must not re-ask. */
@@ -426,13 +438,51 @@ export async function apply(ctx) {
     try { await fiber.dispose(); } catch { /* already gone */ }
   }
 
-  async function connectEnabled() {
-    const results = [];
-    for (const entry of registry.servers) {
-      if (entry.enabled === false) continue;
-      results.push({ name: entry.name, ...(await connect(entry)) });
-    }
+  /**
+   * Run `worker` over `items` with at most `limit` of them in flight, and keep
+   * the answers in the input's order.
+   *
+   * Written by hand rather than reached for from a library because the two
+   * callers below are the only place in this plugin that fan out, and because
+   * the ordering guarantee is the point: `connectEnabled()` returns one result
+   * per registry row, and the client indexes into that array.
+   */
+  async function mapLimited(items, limit, worker) {
+    const list = [...items];
+    const results = new Array(list.length);
+    let next = 0;
+    const width = Math.max(1, Math.min(limit, list.length));
+    await Promise.all(Array.from({ length: width }, async () => {
+      for (;;) {
+        const index = next;
+        next += 1;
+        if (index >= list.length) return;
+        results[index] = await worker(list[index], index);
+      }
+    }));
     return results;
+  }
+
+  async function connectEnabled() {
+    const enabled = registry.servers.filter((entry) => entry.enabled !== false);
+    // One *mount* per name, but one *answer* per enabled row — the caller
+    // indexes into this array by registry position.
+    //
+    // Concurrency is why this cannot simply loop: two rows can share a name (one
+    // client config may define the same server twice), and a concurrent pair
+    // would both pass `connect()`'s `fibers.has()` guard before either had set a
+    // fiber — the second mcp-client launch would collide on the serverName and
+    // be recorded as an external mount it never was (see branch 2 in connect()).
+    // Rows that share a name therefore get the first row's verdict verbatim:
+    // there is nothing else to try, and a second identical attempt would only
+    // produce a second identical failure.
+    const names = [...new Set(enabled.map((entry) => entry.name))];
+    const answers = await mapLimited(names, CONNECT_CONCURRENCY, async (name) => {
+      const entry = enabled.find((row) => row.name === name);
+      return { name, ...(await connect(entry)) };
+    });
+    const byName = new Map(answers.map((answer) => [answer.name, answer]));
+    return enabled.map((entry) => byName.get(entry.name));
   }
 
   function publicList() {
@@ -683,11 +733,16 @@ export async function apply(ctx) {
     recordScan(report);
     await save();
     await writeJson(reportFile, { scannedAt: new Date().toISOString(), report });
-    const connected = [];
-    for (const name of merged.added) {
-      const entry = registry.servers.find((s) => s.name === name);
-      if (entry && entry.enabled !== false) connected.push({ name, ...(await connect(entry)) });
-    }
+    // Newly found servers mount with the same bounded fan-out as a group switch:
+    // a scan that adds several servers must not cost one CONNECT_WAIT_MS each,
+    // and the names in `merged.added` are already unique.
+    const wanted = merged.added
+      .map((name) => registry.servers.find((s) => s.name === name))
+      .filter((entry) => entry && entry.enabled !== false);
+    const connected = await mapLimited(wanted, CONNECT_CONCURRENCY, async (entry) => ({
+      name: entry.name,
+      ...(await connect(entry)),
+    }));
     emit({
       kind: 'scan',
       files: report.length,
@@ -844,7 +899,12 @@ export async function apply(ctx) {
       ...(diagnosisError ? { diagnosisError } : {}),
     });
     return {
-      installed: entry.name,
+      // `server` is the name of the row that was written; `installed` is the
+      // market's own boolean — the same one every catalog row carries. The two
+      // used to share this one key, so the client read a string here and a
+      // boolean on a card: one word, two meanings, one place to get it wrong.
+      server: entry.name,
+      installed: true,
       localInstalls: record?.count ?? localInstallsOf(installs, item, entry.name),
       servers: (await serversPayload()).servers,
       connect: conn,
@@ -944,7 +1004,14 @@ export async function apply(ctx) {
     // The old loop disconnected every target name and reconnected only the rows
     // this source owns, so switching one source off could take the tools away
     // from a same-named row that still had 「启用」 on.
-    for (const name of new Set(targets.map((s) => s.name))) await syncFiber(name);
+    // Bounded fan-out: a group of N rows used to cost N × CONNECT_WAIT_MS when
+    // its mounts could not start (measured: 40s for five). Each name is still
+    // its own fiber, so these do not touch each other's state.
+    await mapLimited(
+      [...new Set(targets.map((s) => s.name))],
+      CONNECT_CONCURRENCY,
+      (name) => syncFiber(name),
+    );
     const external = targets.filter(externallyProvided).length;
     return {
       source,
@@ -1677,7 +1744,14 @@ export async function apply(ctx) {
         .map((item) => applyInstallEvidence(item, evidence.get(item.id)))
         .map(annotateItem),
       errors: result.errors,
-      counts: result.counts,
+      // The panel prints one number per source beside 「共 N 条」, so it has to be
+      // the number of *cards* that source is credited with after the merge — the
+      // raw walked counts still live in `sources[id].items`, and the overlap is
+      // carried separately (`deduped`) so the line can say where the difference
+      // went instead of leaving the reader to wonder why the parts sum to more
+      // than the whole.
+      counts: result.mergedCounts,
+      deduped: result.deduped,
       sources: result.sources,
       total: result.total,
       // "cached" means every source answered from what we already held — the

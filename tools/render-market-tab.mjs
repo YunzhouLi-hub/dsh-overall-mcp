@@ -77,12 +77,21 @@ const MARKET = {
       repository: 'https://github.com/Gatyh/3dtexel-mcp', version: null, group: '搜索与知识',
       installable: true, installed: false, favorite: false,
       installs: 1200, installsLabel: '次启动',
+      // No source published a category for this one, so 分类 is our reading of
+      // its own words — and it is the ONLY entry in that group, which is what
+      // makes the dropdown mark the whole option as （推断）.
+      groupSource: 'inferred',
+      // The repository's own last push. The card has to keep this apart from
+      // the listing's read time: one is upstream's clock, the other is ours.
+      updatedAt: '2026-09-30T12:00:00.000Z',
     },
     {
       id: 'remote:example.com/mcp', title: 'example-mcp', source: 'awesome-remote', author: 'example.com',
       description: 'A hosted endpoint.', transport: 'unknown', install: null,
       installable: false, installed: false, favorite: false,
-      installs: 90000, installsLabel: '次启动',
+      // Deliberately no usage figure at all: neither upstream nor this machine
+      // ever counted one, so under 使用量 ordering it sorts last — and the card
+      // is the only place that can say why.
     },
   ],
   counts: { 'official-registry': 1, 'awesome-list': 1, 'awesome-remote': 1, 'github-mcp': 2 },
@@ -90,9 +99,15 @@ const MARKET = {
   // Two of the sources answered 304 on the last walk, so the freshness line has
   // something honest to say beyond the timestamp.
   notModified: 2,
+  // One repository was reached through two sources, so the per-source figures
+  // sum to one more than the listing holds. The line states the overlap instead
+  // of leaving the reader to find the arithmetic broken.
+  deduped: 1,
   sources: {
     'official-registry': { at: new Date().toISOString(), cached: true, stale: false, notModified: 1, items: 1 },
-    'awesome-list': { at: new Date().toISOString(), cached: true, stale: false, notModified: 1, items: 1 },
+    // Walked three rows, credited with two cards after the merge: the number
+    // beside the source name is the second one.
+    'awesome-list': { at: new Date().toISOString(), cached: true, stale: false, notModified: 1, items: 3, merged: 2 },
     'awesome-remote': { at: new Date().toISOString(), cached: false, stale: false, notModified: 0, items: 1 },
     // The GitHub census contributed rows, and Docker answered nothing: a rate
     // limit has to be visible as a reason, not as a bare zero.
@@ -145,7 +160,8 @@ let liveSources = [CUSTOM_SOURCE];
 // install counter. All three are rendered together (the panel used to answer
 // 「已安装并连接」 for exactly this reply).
 const INSTALL_FAILURE = {
-  installed: '3dtexel-mcp',
+  server: '3dtexel-mcp',
+  installed: true,
   connect: { ok: false, error: 'spawn npx ENOENT' },
   counted: false,
   note: '3dtexel-mcp 已写入注册表，但挂载没有成功，因此没有计入本市场安装数；修好后可用「更新」或重新启用来重试。',
@@ -502,7 +518,9 @@ assert.ok(groupSelect, 'the taxonomy is a select, not a chip row');
 const groupOptions = walk(groupWrap[0]).filter((n) => n.type === 'option');
 assert.equal(groupOptions.length, 4, 'the dropdown lists 全部分类 plus one option per group');
 assert.equal(textOf(groupOptions[0]), '全部分类 (3)', 'the dropdown total lives on 全部分类 alone');
-assert.deepEqual(groupOptions.slice(1).map(textOf), ['开发工具', '搜索与知识', '未分类'],
+// 搜索与知识 holds one entry whose category came from our reading of its own
+// words, so the whole option is marked: every entry behind it is a guess.
+assert.deepEqual(groupOptions.slice(1).map(textOf), ['开发工具', '搜索与知识（推断）', '未分类'],
   'every functional group is reachable from the dropdown, biggest first');
 assert.equal(filterRow.filter((n) => n.type === 'button' && /chip|分类/.test(String(n.props?.className))).length,
   0, 'no chip buttons remain in the filter line');
@@ -516,6 +534,12 @@ const sourceLine = marketOwn.filter((n) => n.props?.key === 'srcline');
 assert.equal(sourceLine.length, 1, 'per-source line present');
 const sourceText = textOf(sourceLine[0]);
 assert.ok(sourceText.includes('官方 1'), 'per-source line names the sources');
+// The figure beside a source is what it is *credited with in this listing*
+// (`merged`), not the rows it walked — otherwise the parts add up to more than
+// 「共 N 条」 and the panel's own arithmetic looks broken.
+assert.ok(sourceText.includes('Awesome 2'), `a source shows the cards it contributed (got ${sourceText})`);
+assert.ok(sourceText.includes('去重合并 1 条（同一仓库被多个来源收录）'),
+  `the overlap is stated once, in words (got ${sourceText})`);
 // A source carrying a coverage note is marked "部分" on this line, and the
 // reason itself is spelled out in the manager box below.
 assert.ok(sourceText.includes('GitHub 2（部分'), `a partially-read source is marked (got ${sourceText})`);
@@ -633,9 +657,13 @@ assert.ok(String(warnLine[0].props.title).includes('搜索配额已用完（约 
 const freshnessLine = marketOwn.filter((n) => n.props?.key === 'meta');
 assert.equal(freshnessLine.length, 1, 'freshness meta line present');
 const freshnessText = textOf(freshnessLine[0]);
-assert.ok(freshnessText.includes('更新于 '), 'freshness line leads with the timestamp');
+assert.ok(freshnessText.includes('列表读取于 '), 'freshness line leads with the timestamp');
 assert.ok(freshnessText.includes('（缓存）'), 'freshness line marks a cached listing');
 assert.ok(freshnessText.includes('2 源未变'), 'freshness line reports how many sources answered 304');
+// The listing's own read time is a different fact from the repository's last
+// push, and the two used to share the word 更新于: this clock says when *we*
+// looked, so it must not be read as upstream's.
+assert.equal(freshnessText.includes('更新于'), false, 'the local clock is not spelled 更新于');
 
 const search = loadedNodes.find((n) => n.type === 'input'
   && String(n.props?.placeholder ?? '').includes('搜索'));
@@ -712,10 +740,12 @@ assert.ok(ctaTexts.some((t) => t.includes('需手动配置')), 'manual-only entr
 assert.ok(ctaTexts.some((t) => t.includes('已安装')), 'installed entry is marked instead of installable');
 // Every card states a category — including the entries whose source publishes
 // none, which must read 未分类 rather than silently dropping the chip. (The
-// fixture used to give all three cards a `group`, so this gap shipped.)
+// fixture used to give all three cards a `group`, so this gap shipped.) Both
+// spellings count: `分类：…` for what the source published, `分类（按名称与描述
+// 推断）：…` for the ones this panel read off the entry's own words.
 for (const card of cards) {
   const kinds = walk(card).filter((n) => n.type === 'span'
-    && typeof n.props?.title === 'string' && /^分类：/.test(n.props.title));
+    && typeof n.props?.title === 'string' && /^分类/.test(n.props.title));
   assert.equal(kinds.length, 1, 'every card carries exactly one 分类 chip');
 }
 {
@@ -769,9 +799,10 @@ function containsNode(root, target) {
   const titleOrder = walk(grid).filter((n) => n.type === 'article')
     .map((n) => String(n.props.title ?? '').split(' · ')[0])
     .filter((t) => ['snag', '3dtexel-mcp', 'example-mcp'].includes(t));
-  // 使用量最多 = upstream figure + installs made from this panel: example-mcp
-  // (90 000 upstream), snag (0 upstream + 5000 local) and 3dtexel (1200).
-  assert.deepEqual(titleOrder, ['example-mcp', 'snag', '3dtexel-mcp'],
+  // 使用量最多 = upstream figure + installs made from this panel: snag (0
+  // upstream + 5000 local) then 3dtexel (1200). example-mcp publishes no figure
+  // at all, so it belongs last and the card says why (see 4c-2).
+  assert.deepEqual(titleOrder, ['snag', '3dtexel-mcp', 'example-mcp'],
     `使用量最多 must add our own installs in (got ${JSON.stringify(titleOrder)})`);
   const snagCard = walk(grid).filter((n) => n.type === 'article')
     .find((n) => String(n.props.title ?? '').startsWith('snag'));
@@ -788,6 +819,45 @@ function containsNode(root, target) {
   // Back to the default so the later sections see the page as first painted.
   sortedSelect.props.onChange({ target: { value: 'default' } });
   await render();
+}
+
+// --- 4c-2. what a card says about its own numbers and its own age -----------
+// Three facts that were missing or ambiguous: an entry no source ever counted
+// (under 使用量 it sorts last, which looks arbitrary unless the card says why),
+// the repository's last push as distinct from the listing's read time, and a
+// category this panel read out of the entry's own words rather than the source
+// publishing it.
+{
+  // The sorting block above scopes its own predicate, so this one carries its
+  // own: the point here is the card's own words, not the comparator again.
+  const pickSort = (nodes) => nodes.find((n) => n.type === 'select'
+    && directChildren(n).some((o) => o.type === 'option' && o.props?.value === 'installs'));
+  const again = walk(await render());
+  const sortAgain = pickSort(again);
+  assert.ok(sortAgain, 'the sort select is still there for the second ranking');
+  sortAgain.props.onChange({ target: { value: 'installs' } });
+  const sorted = walk(await render());
+  const cardsSorted = walk(findByKey(sorted, 'grid')[0]).filter((n) => n.type === 'article');
+  const titleOf = (n) => String(n.props.title ?? '').split(' · ')[0];
+  assert.equal(titleOf(cardsSorted[2]), 'example-mcp', 'an entry with no usage data sorts last');
+  const noData = findByKey(sorted, 'nouse');
+  assert.equal(noData.length, 1, 'the reason for that place is on the card itself');
+  assert.equal(textOf(noData[0]), '无使用量数据');
+  assert.ok(String(noData[0].props.title).includes('按使用量排序时它排在后面'),
+    'and the hover says what this ordering did with it');
+
+  const texel = cardsSorted.find((n) => titleOf(n) === '3dtexel-mcp');
+  assert.ok(textOf(texel).includes('上游更新于 2026-09-30'),
+    `a card states the repository's own last push (got ${textOf(texel)})`);
+  const chip = walk(texel).find((n) => n.type === 'span'
+    && typeof n.props?.title === 'string' && /^分类/.test(n.props.title));
+  assert.equal(textOf(chip), '搜索与知识（推断）', 'an inferred category says so on the card');
+  assert.ok(String(chip.props.title).includes('按名称与描述推断'),
+    'and the hover says where the guess came from');
+
+  sortAgain.props.onChange({ target: { value: 'default' } });
+  await render();
+  console.log('card facts: no-usage data, upstream push time and an inferred category all say so ✓');
 }
 
 // --- 4d. the other two filters narrow the list too --------------------------

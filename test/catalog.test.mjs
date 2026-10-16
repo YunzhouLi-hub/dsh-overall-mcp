@@ -175,7 +175,7 @@ test('catalogItemToEntry returns null for unknown transport', () => {
 });
 
 test('browseCatalog lists without a query, merging every default source', async () => {
-  const { items, errors, counts, total } = await browseCatalog({ fetchImpl: okFetch });
+  const { items, errors, counts, mergedCounts, deduped, sources, total } = await browseCatalog({ fetchImpl: okFetch });
   assert.equal(errors.length, 0);
   assert.equal(counts['official-registry'], 2);
   assert.equal(counts.smithery, 1);
@@ -185,6 +185,18 @@ test('browseCatalog lists without a query, merging every default source', async 
   // acme/pg-mcp is one server seen by smithery + awesome-list -> merged once
   assert.equal(items.filter((i) => i.repository === 'https://github.com/acme/pg-mcp').length, 1);
   assert.equal(total, items.length);
+  // The numbers the panel prints beside 「共 N 条」 are counted *after* that
+  // merge, and the overlap is stated once: a source is credited with every row
+  // it contributes, so the per-source figures sum to more than the listing by
+  // exactly the rows the merge folded away (10 − 1 = 9 here). Before this the
+  // panel showed the walked counts, which left its own arithmetic looking
+  // broken next to the total.
+  assert.equal(deduped, 1, 'acme/pg-mcp was reached through two sources');
+  assert.equal(mergedCounts.smithery, 1);
+  assert.equal(mergedCounts['awesome-list'], 3, 'the merged row still credits the list it came from');
+  assert.equal(sources['awesome-list'].merged, 3);
+  const mergedSum = Object.values(mergedCounts).reduce((sum, n) => sum + n, 0);
+  assert.equal(mergedSum - deduped, total);
 });
 
 test('official registry items unwrap the nested `server` record', async () => {

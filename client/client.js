@@ -1378,7 +1378,7 @@ window.__ModuleLoader__.load({
 		 * inside a button — that nesting is what once made the card's links
 		 * race its click handler and "not go anywhere".
 		 */
-		function MarketCard({ item, stats, media, busy, rank, onInstall, onOpen, onToggleFavorite }) {
+		function MarketCard({ item, stats, media, busy, rank, usageSort, onInstall, onOpen, onToggleFavorite }) {
 			const repo = repoKeyOf(item);
 			const enriched = repo ? (stats ?? {})[repo] : null;
 			const repoMedia = repo ? (media ?? {})[repo] : null;
@@ -1402,6 +1402,12 @@ window.__ModuleLoader__.load({
 			const groupChip = (item.group && item.group !== "__none__")
 				? item.group
 				: (item.category || "未分类");
+			// An inferred group says so on the chip itself, not only in its
+			// tooltip. The two registries publish no category at all, so for
+			// their entries this chip is *our* reading of the name and
+			// description; a reader comparing the panel with the source's own
+			// page should not have to hover to find that out.
+			const groupChipText = item.groupSource === "inferred" ? `${groupChip}（推断）` : groupChip;
 			const groupTitle = [item.group, item.category].filter(Boolean)
 				.filter((v, i, arr) => arr.indexOf(v) === i).join(" · ");
 			const runnerOf = (command) => {
@@ -1566,6 +1572,17 @@ window.__ModuleLoader__.load({
 								createElement("span", { key: "l", style: styles.statSep }, " 本市场"),
 							])
 							: null,
+						// Under 使用量 ordering an entry with no number at all is
+						// not "zero uses": no source published one, and this
+						// machine never installed it from this market. It sorts
+						// last (see compareMarket) — which looks arbitrary unless
+						// the card says why it is there.
+						usageSort && !usageOf(item).hasData
+							? createElement("span", {
+								key: "nouse", style: { ...styles.stat, color: T.text3 },
+								title: "这个来源没有发布使用量，本机也没有从本市场安装过它：按使用量排序时它排在后面（回头按质量分比较）",
+							}, "无使用量数据")
+							: null,
 						typeof stars === "number"
 							? createElement("a", {
 								key: "st", className: "omkt-link", style: styles.stat, href: item.repository || "#",
@@ -1589,8 +1606,12 @@ window.__ModuleLoader__.load({
 							? createElement("span", { key: "lic", style: styles.stat, title: "开源许可证" }, enriched.license)
 							: null,
 						updatedAt
-							? createElement("span", { key: "up", style: styles.stat, title: "最近更新" },
-								`更新于 ${String(updatedAt).slice(0, 10)}`)
+							? createElement("span", { key: "up", style: styles.stat,
+								// GitHub's own push time. It shares no clock with
+								// 「列表读取于」 in the market's meta line, so the two
+								// must not both read 「更新于」.
+								title: "上游更新时间：仓库最近一次 push（来源自己的时间），不是本面板读取目录的时间" },
+								`上游更新于 ${String(updatedAt).slice(0, 10)}`)
 							: null,
 						createElement("span", { key: "src", style: styles.stat },
 							SOURCE_LABELS[`catalog:${item.source}`] ?? item.source),
@@ -1673,7 +1694,7 @@ window.__ModuleLoader__.load({
 								: groupTitle
 									? `分类：${groupTitle}`
 									: "分类：该来源未发布功能分类，同上方的「未分类」筛选",
-						}, groupChip),
+						}, groupChipText),
 						createElement("span", {
 							key: "install", style: { ...styles.tag, ...styles.tagKind },
 							title: `安装方式：${installTitle}`,
@@ -1897,7 +1918,7 @@ window.__ModuleLoader__.load({
 		 * explanation", which is exactly the state this exists to end.
 		 */
 		function installFailureText(result, item) {
-			const name = result?.installed || item?.title || "这个条目";
+			const name = result?.server || item?.title || "这个条目";
 			const lines = [`${name} 已写入注册表，但挂载没有成功：${result?.connect?.error || "宿主没有给出原因"}`];
 			if (result?.diagnosis?.text) {
 				lines.push("", result.diagnosis.text);
@@ -2229,7 +2250,7 @@ window.__ModuleLoader__.load({
 							: DetailRow("Star", typeof enriched?.stars === "number" ? String(enriched.stars)
 								: typeof item.stars === "number" ? String(item.stars) : "目录未提供"),
 						enriched?.pushedAt ? null
-							: DetailRow("更新时间", (enriched?.pushedAt ?? item.updatedAt)?.slice(0, 10) || "该来源不提供"),
+							: DetailRow("上游更新时间", (enriched?.pushedAt ?? item.updatedAt)?.slice(0, 10) || "该来源不提供"),
 						DetailRow("使用量",
 							typeof item.installs === "number"
 								? `${item.installs} ${item.installsLabel ?? "次使用"}${item.installsWindow ? `（${item.installsWindow}）` : ""}`
@@ -3309,7 +3330,7 @@ window.__ModuleLoader__.load({
 					// nothing mounted. Reporting 「已安装并连接」 for it was the one
 					// lie this panel told about its own work.
 					if (result?.connect?.ok === false) setInstallFailure(installFailureText(result, item));
-					else setMessage(`${result.installed} 已安装并连接`);
+					else setMessage(`${result.server ?? "这个条目"} 已安装并连接`);
 				} catch (err) {
 					setError(String(err.message || err));
 				} finally {
@@ -3472,17 +3493,32 @@ window.__ModuleLoader__.load({
 			// lists' ~75 headings into 19 functional groups (Finance and Finance
 			// & Fintech become 金融支付); the three registries publish no category,
 			// so their entries sit under 未分类 rather than being hidden.
+			// A group whose every entry came from our own reading of the name and
+			// description (`groupSource === "inferred"`, see lib/catalog.js) is
+			// marked as such in the dropdown, not only on the card: someone about to
+			// filter by 「金融支付」 is entitled to know whether a source published
+			// that heading or this panel inferred it from the entry's words. A mixed
+			// group keeps the bare name — part of it did come from an upstream
+			// heading, which is exactly what the option claims.
 			const groupOptions = useMemo(() => {
 				if (!marketItems) return [];
 				const counts = new Map();
+				const inferred = new Map();
 				let uncategorized = 0;
 				for (const item of marketItems) {
-					if (item.group) counts.set(item.group, (counts.get(item.group) ?? 0) + 1);
-					else uncategorized += 1;
+					if (!item.group) { uncategorized += 1; continue; }
+					counts.set(item.group, (counts.get(item.group) ?? 0) + 1);
+					if (item.groupSource === "inferred") {
+						if (!inferred.has(item.group)) inferred.set(item.group, true);
+					} else inferred.set(item.group, false);
 				}
-				const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-				return uncategorized > 0 ? [...sorted, ["__none__", uncategorized]] : sorted;
+				const sorted = [...counts.entries()]
+					.map(([name, count]) => [name, count, inferred.get(name) === true])
+					.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+				return uncategorized > 0 ? [...sorted, ["__none__", uncategorized, false]] : sorted;
 			}, [marketItems]);
+			/** Whether any option in the dropdown is a group this panel inferred. */
+			const groupInferred = groupOptions.some(([, , inferred]) => inferred);
 
 			// The host sends the whole merged listing (~5.4k items — upstream cost
 			// is identical for a capped slice); ordering and paging are a view
@@ -3959,7 +3995,9 @@ window.__ModuleLoader__.load({
 									value: marketGroup,
 									title: marketGroup
 										? `分类筛选：${marketGroup === "__none__" ? "未分类" : marketGroup}`
-										: "按功能分类筛选",
+										: (groupInferred
+											? "按功能分类筛选：标「推断」的分类是来源没有发布、由本面板按条目的名称与描述归的"
+											: "按功能分类筛选"),
 									onChange: (e) => { setMarketGroup(e.target.value); setMarketPage(0); },
 								}, [
 									createElement("option", { key: "", value: "" },
@@ -3967,10 +4005,15 @@ window.__ModuleLoader__.load({
 									// No per-group counts (user request): the total
 									// lives on 全部分类 alone, but the order still
 									// follows group size, so the shape of the
-									// taxonomy shows in the list.
-									...groupOptions.map(([name]) => createElement("option", {
+									// taxonomy shows in the list. 「推断」 appears on
+									// the groups whose whole membership this panel
+									// grouped itself — the reader is choosing a
+									// category, and ours must be labelled as ours.
+									...groupOptions.map(([name, , inferredAll]) => createElement("option", {
 										key: name, value: name,
-									}, name === "__none__" ? "未分类" : name)),
+									}, name === "__none__"
+										? "未分类"
+										: (inferredAll ? `${name}（推断）` : name))),
 								]),
 							])
 							: null,
@@ -4070,8 +4113,14 @@ window.__ModuleLoader__.load({
 									`按${(SORT_OPTIONS.find(([v]) => v === marketSort) ?? [, marketSort])[1]}排序`)
 								: null,
 							marketAt
-								? createElement("span", { key: "at", style: styles.metaTail },
-									`更新于 ${marketAt}${market && market.cached ? "（缓存）" : ""}`
+								? createElement("span", { key: "at", style: styles.metaTail,
+									// Three clocks meet on this tab and used to all read
+									// 「更新于」: when a repository was pushed upstream
+									// (the cards), when a source's data was walked (the
+									// source line), and when *we* read the catalogs.
+									// This one is the third, and now says so.
+									title: "本地读取时间：这些目录数据是什么时候取到的，不是条目在上游的发布时间" },
+									`列表读取于 ${marketAt}${market && market.cached ? "（缓存）" : ""}`
 									+ (market && market.notModified > 0
 										// Conditional requests mean a re-walk can cost
 										// nothing; say so, or "refreshed" and "not
@@ -4087,7 +4136,8 @@ window.__ModuleLoader__.load({
 					// and state because they now age independently: one can answer
 					// from a TTL entry while another re-validates upstream.
 					market && market.counts
-						? createElement("div", { key: "srcline", style: { ...styles.hint, marginBottom: 14 } },
+						? createElement("div", { key: "srcline", style: { ...styles.hint, marginBottom: 14 },
+							title: "各来源的数字是去重后计入本页的条数；括号里是来源自己的状态与本地时间（读取/普查），不是上游发布时间" },
 							[
 								Object.entries(market.counts)
 									.map(([s, n]) => {
@@ -4097,9 +4147,19 @@ window.__ModuleLoader__.load({
 										// "部分" flags a source whose own note says the list is
 										// cut short (see the 内置 line below for the reason).
 										const marks = [state, st?.note ? "部分" : "", at].filter(Boolean);
-										return `${shortSourceName(s)} ${n}${marks.length ? `（${marks.join(" ")}）` : ""}`;
+										// The number beside a source is what it contributes to
+										// *this merged listing*, not the raw rows it walked:
+										// one repository reached through two sources is one
+										// card here, so the raw counts could sum to more than
+										// 「共 N 条」 and made the panel's own arithmetic look
+										// broken. The overlap is stated once, just below.
+										const shown = typeof st?.merged === "number" ? st.merged : n;
+										return `${shortSourceName(s)} ${compactCount(shown)}${marks.length ? `（${marks.join(" ")}）` : ""}`;
 									}).join(" · "),
 								`其中 ${installedCount} 个已安装`,
+								market.deduped
+									? `去重合并 ${compactCount(market.deduped)} 条（同一仓库被多个来源收录）`
+									: null,
 								marketGroup && sortedItems
 									? `「${marketGroup === "__none__" ? "未分类" : marketGroup}」筛选后 ${sortedItems.length} 条`
 									: null,
@@ -4274,6 +4334,10 @@ window.__ModuleLoader__.load({
 										// default (综合推荐) there is no ranking to
 										// state, so no chip.
 										rank: marketSort === "default" ? null : safePage * pageSize + i + 1,
+										// Under 使用量 ordering a card with no number
+										// at all sorts last, and that looks arbitrary
+										// unless the card says why.
+										usageSort: marketSort === "installs",
 										onInstall: doInstall, onOpen: setDetail,
 										onToggleFavorite: doToggleFavorite,
 									})))))

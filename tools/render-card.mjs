@@ -146,7 +146,7 @@ const samples = [
       localInstallLastAt: '2026-10-14T08:00:00.000Z',
     },
     titleHref: 'https://smithery.ai/servers/brave', installable: true,
-    chips: ['搜索与知识', 'stdio · npx'],
+    chips: ['搜索与知识（推断）', 'stdio · npx'],
     groupTitlePrefix: '分类（按名称与描述推断）：',
     localInstalls: true,
   },
@@ -189,7 +189,10 @@ for (const { name, item, titleHref, installable, chips, groupTitlePrefix, localI
   // 2b. The footer leads with the two facts a reader wants — the functional
   //     group and how it installs — and never with a source's hosting note.
   //     「托管」/「本地」/package-manager tags are exactly what the chips used
-  //     to be, and they answer neither question.
+  //     to be, and they answer neither question. An inferred group says so in
+  //     both places: the title explains the inference, and the visible text
+  //     carries 「（推断）」, so the reading survives even where a tooltip cannot
+  //     be reached (a screenshot, a card pasted into a chat).
   const footer = deep.find((n) => n.type === 'div' && n.props?.key === 'ft');
   assert.ok(footer, `${name}: card footer missing`);
   const footerSpans = walk(footer).filter((n) => n.type === 'span'
@@ -206,6 +209,8 @@ for (const { name, item, titleHref, installable, chips, groupTitlePrefix, localI
   if (groupTitlePrefix) {
     assert.ok(String(semantic[0]?.title ?? '').startsWith(groupTitlePrefix),
       `${name}: an inferred group must be labelled as inference (${semantic[0]?.title})`);
+    assert.match(String(semantic[0]?.text ?? ''), /（推断）$/,
+      `${name}: the chip text itself must carry the inference (${semantic[0]?.text})`);
   }
   if (localInstalls) {
     const localCell = deep.find((n) => typeof n.props?.title === 'string'
