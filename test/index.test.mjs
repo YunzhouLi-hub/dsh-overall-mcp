@@ -16,6 +16,9 @@ import { promises as fs } from 'node:fs';
 import { register } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
+// The search-budget state lives in the catalog module, not in the host, so the
+// case below can watch it and clean up after itself.
+import { forgetGithubSearchQuota, githubSearchQuota } from '../lib/catalog.js';
 
 // The two DSH peer packages are supplied by the harness at runtime and are not
 // installed here; without this mapping `import('../index.js')` cannot resolve.
@@ -688,6 +691,48 @@ test('opening the market starts the evidence walk, and what it recovers is on di
       assert.equal(all.body.items[0].install.args[1], 'acme-calendar-mcp');
     }, { files });
   });
+});
+
+test('a spent search budget reads as a wait, and nothing spends from it again', async () => {
+  let requests = 0;
+  const refused = async (url) => {
+    requests += 1;
+    assert.match(String(url), /api\.github\.com\/search\/repositories/, 'only the search API is asked');
+    return {
+      ok: false,
+      status: 403,
+      headers: {
+        get: (name) => (name === 'x-ratelimit-remaining' ? '0'
+          : name === 'x-ratelimit-reset' ? String(Math.floor(Date.now() / 1000) + 45) : undefined),
+      },
+      json: async () => ({ message: 'API rate limit exceeded for 203.0.113.7.' }),
+    };
+  };
+  await withFetchStub(refused, async () => {
+    // No census on disk and no install evidence: this host has never walked, so
+    // the GitHub source has nothing to read and would ask the search API. The
+    // walk starts first and its very first request is refused.
+    await withHost(FIXTURE, async ({ call }) => {
+      const first = await call('/api/overall-mcp/catalog', { body: { source: 'github-mcp', limit: 100 } });
+      assert.equal(first.status, 200);
+      assert.equal(first.body.errors.length, 0, 'an emptied window is not a broken source');
+      assert.equal(first.body.counts['github-mcp'], 0);
+      assert.match(String(first.body.sources['github-mcp'].note ?? ''), /正在建立本机普查索引/);
+      assert.equal(requests, 1, 'the live fallback stayed out of the walk\u2019s way');
+
+      // Let the refusal land, then read again *with refresh*, which is the
+      // strongest request the panel can make — and it must still not ask.
+      await waitFor(() => (githubSearchQuota().waitMs > 0 ? true : null));
+      await new Promise((resolve) => { setTimeout(resolve, 30); });
+      const second = await call('/api/overall-mcp/catalog', {
+        body: { source: 'github-mcp', limit: 100, refresh: true },
+      });
+      assert.equal(requests, 1, 'no request is spent from a window known to be empty');
+      assert.match(String(second.body.sources['github-mcp'].note ?? ''), /配额已用完/);
+      assert.equal(second.body.errors.length, 0);
+    });
+  });
+  forgetGithubSearchQuota();
 });
 
 /** Poll a condition until it is truthy, or fail with the last value. */

@@ -16,8 +16,8 @@ import * as mcpClient from '@deepseek-ai/dsh-mcp-client';
 import { BlockAssembler } from '@deepseek-ai/dsh-llm';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { describeAbout, toolNamesFor, aboutSourceLabel, needsInstructionsRead } from './lib/about.js';
-import { scanHost, mergeIntoRegistry, scannedSources, findOrphans, setMountHolder, clearMountHolder } from './lib/scanner.js';
-import { browseCatalog, catalogItemToEntry, fetchRepoStats, searchGithubRepos, USER_AGENT } from './lib/catalog.js';
+import { scanHost, mergeIntoRegistry, collapseDuplicateRows, scannedSources, findOrphans, setMountHolder, clearMountHolder } from './lib/scanner.js';
+import { browseCatalog, catalogItemToEntry, fetchRepoStats, githubSearchQuota, searchGithubRepos, USER_AGENT } from './lib/catalog.js';
 import {
   BASE_QUERIES, INDEX_FILE, INDEX_TTL_MS,
   crawlGithubRepos, indexDocumentOf, indexFreshness, mergeIndexRows, needsGithubCrawl, readIndexDocument,
@@ -229,12 +229,27 @@ export async function apply(ctx) {
     log?.warn?.(`overall-mcp: ${registryLoadError}`);
   }
   const firstRun = registry === null && loaded.damaged === null;
-  if (!registry) registry = { version: REGISTRY_VERSION, servers: [] };
-  // Favourite market entries, keyed exactly like the client's React key
+  if (!registry) registry = { version: REGISTRY_VERSION, servers: [] };  // Favourite market entries, keyed exactly like the client's React key
   // (`<source>:<id|title>`) so the card and the stored state cannot disagree.
   // Kept beside `servers` rather than inside it: a favourite is a UI bookmark,
   // not a mounted server, and mixing the two would make scans write over it.
   const favorites = new Set(Array.isArray(registry.favorites) ? registry.favorites.filter((k) => typeof k === 'string') : []);
+
+  // Repair duplicate rows the old rename left in the file, before anything reads
+  // the list (see lib/scanner.js collapseDuplicateRows). This machine's registry
+  // held four rows for the one `rea-cursor` mount — three of them carrying a
+  // stale mount stamp from a version that did not stamp exclusively, which is
+  // why the orphan cleanup refused to touch them and the panel kept showing
+  // four. Collapsing keeps the row that owns the mount, so a restart repairs the
+  // bookkeeping without changing what is mounted.
+  {
+    const repaired = collapseDuplicateRows(registry);
+    if (repaired.collapsed.length > 0) {
+      registry = repaired.registry;
+      log?.warn?.(`overall-mcp: collapsed ${repaired.collapsed.length} duplicate row(s) — ${repaired.collapsed.map((c) => `${c.name} (-${c.dropped})`).join(', ')}`);
+      await save();
+    }
+  }
 
   const fibers = new Map(); // entry.name -> mcp-client Fiber
 
@@ -633,6 +648,7 @@ export async function apply(ctx) {
     return {
       added: merged.added,
       skipped: merged.skipped,
+      collapsed: merged.collapsed ?? [],
       connected,
       scannedFiles: report.length,
       orphans: orphanEntries().map((s) => s.name),
@@ -1047,6 +1063,8 @@ export async function apply(ctx) {
   let githubIndexLoaded = false;
   let githubIndexDamaged = null;
   let githubCrawl = null;
+  /** Progress of the walk in flight, for the panel's "building" sentence. */
+  let githubWalkProgress = null;
 
   /** Read the census once per process; the crawl below keeps it current. */
   async function readGithubIndex() {
@@ -1077,9 +1095,41 @@ export async function apply(ctx) {
     if (githubCrawl) return githubCrawl;
     const held = githubIndexDoc;
     if (!needsGithubCrawl(held, { force })) return null;
+    // Do not start a walk into a window the upstream has already told us is
+    // empty: the first request would fail, and every retry inside the same
+    // minute is another request against a budget that has none. The next browse
+    // after the reset starts it.
+    const quota = githubSearchQuota();
+    if (quota.waitMs > 0) {
+      log?.warn?.(`overall-mcp: GitHub search budget is empty for another ${Math.ceil(quota.waitMs / 1000)}s; not walking`);
+      return null;
+    }
     githubCrawl = (async () => {
       log?.info?.('overall-mcp: walking the GitHub index');
-      const walk = await crawlGithubRepos({ search: searchGithubRepos });
+      githubWalkProgress = { requests: 0, rows: 0 };
+      let lastWrite = 0;
+      const walk = await crawlGithubRepos({
+        search: searchGithubRepos,
+        onProgress: ({ requests, rows, items }) => {
+          githubWalkProgress = { requests, rows };
+          // Minutes-long walk, desktop process: what has been collected is
+          // written as it arrives, marked unfinished so a restart resumes from a
+          // truthful "partial census" rather than from nothing.
+          const stamp = Date.now();
+          if (rows === 0 || stamp - lastWrite < 5000) return;
+          lastWrite = stamp;
+          const at = new Date(stamp).toISOString();
+          const merged = mergeIndexRows(held?.rows ?? [], [...items.values()], { at });
+          void writeJson(githubIndexFile, indexDocumentOf({
+            at,
+            rows: merged,
+            queries: [...BASE_QUERIES],
+            requests,
+            complete: false,
+            partial: `正在抓取（已收 ${rows} 行）`,
+          })).catch(() => {});
+        },
+      });
       const rows = mergeIndexRows(held?.rows ?? [], walk.rows, { at: walk.at });
       const doc = indexDocumentOf({
         at: walk.at,
@@ -1104,7 +1154,10 @@ export async function apply(ctx) {
         log?.warn?.(`overall-mcp: github index walk failed: ${String(err?.message ?? err)}`);
         return null;
       })
-      .finally(() => { githubCrawl = null; });
+      .finally(() => {
+        githubCrawl = null;
+        githubWalkProgress = null;
+      });
     return githubCrawl;
   }
 
@@ -1325,7 +1378,12 @@ export async function apply(ctx) {
     // repositories off disk instead of 200 off the network. The crawl behind a
     // stale one starts here and is deliberately not awaited.
     const githubIndex = await githubIndexPayload();
-    if (!source || source === 'github-mcp') maybeCrawlGithubIndex({ force: refresh });
+    // A walk just started (or is running) and has produced nothing yet. The
+    // browse is told, so the GitHub source answers "正在建立索引" instead of
+    // spending the *same* 10-per-minute search budget the walk is spending —
+    // which is how this source used to report itself as unavailable.
+    const walk = (!source || source === 'github-mcp') ? maybeCrawlGithubIndex({ force: refresh }) : null;
+    const githubWalk = !githubIndex && walk ? (githubWalkProgress ?? { requests: 0, rows: 0 }) : null;
     // Rows the census cannot install by itself get their command from their own
     // repository when that walk has already recovered one. The listing is
     // annotated here rather than in the source, so the cached census stays a
@@ -1337,7 +1395,7 @@ export async function apply(ctx) {
     // The listing is cached RAW: the installed flag depends on the registry and
     // is recomputed on every read, so installing/removing never shows a stale badge.
     const result = await browseCatalog({
-      query: q, limit, source, customSources, cache: catalogCache, force: refresh, githubIndex,
+      query: q, limit, source, customSources, cache: catalogCache, force: refresh, githubIndex, githubWalk,
     });
     // The GitHub row count is the census; how many of those rows came back with a
     // command from their own repository is a second number the panel has to be

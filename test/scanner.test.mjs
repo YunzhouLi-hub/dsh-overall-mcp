@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   normalizeServer, extractJsonServers, extractCodexTomlServers,
-  scanHost, mergeIntoRegistry, scannedSources, findOrphans,
+  scanHost, mergeIntoRegistry, collapseDuplicateRows, scannedSources, findOrphans,
   setMountHolder, clearMountHolder,
 } from '../lib/scanner.js';
 
@@ -204,6 +204,65 @@ test('an inert duplicate of a mounted name is still swept', () => {
   // With the mount gone, both rows are leftovers and both are sweepable.
   clearMountHolder(rows, 'rea-cursor');
   assert.deepEqual(findOrphans({ servers: rows }, scanned), rows);
+});
+
+// The old merge renamed a conflicting import to `name-<source>` and pushed a new
+// row per scan, so one Cursor entry left four `rea-cursor` rows behind. Three of
+// them carried a mount stamp from the version that did not stamp exclusively,
+// which is why findOrphans() refused to clean them: same name, same contract
+// means one server, and collapsing has to keep the row that owns the mount.
+test('collapseDuplicateRows keeps one row per name and contract, and says what it dropped', () => {
+  const row = (over = {}) => ({
+    name: 'rea-cursor', source: 'cursor', transport: 'stdio', command: 'cmd.exe',
+    args: ['/d', '/c', 'npx', '-y', 'rea-agents@6.5.0', 'mcp'], enabled: true, ...over,
+  });
+  const registry = {
+    favorites: ['official-registry:foo'],
+    servers: [
+      row({ importedAt: '2026-10-13T08:23:07Z' }),
+      row({ serverName: 'rea-cursor', importedAt: '2026-10-13T08:33:56Z' }),
+      row({ serverName: 'rea-cursor', importedAt: '2026-10-13T08:33:57Z', providedExternally: true }),
+      row({ importedAt: '2026-10-14T06:53:56Z' }),
+      // Same contract, different name: a second install, not a duplicate.
+      row({ name: 'rea', providedExternally: true, importedAt: '2026-10-12T00:54:29Z' }),
+      // Same name, different contract: a changed server, not a duplicate.
+      row({ args: ['/d', '/c', 'npx', '-y', 'rea-agents@6.1.0', 'mcp'] }),
+    ],
+  };
+  const { registry: out, collapsed } = collapseDuplicateRows(registry);
+  assert.deepEqual(collapsed, [{ name: 'rea-cursor', dropped: 3 }]);
+  assert.deepEqual(out.servers.map((s) => s.args.at(-2)), ['rea-agents@6.5.0', 'rea-agents@6.5.0', 'rea-agents@6.1.0']);
+  assert.deepEqual(out.servers.map((s) => s.name), ['rea-cursor', 'rea', 'rea-cursor']);
+  const kept = out.servers[0];
+  assert.equal(kept.serverName, 'rea-cursor', 'the row holding the mount survives');
+  assert.equal(kept.providedExternally, true, 'a twin that was provided externally is remembered');
+  assert.equal(kept.importedAt, '2026-10-13T08:23:07Z', 'the first sighting wins');
+  assert.deepEqual(out.favorites, ['official-registry:foo'], 'top-level keys are not the collapse\u2019s business');
+  assert.equal(registry.servers.length, 6, 'the input is not mutated');
+});
+
+test('collapseDuplicateRows never turns a mounted server off, and never turns one on', () => {
+  const row = (over = {}) => ({
+    name: 'x', transport: 'stdio', command: 'npx', args: ['-y', 'x'], ...over,
+  });
+  const on = collapseDuplicateRows({ servers: [row({ serverName: 'x' }), row({ enabled: false })] });
+  assert.equal(on.registry.servers.length, 1);
+  assert.equal(on.registry.servers[0].enabled, undefined, 'the surviving row keeps its own state');
+  const off = collapseDuplicateRows({ servers: [row({ enabled: false, serverName: 'x' }), row()] });
+  assert.equal(off.registry.servers[0].enabled, false);
+});
+
+test('mergeIntoRegistry reports the duplicate rows it collapsed', () => {
+  const twin = (at) => ({
+    name: 'rea-cursor', source: 'cursor', transport: 'stdio', command: 'cmd.exe',
+    args: ['/d', '/c', 'npx', '-y', 'rea-agents@6.5.0', 'mcp'], enabled: true, importedAt: at,
+  });
+  const registry = { version: 1, servers: [twin('a'), twin('b'), twin('c')] };
+  const found = [{ name: 'rea', source: 'cursor', transport: 'stdio', command: 'cmd.exe', args: registry.servers[0].args }];
+  const r = mergeIntoRegistry(registry, found);
+  assert.deepEqual(r.collapsed, [{ name: 'rea-cursor', dropped: 2 }]);
+  assert.equal(r.registry.servers.filter((s) => s.name === 'rea-cursor').length, 1);
+  assert.deepEqual(r.added, ['rea'], 'a different name is still an import');
 });
 
 test('scannedSources separates "read and empty" from "could not read"', () => {

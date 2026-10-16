@@ -5,6 +5,7 @@ import {
   browseCatalog, catalogItemToEntry, fetchAwesomeList,
   fetchAwesomeRemote, fetchDockerCatalog, fetchGithubMcp, githubReposOf, fetchRepoStats,
   githubItemOf, githubIndexNote, searchGithubRepos, describeAge,
+  forgetGithubSearchQuota, githubSearchQuota,
   functionalGroupOf, inferGroupOf, groupSourceOf,
 } from '../lib/catalog.js';
 import { CATALOG_SOURCES } from '../lib/catalog.js';
@@ -1257,5 +1258,96 @@ test('searchGithubRepos asks one window and reports its hit count', async () => 
   assert.equal(seen[0].headers['user-agent'], 'dsh-overall-mcp (DeepSeek Harness plugin)');
   assert.ok(Array.isArray(answer.repos));
   assert.equal(typeof answer.totalCount, 'number');
+});
+
+// ---------------------------------------------------------------------------
+// The GitHub search budget. Anonymous search gets 10 requests per minute, and
+// this machine's IP shares that budget with whatever else is asking — which is
+// how the *census walk* came to report `HTTP 403` and the source came to look
+// broken. What these tests pin down: an emptied window is a wait, not a
+// failure; it is not retried; and nobody spends from it while it is empty.
+// ---------------------------------------------------------------------------
+
+/** A GitHub search answer that refuses, the way the API really refuses. */
+const quota403 = () => ({
+  ok: false,
+  status: 403,
+  headers: { get: (name) => (name === 'x-ratelimit-remaining' ? '0' : name === 'x-ratelimit-reset' ? String(Math.floor(Date.now() / 1000) + 30) : undefined) },
+  json: async () => ({ message: 'API rate limit exceeded for 203.0.113.7. (But here is the good news: Authenticated requests get a higher rate limit.)' }),
+});
+
+test('an emptied search window is not retried, and it is a note rather than a failure', async () => {
+  forgetGithubSearchQuota();
+  let calls = 0;
+  const result = await browseCatalog({
+    source: 'github-mcp',
+    fetchImpl: async () => { calls += 1; return quota403(); },
+  });
+  // One request, not two: the retry policy exists for burst 403s, and asking
+  // again immediately spends another token from the window that is empty.
+  assert.equal(calls, 1);
+  assert.equal(result.errors.length, 0, 'a wait is not an error');
+  assert.equal(result.counts['github-mcp'], 0);
+  const note = result.sources['github-mcp'].note;
+  assert.match(String(note), /配额已用完/);
+  assert.match(String(note), /秒后恢复/);
+  // The budget's state is remembered, with the wait it implies.
+  const quota = githubSearchQuota();
+  assert.ok(quota.waitMs > 0);
+  forgetGithubSearchQuota();
+});
+
+test('a source does not spend from a window it knows is empty', async () => {
+  forgetGithubSearchQuota();
+  let calls = 0;
+  const fetchImpl = async () => { calls += 1; return quota403(); };
+  await browseCatalog({ source: 'github-mcp', fetchImpl });
+  assert.equal(calls, 1);
+  // The second browse is asked to refresh (which ignores the cached answer), so
+  // it reaches the source — which must refuse to ask at all.
+  const second = await browseCatalog({ source: 'github-mcp', force: true, fetchImpl });
+  assert.equal(calls, 1, 'no second request was sent');
+  assert.match(String(second.sources['github-mcp'].note), /配额已用完/);
+  forgetGithubSearchQuota();
+});
+
+test('a usable window is recorded as such, and its answer is used', async () => {
+  forgetGithubSearchQuota();
+  const calls = [];
+  const result = await browseCatalog({
+    source: 'github-mcp',
+    fetchImpl: async (url) => {
+      calls.push(String(url));
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: (name) => (name === 'x-ratelimit-remaining' ? '9' : undefined) },
+        json: async () => ({ total_count: 1, items: [ghRepo('acme/recovered-mcp', 42, ['mcp'])] }),
+      };
+    },
+  });
+  assert.equal(calls.length, 3, 'three queries, one browse');
+  assert.equal(result.errors.length, 0);
+  assert.equal(result.counts['github-mcp'], 1);
+  // The budget is a fact the caller can read back and pace itself against.
+  const quota = githubSearchQuota();
+  assert.equal(quota.remaining, 9);
+  assert.equal(quota.waitMs, 0);
+  forgetGithubSearchQuota();
+});
+
+test('a census walk in flight answers the source instead of competing with it', async () => {
+  forgetGithubSearchQuota();
+  let calls = 0;
+  const result = await fetchGithubMcp({
+    githubWalk: { requests: 4, rows: 187 },
+    fetchImpl: async () => { calls += 1; return quota403(); },
+  });
+  assert.equal(calls, 0, 'the walk owns the budget; the fallback stays out of it');
+  assert.deepEqual(result.items, []);
+  assert.match(result.note, /正在建立本机普查索引（已收 187 行）/);
+
+  const empty = await fetchGithubMcp({ githubWalk: { requests: 0, rows: 0 } });
+  assert.match(empty.note, /首次建索引需要几分钟/);
 });
 
