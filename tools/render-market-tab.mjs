@@ -155,7 +155,55 @@ const INSTALL_FAILURE = {
   },
 };
 
+// What the host answers when the panel asks who it is and what it has done.
+// Two data files, one of them not written yet: the identity line counts the
+// ones that exist. The events carry fields the panel knows (`items`, `ms`) and
+// fields it has never heard of (`mounted`, `total`), because the log must not
+// hide what a newer host chose to record.
+const STATUS = {
+  plugin: {
+    id: 'dsh-overall-mcp',
+    version: '0.1.0',
+    dir: 'C:/plugins/dsh-overall-mcp',
+    loadedAt: '2026-01-01T00:00:00.000Z',
+    source: { newestAt: '2026-01-01T00:00:00.000Z', stale: false, files: [{ name: 'index.js', at: '2026-01-01T00:00:00.000Z', bytes: 120 }] },
+  },
+  host: {
+    pid: 4242,
+    startedAt: '2026-01-01T07:00:00.000Z',
+    uptimeMs: (3 * 3600 + 12 * 60) * 1000,
+    node: 'v24.15.0',
+    electron: '38.0.0',
+    platform: 'win32',
+    arch: 'x64',
+  },
+  data: {
+    dir: 'C:/dsh/overall-mcp',
+    files: [
+      { name: 'registry.json', bytes: 128, at: '2026-01-01T09:00:00.000Z' },
+      { name: 'github-index.json', bytes: null, at: null },
+    ],
+  },
+  census: { rows: 0, at: null, complete: false, partial: false, walking: false, loaded: false, damaged: false },
+  evidence: { requests: 0, at: null, damaged: false },
+  quota: { remaining: 60, limit: 60, resetMs: 0 },
+  events: { bytes: 512, at: '2026-01-01T10:00:02.000Z', lines: 2, damaged: 1, lastAt: '2026-01-01T10:00:02.000Z' },
+  errors: { registry: '', sources: '' },
+};
+const EVENTS = {
+  total: 5,
+  damaged: 1,
+  events: [
+    { at: '2026-01-01T10:00:00.000Z', kind: 'browse', source: 'docker-catalog', query: 'mcp', items: 12, ms: 340, cached: true, total: 12 },
+    { at: '2026-01-01T10:00:02.000Z', kind: 'install', server: 'codegraph', source: 'claude-code', itemId: 'official:ac.snag/snag', mounted: true, counted: false },
+  ],
+};
+
 let captured = null;
+// A host older than the panel has no /events route at all. Flipped for the
+// first half of section 6c, which is the only way to reach that branch: the
+// page only re-reads the log when the box is opened.
+let eventsFails = false;
 const calls = [];
 const styleElements = [];
 globalThis.window = { __ModuleLoader__: { load(spec) { captured = spec; } } };
@@ -236,6 +284,16 @@ globalThis.fetch = async (url, init) => {
   if (path.startsWith('/self-update')) {
     calls.push('POST /self-update');
     return ok({ ok: true, updated: true, from: '0.1.0', to: '0.2.0', command: 'dsh plugin --profile desktop add dsh-overall-mcp@0.2.0', restartRequired: true });
+  }
+  // Which build this panel is talking to, and what that build has been doing.
+  if (path.startsWith('/status')) {
+    calls.push('GET /status');
+    return ok(STATUS);
+  }
+  if (path.startsWith('/events')) {
+    calls.push('GET /events');
+    if (eventsFails) return { ok: false, status: 404, json: async () => ({}) };
+    return ok(EVENTS);
   }
   return ok({});
 };
@@ -788,7 +846,8 @@ assert.ok(registryNodes.some((n) => n.type === 'button' && textOf(n) === '重新
   const regText = textOf(regHead);
   assert.ok(regText.includes('全局 MCP'), `head names the page — got: ${regText}`);
   assert.match(regText, /v\d+\.\d+\.\d+/, 'version chip missing from the head');
-  assert.ok(regText.includes('宿主机扫描 · 市场发现 · 一键接入'), 'sub-line missing');
+  assert.match(textOf(findByKey(registry, 'hd-sub')[0]), /插件 v\d+\.\d+\.\d+/,
+    'sub-line missing, or not saying which build is running');
   assert.ok(!regText.includes('申请收录'), 'no contribution flow is advertised from the page head');
   assert.ok(walk(regHead).some((n) => n.type === 'svg'), 'brand mark is not drawn');
   // `findByKey` walks the flattened tree, so the keyed button itself is a hit.
@@ -828,6 +887,74 @@ assert.ok(registryNodes.some((n) => n.type === 'button' && textOf(n) === '重新
   assert.equal(findByKey(afterCheck, 'hd-primary').length, 0,
     'the market tab does not duplicate the self-update as a primary button');
   console.log('page head renders: brand mark, title + version, sub-line, chip self-update ✓');
+}
+
+// --- 6c. which build is running, and what it has been doing ----------------
+// A version string cannot answer either question. The identity line has to name
+// the process and its uptime (a panel served by a process started before the
+// fix on disk is the "still broken" / "not loaded yet" distinction), and the
+// log has to fold out on demand, count what it is showing, and keep fields it
+// has no template for.
+{
+  const market = walk(await render());
+  assert.ok(calls.includes('GET /status'), 'the page asks the host who it is');
+  const sub = textOf(findByKey(market, 'hd-sub')[0]);
+  assert.match(sub, /插件 v0\.1\.0/, `the identity line names the running build — got: ${sub}`);
+  assert.match(sub, /pid 4242/, 'the identity line names the process');
+  assert.match(sub, /已运行 3 小时 12 分/, `and how long it has been up — got: ${sub}`);
+  assert.match(sub, /1 个数据文件/, `counting only the data files that exist — got: ${sub}`);
+  assert.match(sub, /日志 2 条/, `and how many lines the log holds — got: ${sub}`);
+
+  assert.equal(findByKey(market, 'log').length, 0, 'the log stays folded until asked for');
+  const toggle = buttonByText(market, '运行日志');
+  assert.ok(toggle, 'the head offers a 运行日志 toggle');
+
+  // First open, against a host that does not have the route: the box has to
+  // say why in its own words, and the page must not grow a red error line for
+  // what is only a version difference.
+  eventsFails = true;
+  const msgBefore = findByKey(market, 'message').length ? textOf(findByKey(market, 'message')[0]) : '';
+  toggle.props.onClick();
+  const old = walk(await render());
+  const oldBody = textOf(findByKey(old, 'log-body')[0]);
+  assert.match(oldBody, /宿主插件还是旧版本（没有 \/api\/overall-mcp\/events）/, `the log reports an old host — got: ${oldBody}`);
+  const msgAfter = findByKey(old, 'message').length ? textOf(findByKey(old, 'message')[0]) : '';
+  assert.equal(msgAfter, msgBefore, 'an old host is reported in the log box, not as a page-wide failure');
+
+  // Second open against a host that has it: same button, real rows.
+  buttonByText(old, '收起运行日志').props.onClick();
+  eventsFails = false;
+  const folded = walk(await render());
+  buttonByText(folded, '运行日志').props.onClick();
+  const opened = walk(await render());
+  assert.ok(calls.includes('GET /events'), 'opening the log asks the host for it');
+  const head = textOf(findByKey(opened, 'log-hd')[0]);
+  assert.match(head, /运行日志 · 显示 2 条（共 5 条）/, `the log head counts what it shows — got: ${head}`);
+  assert.match(head, /1 行损坏/, `and admits the lines it could not read — got: ${head}`);
+  const logText = textOf(findByKey(opened, 'log-body')[0]);
+  assert.match(logText, /browse · docker-catalog · “mcp” · 12 条 · 340 ms · 缓存/,
+    `a browse row reads as one line — got: ${logText}`);
+  assert.match(logText, /total=12/, `a field the panel has no column for still shows — got: ${logText}`);
+  assert.match(logText, /server=codegraph/, 'an install row keeps the server it installed');
+  assert.match(logText, /mounted=true/, 'and whether the mount actually worked');
+
+  const refresh = buttonByText(opened, '刷新');
+  assert.ok(refresh, 'the open log offers a refresh');
+  refresh.props.onClick();
+  const again = walk(await render());
+  assert.equal(findByKey(again, 'log').length, 1, 'the log stays open across renders');
+  assert.equal(buttonByText(again, '收起运行日志') != null, true, 'and the toggle now offers to fold it away');
+
+  // The branch a single render cannot reach: the host has no /status route yet
+  // (or answers half of it), so the tagline has to stay rather than the line
+  // emptying itself and taking the page's only identity with it.
+  assert.equal(typeof mod.__test?.subLineText, 'function', 'client exports __test.subLineText');
+  const TAGLINE = '宿主机扫描 · 市场发现 · 一键接入';
+  assert.equal(mod.__test.subLineText(null), TAGLINE, 'a host without /status keeps the tagline');
+  assert.equal(mod.__test.subLineText({}), TAGLINE, 'a host that answers nothing keeps the tagline');
+  assert.equal(mod.__test.subLineText({ plugin: { version: '0.1.0' } }), TAGLINE,
+    'half an answer (no host block) keeps the tagline');
+  console.log('identity line + action log: names the build, folds out what it did ✓');
 }
 
 // --- 6b. clicking that button installs the plugin and says a restart is due --

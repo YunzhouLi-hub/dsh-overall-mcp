@@ -12,6 +12,7 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as mcpClient from '@deepseek-ai/dsh-mcp-client';
 import { BlockAssembler } from '@deepseek-ai/dsh-llm';
 import { defineTool } from '@deepseek-ai/dsh-tools';
@@ -43,11 +44,23 @@ import { httpStatusFor } from './lib/http-status.js';
 import { sanitizeToolDefinition } from './lib/schema-guard.js';
 import { checkAllUpdates, checkDescribesEntry, checkEntryUpdate, parsePackageInvocation, pinArgs } from './lib/updates.js';
 import { checkSelfUpdate, updateSelf } from './lib/self-update.js';
+import { appendEvents, emit, eventFileFacts, readEvents, setEventSink } from './lib/events.js';
 
 export const name = 'overall-mcp';
 export const inject = ['tools'];
 
 const REGISTRY_VERSION = 1;
+/**
+ * When this process evaluated its own code. The plugin version cannot answer
+ * "is the running build the one on disk?" — `package.json` and the client's
+ * version chip both stay at 0.1.0 across releases — but a comparison with the
+ * files' mtimes can, and that is the question the 2026-10-16 report turned on:
+ * a host started 16:50 the previous day was still running code from before the
+ * two batches that fixed the source it called unavailable (see `/status`).
+ */
+const LOADED_AT = new Date();
+/** This checkout's directory, for the same answer's file list. */
+const PLUGIN_DIR = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_NAME_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
 /** Bounded readiness wait for one mcp-client mount (see connect()). */
 const CONNECT_WAIT_MS = 8000;
@@ -188,6 +201,12 @@ export async function apply(ctx) {
   const dir = dataDir();
   const registryFile = path.join(dir, 'registry.json');
   const reportFile = path.join(dir, 'scan-report.json');
+  // The plugin's own activity log (lib/events.js explains why). The sink is
+  // installed before anything else in `apply()` runs, so the repairs and
+  // damaged-file reports below are the log's first entries rather than its first
+  // invisible ones. Writes are fire-and-forget: `appendEvents` never rejects.
+  const eventsFile = path.join(dir, 'events.ndjson');
+  setEventSink((event) => { void appendEvents(eventsFile, [event]); });
   // Installs made from this panel, counted locally (lib/installs.js). The
   // sources publish their own usage figures; neither counts our installs, and
   // the user asked for them (「下载量以后从我们市场下载的也要统计一下」).
@@ -207,6 +226,7 @@ export async function apply(ctx) {
     try { await fs.copyFile(sourcesFile, backup); } catch { /* keep going: reporting beats failing */ }
     sourcesLoadError = `自定义目录源文件无法解析（${loadedSources.damaged}），本次以空列表启动；原文件已备份为 ${path.basename(backup)}`;
     log?.warn?.(`overall-mcp: ${sourcesLoadError}`);
+    emit({ kind: 'sources', action: 'damaged', error: loadedSources.damaged, backup: path.basename(backup) });
   }
 
   /** Persist the custom source list (temp file + rename, like every document here). */
@@ -227,6 +247,7 @@ export async function apply(ctx) {
     try { await fs.copyFile(registryFile, backup); } catch { /* keep going: reporting beats failing */ }
     registryLoadError = `注册表文件无法解析（${loaded.damaged}），本次以空注册表启动；原文件已备份为 ${path.basename(backup)}`;
     log?.warn?.(`overall-mcp: ${registryLoadError}`);
+    emit({ kind: 'registry', action: 'damaged', error: loaded.damaged, backup: path.basename(backup) });
   }
   const firstRun = registry === null && loaded.damaged === null;
   if (!registry) registry = { version: REGISTRY_VERSION, servers: [] };  // Favourite market entries, keyed exactly like the client's React key
@@ -247,6 +268,7 @@ export async function apply(ctx) {
     if (repaired.collapsed.length > 0) {
       registry = repaired.registry;
       log?.warn?.(`overall-mcp: collapsed ${repaired.collapsed.length} duplicate row(s) — ${repaired.collapsed.map((c) => `${c.name} (-${c.dropped})`).join(', ')}`);
+      emit({ kind: 'registry', action: 'collapse', collapsed: repaired.collapsed });
       await save();
     }
   }
@@ -645,6 +667,15 @@ export async function apply(ctx) {
       const entry = registry.servers.find((s) => s.name === name);
       if (entry && entry.enabled !== false) connected.push({ name, ...(await connect(entry)) });
     }
+    emit({
+      kind: 'scan',
+      files: report.length,
+      added: merged.added.length,
+      skipped: merged.skipped.length,
+      collapsed: merged.collapsed?.length ?? 0,
+      connected: connected.length,
+      orphans: orphanEntries().length,
+    });
     return {
       added: merged.added,
       skipped: merged.skipped,
@@ -777,6 +808,20 @@ export async function apply(ctx) {
         log?.warn?.(`overall-mcp: could not explain the failed install of ${entry.name}: ${diagnosisError}`);
       }
     }
+    // The install is the action a user most often needs to reconstruct ("it said
+    // it installed — did it mount?"). Two facts in one line: the mount verdict,
+    // and whether it was counted as an install of this market.
+    emit({
+      kind: 'install',
+      server: entry.name,
+      source: item?.source ?? null,
+      itemId: item?.id ?? null,
+      mounted: conn.ok !== false,
+      counted: record !== null,
+      ...(conn.ok === false ? { error: capText(String(conn.error ?? 'mount failed'), 200) } : {}),
+      ...(diagnosis ? { diagnosis: true } : {}),
+      ...(diagnosisError ? { diagnosisError } : {}),
+    });
     return {
       installed: entry.name,
       localInstalls: record?.count ?? localInstallsOf(installs, item, entry.name),
@@ -791,7 +836,6 @@ export async function apply(ctx) {
       ...(diagnosisError ? { diagnosisError } : {}),
     };
   }
-
   // ---- mutations ------------------------------------------------------------
   // A `providedExternally` entry is one that another mcp-client mount already
   // serves under the same DSH server name (see `connect`): this plugin skipped
@@ -950,6 +994,7 @@ export async function apply(ctx) {
     registry.servers = registry.servers.filter((s) => !gone.has(s));
     await save();
     log?.info?.(`overall-mcp: forgot ${removed.length} orphaned ${removed.length === 1 ? 'entry' : 'entries'} (${names.join(', ')})`);
+    emit({ kind: 'registry', action: 'forget-orphans', count: removed.length, names });
     return { removed, count: removed.length, ...(await serversPayload()) };
   }
 
@@ -970,7 +1015,18 @@ export async function apply(ctx) {
   // `force: true` itself.
   const doCheckSelfUpdate = () => checkSelfUpdate({ moduleUrl: import.meta.url, cache: selfUpdateCache });
 
-  const doSelfUpdate = () => updateSelf({ moduleUrl: import.meta.url });
+  const doSelfUpdate = async () => {
+    const result = await updateSelf({ moduleUrl: import.meta.url });
+    emit({
+      kind: 'update',
+      target: 'dsh-overall-mcp',
+      updated: result?.updated === true,
+      ...(result?.ok === false ? { error: result.reason ?? 'failed' } : {}),
+      ...(result?.version ? { from: result.version } : {}),
+      ...(result?.latest ? { to: result.latest } : {}),
+    });
+    return result;
+  };
 
   async function doCheckUpdatesImpl() {
     const entries = registry.servers.filter((s) => s.enabled !== false);
@@ -1102,11 +1158,13 @@ export async function apply(ctx) {
     const quota = githubSearchQuota();
     if (quota.waitMs > 0) {
       log?.warn?.(`overall-mcp: GitHub search budget is empty for another ${Math.ceil(quota.waitMs / 1000)}s; not walking`);
+      emit({ kind: 'census', action: 'skipped', waitMs: quota.waitMs });
       return null;
     }
     githubCrawl = (async () => {
       log?.info?.('overall-mcp: walking the GitHub index');
       githubWalkProgress = { requests: 0, rows: 0 };
+      emit({ kind: 'census', action: 'start', force: force === true });
       let lastWrite = 0;
       const walk = await crawlGithubRepos({
         search: searchGithubRepos,
@@ -1144,6 +1202,16 @@ export async function apply(ctx) {
       githubIndexLoaded = true;
       githubIndexDamaged = null;
       log?.info?.(`overall-mcp: github index ${doc.rows.length} rows in ${walk.requests} requests (complete=${walk.complete})`);
+      // The census's outcome is the fact a stale面板 cannot show: how many rows
+      // the walk actually kept, and whether it finished.
+      emit({
+        kind: 'census',
+        action: 'stop',
+        requests: walk.requests,
+        rows: doc.rows.length,
+        complete: walk.complete === true,
+        ...(doc.partial ? { partial: doc.partial } : {}),
+      });
       // A census that just grew is the cheapest moment to ask the repositories
       // themselves how they are run: the two walks share no quota (search API
       // vs raw.githubusercontent), and this one is deliberately not awaited.
@@ -1152,6 +1220,7 @@ export async function apply(ctx) {
     })()
       .catch((err) => {
         log?.warn?.(`overall-mcp: github index walk failed: ${String(err?.message ?? err)}`);
+        emit({ kind: 'census', action: 'failed', error: String(err?.message ?? err) });
         return null;
       })
       .finally(() => {
@@ -1268,6 +1337,7 @@ export async function apply(ctx) {
     if (!rows.length) return null;
     evidenceCrawl = (async () => {
       log?.info?.(`overall-mcp: recovering install commands for ${rows.length} repositories`);
+      emit({ kind: 'evidence', action: 'start', rows: rows.length, force: force === true });
       const walk = await crawlInstallEvidence({
         rows,
         previous: held?.rows ?? [],
@@ -1288,10 +1358,19 @@ export async function apply(ctx) {
       evidenceDamaged = null;
       const withCommand = doc.rows.filter((row) => row.install).length;
       log?.info?.(`overall-mcp: install evidence ${doc.rows.length} rows, ${withCommand} with a command (${walk.requests} requests)`);
+      emit({
+        kind: 'evidence',
+        action: 'stop',
+        requests: walk.requests,
+        rows: doc.rows.length,
+        withCommand,
+        ...(doc.partial ? { partial: doc.partial } : {}),
+      });
       return doc;
     })()
       .catch((err) => {
         log?.warn?.(`overall-mcp: install evidence walk failed: ${String(err?.message ?? err)}`);
+        emit({ kind: 'evidence', action: 'failed', error: String(err?.message ?? err) });
         return null;
       })
       .finally(() => { evidenceCrawl = null; });
@@ -1372,7 +1451,98 @@ export async function apply(ctx) {
     await save();
     return { key: normalized, favorite: favorites.has(normalized), favorites: registry.favorites };
   }
+  /**
+   * What code is running here, and what this process has been doing.
+   *
+   * The panel's version chip cannot answer the first question: it is a literal
+   * (0.1.0) that does not move between releases, and a process loads its code
+   * once at startup — a checkout edited afterwards keeps reporting the old story.
+   * On 2026-10-16 that cost a whole diagnostic round: 「github-mcp 源不可用」 came
+   * from a host started the previous day, before the batches that fixed it
+   * existed. `source.stale` is exactly that comparison, from file mtimes;
+   * `data`/`census`/`quota`/`events` are the second half — which file the panel
+   * is actually reading, and how old what it holds is.
+   */
+  async function statusPayload() {
+    const statOf = async (file) => {
+      try {
+        const s = await fs.stat(file);
+        return { bytes: s.size, at: s.mtime.toISOString() };
+      } catch {
+        return null;
+      }
+    };
+    const relative = ['index.js', 'client/client.js'];
+    try {
+      for (const name of await fs.readdir(path.join(PLUGIN_DIR, 'lib'))) {
+        if (name.endsWith('.js')) relative.push(`lib/${name}`);
+      }
+    } catch { /* a checkout without lib/ is not worth failing the status over */ }
+    const sourceFiles = [];
+    for (const rel of relative) {
+      const facts = await statOf(path.join(PLUGIN_DIR, rel));
+      if (facts) sourceFiles.push({ name: rel, at: facts.at, bytes: facts.bytes });
+    }
+    const newestSource = sourceFiles.map((f) => f.at).sort().at(-1) ?? null;
+    let version = null;
+    try {
+      version = JSON.parse(await fs.readFile(path.join(PLUGIN_DIR, 'package.json'), 'utf8'))?.version ?? null;
+    } catch { /* unreadable package.json is a fact about the checkout, not a failure */ }
+    const dataFiles = [];
+    for (const file of [registryFile, reportFile, sourcesFile, installsFile, githubIndexFile, evidenceFile, eventsFile]) {
+      const facts = await statOf(file);
+      dataFiles.push({ name: path.basename(file), ...(facts ?? { bytes: null, at: null }) });
+    }
+    const census = await githubIndexPayload();
+    const uptimeMs = Math.round(process.uptime() * 1000);
+    return {
+      plugin: {
+        id: 'dsh-overall-mcp',
+        version,
+        dir: PLUGIN_DIR,
+        loadedAt: LOADED_AT.toISOString(),
+        // The question the panel could not ask: is the code on disk newer than
+        // the code this process is running?
+        source: {
+          newestAt: newestSource,
+          stale: newestSource !== null && newestSource > LOADED_AT.toISOString(),
+          files: sourceFiles,
+        },
+      },
+      host: {
+        pid: process.pid,
+        startedAt: new Date(Date.now() - uptimeMs).toISOString(),
+        uptimeMs,
+        node: process.versions.node ?? null,
+        electron: process.versions.electron ?? null,
+        platform: process.platform,
+        arch: process.arch,
+      },
+      data: { dir, files: dataFiles },
+      census: census
+        ? {
+          rows: census.rows?.length ?? 0,
+          at: census.at ?? null,
+          complete: census.complete === true,
+          partial: census.partial ?? null,
+          walking: githubCrawl !== null,
+          loaded: githubIndexLoaded,
+          damaged: githubIndexDamaged ?? null,
+        }
+        : { rows: 0, at: null, complete: false, partial: null, walking: githubCrawl !== null, loaded: githubIndexLoaded, damaged: githubIndexDamaged ?? null },
+      evidence: {
+        ...(await evidenceSummary()),
+        requests: evidenceDoc?.requests ?? 0,
+        damaged: evidenceDamaged ?? null,
+      },
+      quota: githubSearchQuota(),
+      events: await eventFileFacts(eventsFile),
+      errors: { registry: registryLoadError, sources: sourcesLoadError },
+    };
+  }
+
   async function doBrowse({ query = '', limit = 120, source = '', refresh = false } = {}) {
+    const startedAt = Date.now();
     const q = typeof query === 'string' ? query.slice(0, CATALOG_QUERY_MAX) : '';
     // The GitHub census is handed to the browse, so that source reads 1700+
     // repositories off disk instead of 200 off the network. The crawl behind a
@@ -1409,6 +1579,18 @@ export async function apply(ctx) {
       .map((s) => s.at)
       .filter((at) => typeof at === 'string')
       .sort()[0];
+    // One line per read of the market: what was asked, and how it went. The
+    // per-source lines are already emitted inside `browseCatalog`.
+    emit({
+      kind: 'browse',
+      source: source || 'all',
+      query: q || null,
+      items: result.items.length,
+      total: result.total,
+      cached: Object.values(result.sources).every((s) => s.cached === true),
+      errors: result.errors.length,
+      ms: Date.now() - startedAt,
+    });
     return {
       // Evidence first: `annotateItem` derives `installable` from the row's
       // install, so a recovered command has to be on the row before it runs.
@@ -1471,6 +1653,7 @@ export async function apply(ctx) {
     await saveSources();
     catalogCache.forgetSourceId(next.source.id);
     log?.info?.(`overall-mcp: custom source added — ${next.source.label} (${next.source.url})`);
+    emit({ kind: 'source-config', action: 'add', id: next.source.id, url: next.source.url, label: next.source.label });
     return { source: next.source, ...sourcesPayload() };
   }
 
@@ -1483,6 +1666,7 @@ export async function apply(ctx) {
     await saveSources();
     const dropped = catalogCache.forgetSourceId(removed.id);
     log?.info?.(`overall-mcp: custom source removed — ${removed.label} (${dropped} cached result(s) dropped)`);
+    emit({ kind: 'source-config', action: 'remove', id: removed.id, url: removed.url, label: removed.label, dropped });
     return { removed, dropped, ...sourcesPayload() };
   }
 
@@ -1808,6 +1992,17 @@ export async function apply(ctx) {
     };
 
     const routes = [
+      // Which build is running, and what it has been doing. The panel showed a
+      // source as unavailable while the reason lived in a process that had
+      // already exited; these two are the answer to "which build is this, and
+      // what happened?" (see lib/events.js).
+      ['/api/overall-mcp/status', ['GET'], guard(async () => json(await statusPayload()))],
+      ['/api/overall-mcp/events', ['GET'], guard(async (req) => {
+        const url = new URL(req.url);
+        const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 100, 1), 500);
+        const { events, damaged, total } = await readEvents(eventsFile, { limit });
+        return json({ events, damaged, total });
+      })],
       ['/api/overall-mcp/servers', ['GET'], guard(async () => json(await serversPayload()))],
       ['/api/overall-mcp/scan', ['GET', 'POST'], guard(async () => json(await doScan()))],
       ['/api/overall-mcp/catalog', ['GET', 'POST'], guard(async (req) => {
@@ -1898,10 +2093,20 @@ export async function apply(ctx) {
         // `slot` / `from` say which row was clicked when a name has several
         // rows; without them an ambiguous name is an error rather than a guess,
         // because toggling the wrong row disconnects real tools.
-        return json(await doSetEnabled(name, enabled, {
+        const result = await doSetEnabled(name, enabled, {
           slot: Number.isInteger(slot) ? slot : null,
           from: typeof from === 'string' && from !== '' ? from : null,
-        }));
+        });
+        // Mounting is the other action worth a line: the panel's badges say what
+        // is mounted *now*, never that a user asked for a change.
+        emit({
+          kind: 'mount',
+          name,
+          enabled,
+          ...(result?.status ? { status: result.status } : {}),
+          ...(result?.error ? { error: String(result.error) } : {}),
+        });
+        return json(result);
       })],
       ['/api/overall-mcp/set-source-enabled', ['POST'], guard(async (req) => {
         const { source, enabled } = await readBody(req);
@@ -1922,10 +2127,19 @@ export async function apply(ctx) {
         // `slot` / `from` are optional: a caller that only knows the name still
         // works, and one that knows which row it clicked can say so (two rows
         // may share a name).
-        return json(await doUpdate(name, {
+        const result = await doUpdate(name, {
           slot: Number.isInteger(slot) ? slot : null,
           from: typeof from === 'string' && from !== '' ? from : null,
-        }));
+        });
+        emit({
+          kind: 'update',
+          target: name,
+          updated: result?.updated === true,
+          ...(result?.from ? { from: result.from } : {}),
+          ...(result?.to ? { to: result.to } : {}),
+          ...(result?.reason ? { reason: result.reason } : {}),
+        });
+        return json(result);
       })],
       ['/api/overall-mcp/remove', ['POST'], guard(async (req) => {
         const { name, slot, from } = await readBody(req);

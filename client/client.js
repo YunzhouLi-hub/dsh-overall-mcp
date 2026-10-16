@@ -899,6 +899,23 @@ window.__ModuleLoader__.load({
 			ghStatLab: { color: T.text3, fontSize: 11 },
 			message: { fontSize: 13, color: T.text2 },
 			error: { fontSize: 13, color: "#f53f3f" },
+			// 运行日志 — the host's own record of what the plugin did. It is read
+			// line by line when something went wrong and folded away the rest of
+			// the time, so it hangs under the head rather than owning a tab.
+			logBox: {
+				border: `1px solid ${T.line}`, borderRadius: 8, background: T.cardBg,
+				padding: "10px 12px", marginBottom: 12,
+			},
+			logHead: {
+				display: "flex", gap: 12, alignItems: "center",
+				justifyContent: "space-between", marginBottom: 6,
+			},
+			logTitle: { fontSize: 12.5, color: T.text2, fontWeight: 600 },
+			logBody: {
+				maxHeight: 220, overflowY: "auto", fontSize: 11.5, lineHeight: 1.7,
+				color: T.text2, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+				whiteSpace: "pre-wrap", wordBreak: "break-word",
+			},
 			hint: { fontSize: 12, color: T.text3 },
 			// v4's `.note`: the page's closing footnote, ruled off from the
 			// content above it.
@@ -1800,6 +1817,40 @@ window.__ModuleLoader__.load({
 			return `${Math.floor(v / 100) / 10}k`;
 		}
 
+		/** An uptime a person reads, not 187 minutes. */
+		function uptimeText(ms) {
+			const total = Math.max(0, Math.floor(Number(ms) / 1000));
+			const days = Math.floor(total / 86400);
+			const hours = Math.floor((total % 86400) / 3600);
+			const minutes = Math.floor((total % 3600) / 60);
+			if (days > 0) return `${days} 天 ${hours} 小时`;
+			if (hours > 0) return `${hours} 小时 ${minutes} 分`;
+			if (minutes > 0) return `${minutes} 分`;
+			return `${total} 秒`;
+		}
+
+		/**
+		 * The one line under the title: which build this process is actually
+		 * running, which process, how long it has been up, and how many data
+		 * files it found.
+		 *
+		 * A version string alone cannot tell a user whether the fix they just
+		 * made is loaded — a panel served by a process started before it is the
+		 * difference between "still broken" and "not loaded yet". A host with no
+		 * `/status` route (or a half answer) keeps the tagline, so the page
+		 * degrades instead of emptying itself.
+		 */
+		function subLineText(status) {
+			if (!status?.plugin || !status?.host) return "宿主机扫描 · 市场发现 · 一键接入";
+			return [
+				`插件 v${status.plugin.version ?? "?"}`,
+				`pid ${status.host.pid}`,
+				`已运行 ${uptimeText(status.host.uptimeMs)}`,
+				`${(status.data?.files ?? []).filter((f) => f.bytes !== null).length} 个数据文件`,
+				status.events?.lines ? `日志 ${compactCount(status.events.lines)} 条` : null,
+			].filter(Boolean).join(" · ");
+		}
+
 		/**
 		 * When one source's listing was read, as HH:MM — or "" when the host did
 		 * not say. Sources age independently (each has its own TTL and validator),
@@ -2385,6 +2436,20 @@ window.__ModuleLoader__.load({
 			const scrollerRef = useRef(null);
 			const [showTop, setShowTop] = useState(false);
 
+			// ---- what this page is running, and what it has been doing ----
+			// Both answers come from the host, not from this bundle:
+			// `CLIENT_VERSION` is a literal compiled into the page, so it can only
+			// say what the page *is* — never whether the code on disk has moved
+			// ahead of the process serving it. That difference is not academic:
+			// after the 2026-10-16 fixes the panel still reported a source as
+			// unavailable, because DSH had been up since before the fix and
+			// nothing on screen could say so.
+			const [hostStatus, setHostStatus] = useState(null);
+			const [statusError, setStatusError] = useState("");
+			const [eventLog, setEventLog] = useState(null);
+			const [logOpen, setLogOpen] = useState(false);
+			const [logBusy, setLogBusy] = useState(false);
+
 			// The servers the host's last 检查更新 marked as updatable. Derived
 			// rather than stored, and derived from the *listing* rather than from
 			// the queue: the page refreshes the registry after every update, so
@@ -2437,7 +2502,118 @@ window.__ModuleLoader__.load({
 			useEffect(() => {
 				refresh().catch((err) => setError(String(err.message || err)));
 				loadSources();
+				loadStatus();
 			}, []);
+
+			/**
+			 * Which build is answering, and with which data files.
+			 *
+			 * One line of text, not a panel: the page has to stay readable, and
+			 * the one fact worth interrupting for — the files on disk are newer
+			 * than the running process — is called out on that same line.
+			 */
+			async function loadStatus() {
+				try {
+					setHostStatus(await api("/status"));
+					setStatusError("");
+				} catch (err) {
+					const text = String(err.message || err);
+					// An older host has no such route. That is a version fact
+					// about the host, not a failure of this page, so it is not
+					// shown as one.
+					setStatusError(text.includes("404") ? "" : text);
+				}
+			}
+
+			/**
+			 * The host's own record of what the plugin did.
+			 *
+			 * Read on demand rather than with the page: it is the second thing
+			 * somebody looks at, not the first, and every other part of this
+			 * panel works without it.
+			 */
+			async function loadEvents() {
+				setLogBusy(true);
+				try {
+					const body = await api("/events");
+					setEventLog({
+						events: Array.isArray(body.events) ? body.events : [],
+						damaged: Number(body.damaged) || 0,
+						total: Number(body.total) || 0,
+					});
+				} catch (err) {
+					const text = String(err.message || err);
+					// An older host has no such route. That is the same version
+					// fact /status reports (and the page already knows how to
+					// say it), so it is said inside the log box where the user
+					// just looked, rather than as a failure of the whole page —
+					// and never as "这次运行还没有记录", which would be a lie
+					// about a log nobody could read.
+					setEventLog({
+						events: [], damaged: 0, total: 0,
+						note: text.includes("404")
+							? "宿主插件还是旧版本（没有 /api/overall-mcp/events）；重启 DSH 后再看运行日志"
+							: `读取运行日志失败：${text}`,
+					});
+				} finally {
+					setLogBusy(false);
+				}
+			}
+
+			function toggleLog() {
+				const next = !logOpen;
+				setLogOpen(next);
+				if (next) loadEvents();
+			}
+
+			/**
+			 * One line per event, in the order a person reads it: when, what kind
+			 * of thing, then only the fields that kind actually carries.
+			 *
+			 * A generic JSON dump was the alternative and it is worse here — the
+			 * log is scanned for the one line that says why, and a wall of braces
+			 * is how that line stays hidden. Every field is read defensively: an
+			 * old line written by a newer plugin version must not break the list.
+			 */
+			function formatEvent(event) {
+				if (!event || typeof event !== "object") return String(event ?? "");
+				const at = typeof event.at === "string" ? event.at.slice(11, 19) : "";
+				const parts = [at, event.kind];
+				// Everything the fields below already say, so the tail does not
+				// repeat it.
+				const known = new Set(["at", "kind", "action", "source", "target", "query", "items",
+					"ms", "waitMs", "cached", "notModified", "files", "rows", "error", "note"]);
+				if (event.action) parts.push(event.action);
+				if (event.source) parts.push(event.source);
+				if (event.target) parts.push(event.target);
+				if (event.query) parts.push(`“${event.query}”`);
+				if (typeof event.items === "number") parts.push(`${event.items} 条`);
+				if (typeof event.ms === "number") parts.push(`${event.ms} ms`);
+				if (typeof event.waitMs === "number") parts.push(`等待 ${Math.ceil(event.waitMs / 1000)} 秒`);
+				if (event.cached) parts.push("缓存");
+				if (event.notModified) parts.push(`304 ×${event.notModified}`);
+				if (typeof event.files === "number") parts.push(`${event.files} 台`);
+				if (typeof event.rows === "number") parts.push(`${event.rows} 行`);
+				if (event.error) parts.push(`✗ ${event.error}`);
+				if (event.note) parts.push(event.note);
+				// Whatever this version of the panel does not know by name still
+				// shows up: the log exists to explain a failure nobody planned
+				// for, so a field added by a newer host must not become
+				// invisible here. Falsy extras are left out (`cached: false`,
+				// `skipped: 0`) so the line stays readable, and arrays keep
+				// their element count rather than their contents.
+				for (const [key, value] of Object.entries(event)) {
+					if (known.has(key)) continue;
+					if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+						if (value === "" || value === false || value === 0) continue;
+						parts.push(`${key}=${value}`);
+					} else if (Array.isArray(value) && value.length > 0) {
+						parts.push(`${key}[${value.length}]`);
+					}
+					if (parts.length >= 14) { parts.push("…"); break; }
+				}
+				return parts.filter((part) => part !== undefined && part !== null && part !== "").join(" · ");
+			}
 
 			/**
 			 * The user's own catalogue sources. Kept in its own request because it
@@ -2749,11 +2925,38 @@ window.__ModuleLoader__.load({
 			 * to export, and a bug report needs exactly this — which catalogs
 			 * answered, with how many entries, and what the page did with them.
 			 */
-			function doExportLog() {
+			async function doExportLog() {
 				try {
+					// The host's own account of this run, fetched now rather than
+					// reused from the panel's state: the export has to be true at
+					// the moment it is written, and 运行日志 may never have been
+					// opened at all.
+					const [status, events] = await Promise.all([
+						api("/status").catch(() => null),
+						api("/events").catch(() => null),
+					]);
 					const payload = {
 						exportedAt: new Date().toISOString(),
-						plugin: { id: "dsh-overall-mcp", version: CLIENT_VERSION },
+						plugin: {
+							id: "dsh-overall-mcp", version: CLIENT_VERSION,
+							// What the process serving this page actually is. The
+							// bundle's own constant cannot answer that question —
+							// it is compiled into the page.
+							host: status?.plugin ?? null,
+						},
+						host: status
+							? {
+								process: status.host ?? null, data: status.data ?? null,
+								census: status.census ?? null, evidence: status.evidence ?? null,
+								quota: status.quota ?? null,
+							}
+							: null,
+						// The reasons that outlive the panel's own memory: why a
+						// source was unavailable, when a census started, what an
+						// install did.
+						events: events
+							? { total: events.total ?? 0, damaged: events.damaged ?? 0, lines: events.events ?? [] }
+							: null,
 						registry: {
 							total: stats.total, enabled: stats.enabled, disabled: stats.disabled,
 							connected: stats.connected, failed: stats.failed, servers,
@@ -2786,7 +2989,7 @@ window.__ModuleLoader__.load({
 					a.click();
 					a.remove();
 					setTimeout(() => URL.revokeObjectURL(url), 1000);
-					setMessage(`已导出日志：${stats.total} 台服务器、${marketItems?.length ?? 0} 条市场条目`);
+					setMessage(`已导出日志：${stats.total} 台服务器、${marketItems?.length ?? 0} 条市场条目${events?.events?.length ? `、${events.events.length} 条运行日志` : ""}`);
 				} catch (err) {
 					setError(`导出失败：${String(err.message || err)}`);
 				}
@@ -3193,6 +3396,10 @@ window.__ModuleLoader__.load({
 				? sortedItems.slice(safePage * pageSize, safePage * pageSize + pageSize)
 				: null;
 
+			// The sub-line answers "what am I looking at" — see subLineText.
+			const running = subLineText(hostStatus);
+			const staleSource = hostStatus?.plugin?.source?.stale === true;
+
 			// The one outlined control that belongs beside the sub-line rather
 			// than in the run of text buttons on the first row.
 			const logButton = createElement("button", {
@@ -3263,13 +3470,65 @@ window.__ModuleLoader__.load({
 								: null,
 						]),
 					]),
-					// Row B — the sub-line and the log button beside it.
+					// Row B — the identity line, then the two controls that are
+					// about this page rather than about its content: the log, and
+					// exporting it with everything else the page knows.
 					createElement("div", { key: "hd-row2", style: styles.headSubRow }, [
-						createElement("div", { key: "hd-sub", style: styles.pageSub },
-							"宿主机扫描 · 市场发现 · 一键接入"),
-						logButton,
+						createElement("div", { key: "hd-sub", style: styles.pageSub }, [
+							createElement("p", { key: "hd-subtext", style: styles.pageSubText }, running),
+							// The fact this panel could not state before: the files on
+							// disk are newer than the process serving them, so a fix
+							// that has already been made is not in effect yet. It is
+							// the difference between "still broken" and "not loaded".
+							staleSource
+								? createElement("span", {
+									key: "hd-stale", style: styles.error,
+									title: `磁盘上的代码比当前进程更新（进程启动于 ${hostStatus.plugin.loadedAt}）；重启 DSH 后生效`,
+								}, "⚠ 代码已更新，重启 DSH 后生效")
+								: null,
+							statusError
+								? createElement("span", { key: "hd-statuserr", style: styles.error }, `⚠ ${statusError}`)
+								: null,
+						]),
+						createElement("div", { key: "hd-logacts", style: styles.pageSub }, [
+							createElement("button", {
+								key: "hd-events", type: "button", className: "omkt-btn omkt-btn-text",
+								style: styles.textBtn, onClick: toggleLog,
+							}, logOpen ? "收起运行日志" : "运行日志"),
+							logButton,
+						]),
 					]),
 				]),
+
+				// 运行日志 — the host's own account of what this plugin did, which
+				// outlives the request that produced it and the process that knew
+				// the reason. Folded away until asked for.
+				logOpen
+					? createElement("div", { key: "log", style: styles.logBox }, [
+						createElement("div", { key: "log-hd", style: styles.logHead }, [
+							createElement("span", { key: "log-t", style: styles.logTitle },
+								eventLog === null
+									? "运行日志"
+									: `运行日志 · 显示 ${eventLog.events.length} 条`
+										+ (eventLog.total > eventLog.events.length ? `（共 ${eventLog.total} 条）` : "")
+										+ (eventLog.damaged ? ` · ${eventLog.damaged} 行损坏` : "")),
+							createElement("button", {
+								key: "log-r", type: "button", className: "omkt-btn omkt-btn-text",
+								style: styles.textBtn, disabled: logBusy, onClick: loadEvents,
+							}, logBusy ? "读取中…" : "刷新"),
+						]),
+						createElement("div", { key: "log-body", style: styles.logBody },
+							eventLog === null
+								? "读取中…"
+								: eventLog.note
+									? eventLog.note
+									: eventLog.events.length === 0
+										? "这次运行还没有记录。"
+										: eventLog.events.slice().reverse().map((event, index) => createElement("div", {
+											key: `ev-${index}`,
+										}, formatEvent(event)))),
+					])
+					: null,
 
 				createElement("div", { key: "tabs", className: "omkt-tabbar", role: "tablist", style: styles.tabBar }, [
 					createElement("button", {
@@ -3922,12 +4181,14 @@ window.__ModuleLoader__.load({
 
 		exports.apply = apply;
 		exports.inject = ["slots"];
-		// Exposed for tools/render-detail.mjs and tools/render-card.mjs only:
-		// the detail panel once shipped with labels and no values, and the card
-		// once shipped its front-door link inside a <button> (click raced the
-		// navigation). No test that avoids real rendering could catch either.
+		// Exposed for the render probes under tools/ only: the detail panel once
+		// shipped with labels and no values, the card once shipped its front-door
+		// link inside a <button> (click raced the navigation), and the sub-line's
+		// fallback for a host without /status is a branch no render can reach
+		// once the route answers. No test that avoids real rendering could catch
+		// the first two, and none that renders once can catch the third.
 		exports.__test = {
-			MarketDetail, MarketCard, DetailRow, LinkChip, PanelGlyph,
+			MarketDetail, MarketCard, DetailRow, LinkChip, PanelGlyph, subLineText,
 			version: CLIENT_VERSION, bundleName: BUNDLE_NAME, panelId: PANEL_ID,
 		};
 		// Section is exported for tools/render-market-tab.mjs: the market tab's

@@ -15,6 +15,8 @@
 | 🖥️ | 侧栏页面 | 左侧导航「插件」正下方的 **全局 MCP** 入口：**已注册**（按来源分组、可折叠、分组开关、统计筛选）与 **MCP 市场**（浏览/搜索/安装）两个标签页 |
 | 🎛️ | 分组批量启停 | 每个来源分组一个总开关，一次启用/停用该来源的全部服务器（模型工具 `overall_mcp_set_source_enabled` 同能力） |
 | ⬆️ | 版本检查与更新 | 对经 `npx`/`uvx`（含 Windows `cmd.exe /c` 包装）启动的服务器检查 npm / PyPI 最新版本，「已注册」页一条 `全部更新（N）` 串行更新并自动重连，带条目级进度与逐条明细，跑完无剩余项时变为绿色 `✓ 已完成` |
+| 🪪 | 身份行 | 页头第二行写清**这个面板此刻在跑哪份代码**：插件版本、`pid`、已运行时长、能读到的数据文件数、日志条数；磁盘上的代码比进程新时另挂一颗「⚠ 代码已更新，重启 DSH 后生效」——「还是坏的」和「还没载入」从此不是同一句话（`GET /status`） |
+| 🧾 | 动作日志 | 宿主把自己的动作写进 `events.ndjson`（浏览/各源成败/配额/扫描/普查/证据/安装是否挂上/更新/挂载/注册表修复），页头「运行日志」一键展开；只记元数据，不记密钥，最多留最近 400 行 |
 
 ## 快速开始
 
@@ -269,6 +271,8 @@ Invalid schema for function 'mcp__rea-om__analyze_javascript_application':
 ## HTTP API（界面使用，Connection 鉴权）
 
 `GET /api/overall-mcp/servers`、`GET /api/overall-mcp/tools`（schema 取证）、
+`GET /api/overall-mcp/status`（这个进程在跑哪份代码、它在做什么，见下）、
+`GET /api/overall-mcp/events?limit=`（动作日志，见下）、
 `GET|POST /api/overall-mcp/updates`（版本检查）、`POST /api/overall-mcp/update`（更新并重连）、
 `GET|POST /api/overall-mcp/catalog?query=&source=&limit=&refresh=`、
 `GET|POST /api/overall-mcp/sources`（自定义目录源：列出 / 添加）、`POST /api/overall-mcp/sources/remove`（移除一个，见下）、
@@ -305,6 +309,27 @@ key 就是市场卡片的 React key，因为官方 Registry 的 id 随版本变�
 `GET /api/overall-mcp/favorites` → `{"favorites":["<source>:<id|title>",...],"count":N}`：**读取面**。需要它是因为 `/catalog` 只标注本次查询命中的条目：来源筛选或搜索词会把其余的藏起来，于是「我到底收藏了什么」需要独立答案。
 面板上对应的是市场页筛选行里的**仅看收藏 (N)** 按钮：它是对当前列表的视图过滤（不是重新查询），并在宿主总数多于当前可见数时明说「共 N 条收藏；当前来源与搜索下能看到 M 条」，免得筛出来的空列表看起来像「一条都没收藏」。
 实测：`{"key":"official-registry:official:ai.0si/disclosures","favorite":true,"favorites":[...]}`，再次浏览同一条目即返回 `favorite: true`。
+
+## 面板身份行与动作日志（第十八轮）
+
+宿主插件的代码在 DSH 启动时只载入一次（见「常见问题」）。这带来一个用版本号答不上来的问题：**这个面板此刻到底在跑哪份代码？** 页头原来的第二行是一句写死的标语，现在它改读 `GET /api/overall-mcp/status`：
+
+`插件 v0.1.0 · pid 4242 · 已运行 3 小时 12 分 · 5 个数据文件 · 日志 2 条`
+
+`/status` 把三组事实分开报，因为它们的失效方式不同：
+
+- `plugin`：`id` / `version`（读 `package.json`，不是前端那个字面量）/ `dir`（宿主实际载入的目录）/ `loadedAt`（进程启动时刻），以及 `source`——`index.js`、`client/client.js` 与 `lib/*.js` 各自在磁盘上的 `mtime` 与大小；`stale` 表示**磁盘上的代码比当前进程新**。这时页头画一颗琥珀色「⚠ 代码已更新，重启 DSH 后生效」（悬停给出进程启动时刻），因为它和「这个 bug 还在」看起来一模一样，而两者之间只差一次重启。
+- `host`：`pid`、`startedAt`、`uptimeMs`、`node` / `electron` / `platform` / `arch`。用户报问题时需要的正是这四行里的东西。
+- `data`：数据目录与其中每个文件的 `{bytes, at}`（没写出来的文件 `bytes: null`，身份行也只数存在的那些），外加 `census` / `evidence` / `quota` / `errors` 的现状摘要。
+
+与之配套的是 `GET /api/overall-mcp/events?limit=`：宿主把**动作**追加进 `$DSH_HOME/overall-mcp/events.ndjson`（一行一个 JSON，见「数据」），面板上「运行日志」按钮展开即读。记的是动作而不是聊天：`browse`（哪个源、命中几条、耗时、是否命中缓存）、`source`（每个源的成败与原因）、`quota`（GitHub 搜索配额用尽的那一次）、`scan`（读到几个文件、导入/跳过/折叠/孤儿各几条）、`census`、`evidence`、`install`（挂载是否成功、是否计入安装数）、`source-config`、`update`、`mount`、`registry`（损坏、折叠修复、清理孤儿）。**只写元数据**：服务器名、来源 id、条目 id、条目数、耗时、错误文本——不写查询正文之外的用户内容，也不写任何密钥（安装命令里的 token 从不经过这里）。
+
+几条实现上的取舍（`lib/events.js`，单测 `test/events.test.mjs`）：
+
+- **日志不能把插件写挂**：`emit()` 在没有 sink 时是空操作，sink 抛错被吞掉，写盘走一条串行队列（并发 `append` 不会互相截断），失败返回 `null` 而不是抛出——一个写不进去的日志文件不该让扫描或安装失败。
+- **有界**：默认保留最近 400 行 / 256KB（按行数或字节数先到者），修剪时在最前面补一行 `{"kind":"log","action":"trim"}` 说明丢了多少行，而不是让日志悄悄从中间断掉。
+- **不因为一个字段而丢一行**：单个字段超过 600 字符截断、数组超过 20 项折成计数、对象在两层以上折成 `{…}`；极端到整行都序列化不了（例如含 `BigInt`）时写 `{"kind":"log","action":"unserializable"}`——这一行本身就是证据。反过来，面板的渲染器也不只为已知字段写模板：认不出来的字段会以 `key=value` 追加在同一行（`server=codegraph · mounted=true`），所以新版本宿主多记一个字段时旧面板也能看见它，而不是把它藏起来。
+- **读的是尾部**：`/events` 默认回最近 100 条（`limit` 上限 500），从旧到新排列，另报 `total` 与 `damaged`（读不动的行数，文件被外部写过时的取证）。宿主若比面板旧、根本没有这条路由，日志框里写「宿主插件还是旧版本（没有 /api/overall-mcp/events）；重启 DSH 后再看运行日志」，而不是把整页标红，也不会假装「这次运行还没有记录」——前者是版本事实，后者是对一份读不到的日志撒谎。
 
 ## 扫描的宿主机位置
 
@@ -344,6 +369,7 @@ key 就是市场卡片的 React key，因为官方 Registry 的 id 随版本变�
 - `$DSH_HOME/overall-mcp/registry.json` — 注册表（权威）。写盘走临时文件 + `rename`（不会留下半截 JSON）；解析失败时先把原文件复制成 `registry.json.corrupt-<时间戳>`，再用空注册表启动，并把原因随列表响应报给面板（`registryError`）——**不会被当成「首次运行」而覆盖**
 - `$DSH_HOME/overall-mcp/installs.json` — 本市场安装计数（键是目录条目的 `id`，无 id 时回退 `name:<服务器名>`；只在挂载成功之后 +1）
 - `$DSH_HOME/overall-mcp/scan-report.json` — 最近一次扫描报告
+- `$DSH_HOME/overall-mcp/events.ndjson` — 动作日志（每行一个 JSON，最近 400 行 / 256KB，见「面板身份行与动作日志」）：只记元数据，删掉不影响任何功能，只是面板里的「运行日志」变空
 - `$DSH_HOME/overall-mcp/github-install.json` — 从仓库里恢复出来的安装命令（同样是**派生数据**：删掉只是重新走一遍）：`{version, at, requests, partial, rows:[{id, install, installSource, at, lastSeen}]}`；`installSource` 记录证据来自哪个文件、包在哪个 registry 上被确认存在；文件损坏只记警告并按「没有证据」处理
 - `$DSH_HOME/overall-mcp/github-index.json` — GitHub 普查索引（派生数据，删掉只会触发一次重新普查）：`{version, at, minStars, queries, requests, complete, partial, rows}`，每行是市场条目的形状 + `firstSeen`/`lastSeen`；写盘同样走临时文件 + `rename`，文件损坏只记警告并按「没有索引」处理（不隔离、不备份）。走查**每 5 秒**把当前进度写一次（`complete:false`、`partial:"正在抓取（已收 N 行）"`），所以中途被拒绝或退出时，下一次浏览仍能看到已经收到的那些行
 - 市场列表每个来源各缓存 60 秒（只缓存原始数据，"已安装"标记每次读取时重新计算）；上游 URL 的 `ETag` 与正文另存一层，`304` 时复用而不重抓（详见上文 `/catalog` 的两层缓存）
@@ -359,12 +385,13 @@ key 就是市场卡片的 React key，因为官方 Registry 的 id 随版本变�
 
 ```sh
 node --test test/*.mjs                                     # 纯逻辑测试（lib/ 零依赖）
+node --test test/events.test.mjs                           # 动作日志本身：往返、按行/按字节修剪并留痕、损坏行计数、并发追加不互相截断、写不进去只回 null
 node --test test/index.test.mjs                            # 宿主契约测试：真跑 apply(ctx)，假宿主 + 临时 DSH_HOME（见下）
 #   三个宿主 peer 依赖本仓库不安装，由 test/hooks.mjs 映射到 test/stubs/；npm test 的脚本是显式文件列表，新增测试要加进去
 node tools/client-smoke.mjs                               # 客户端注册契约 smoke（模拟前端 module loader；并断言客户端版本号 == package.json）
 node tools/render-detail.mjs                              # 渲染详情页：事实表有值、链接齐全、命令可见、复制按钮真的把命令交给剪贴板（打桩 navigator.clipboard 后驱动真实按钮）
 node tools/render-card.mjs                                # 渲染卡片：标题是链接、正文不是 button、无嵌套交互元素、GitHub 标记/版本在位、命令行只在详情面板
-node tools/render-market-tab.mjs                          # 渲染整个市场页 chrome：页头两行、页签计数、搜索行、筛选行、元信息行、卡片流、页脚分工，以及「仅看收藏」过滤后如实说明藏了多少条
+node tools/render-market-tab.mjs                          # 渲染整个市场页 chrome：页头两行（含身份行与折叠的运行日志）、页签计数、搜索行、筛选行、元信息行、卡片流、页脚分工，以及「仅看收藏」过滤后如实说明藏了多少条
 node tools/probe-server-about.mjs                          # 渲染「已注册」行：用途行在事实行之前、被 clamp 成两行、title 与证据来源一致、无证据时不留空元素
 node tools/verify-css.mjs                                 # 校验所有 className 在注入的样式表里都有对应规则（探针选择器除外，见文件内 HOOKS）
 node tools/layout-probe.mjs                               # 真实 Chrome 量卡片几何：长名称必须省略号、CTA 必须在卡内（npm run test:layout）
@@ -401,6 +428,7 @@ node tools/fixture-bad-schema-mcp.mjs                     # 故意带 `^[^\0]*$`
 | `lib/install-diagnosis.js` | 安装失败时的诊断文本：系统提示、条目事实抽取（不发 `env`/`headers`）、凭据遮蔽、读取模型回答（纯函数，便于单测） |
 | `lib/about.js` | 「这个 MCP 是干什么的」：从服务器 `instructions` / 已注册工具 / 启动命令中取一句人话，含 markdown 剥离、截断与证据标签；以及判断何时需要重读 system prompt 的 `needsInstructionsRead()` |
 | `lib/http-status.js` | 把宿主内部的错误映射成 HTTP 状态码（`unknown server|source`→404、缺参数/不可安装传输→400、上游版本查询失败→502、其余 500），供 `index.js` 的 `guard` 使用 |
+| `lib/events.js` | 动作日志：`emit()` 只把事件交给注入的 sink（没有 sink 就是空操作，sink 抛错被吞掉），`appendEvents()` 串行追加、按行数/字节数修剪并在最前面留一行 `trim` 记录，`readEvents()` 读尾部并统计读不动的行，`eventFileFacts()` 给 `/status` 报文件现状 |
 | `index.js` | cordis 宿主插件（`inject:['tools']`）：注册表、每服务器 `ctx.plugin(mcpClient)` 桥接、`defineTool` 管理工具、HTTP 路由 |
 | `client/client.js` | `__ModuleLoader__` 客户端插件：注册侧栏入口（`sidebar.panellist`，id `overall-mcp`，order 5）与面板本体（布局的 `main` 键控插槽，同一 id） |
 | `cordis.patch.yml` | 宿主 composition 补丁 |
@@ -447,9 +475,11 @@ node tools/fixture-bad-schema-mcp.mjs                     # 故意带 `^[^\0]*$`
 
 **刻意不搬的一条**：dshmarket 的规矩是「失败绝不用缓存回答」，本插件失败时会用上一轮结果，但标成 `旧 / 缓存`。它反对的是**不可分辨的**陈旧，不是陈旧本身——六个来源里 GitHub 那一路时通时断（见上节镜像链），一刀切会让整屏空白。只要陈旧在屏幕上是可读的，这个差异就是取舍而不是欠债。
 
-## 发布包内容（第十七轮）
+## 发布包内容（第十七轮起）
 
-`package.json` 增加了 `files` 白名单，只有这些进包：`index.js`、`lib/`、`client/`、`cordis.patch.yml`、`registry.json`、`README.zh-CN.md`（npm 另会强制带上 `package.json` 与 `LICENSE`）。实测 `npm pack`：**74 个文件 / 1.26 MB → 22 个文件 / 0.64 MB**（tarball 394 KB → 217 KB）。被排除的是 `test/`（20 个文件，231 KB）、`tools/`（随包 25 个，269 KB）、`prototype/`（2 个，62 KB）与 `INTEGRATION-TODO.md`（59 KB），全是开发期资产，没有任何一个是运行时读取的——已核对：`index.js:189` 读的是数据目录下的 `registry.json`（`$DSH_HOME/overall-mcp/`），不是仓库根这一份；`tools/registry-submission.mjs` 只由 CI 在 checkout 上运行。
+`package.json` 增加了 `files` 白名单，进包的只有这 23 个（`npm pack` 实测，含 npm 强制带上的 `package.json` 与 `LICENSE`）：`index.js`、`lib/`（16 个 `.js`）、`client/client.js`、`cordis.patch.yml`、`registry.json`、`README.zh-CN.md`。实测 **76 个文件 / 1.25 MB → 23 个文件 / 0.65 MB**（tarball 410 KB → 229 KB）。
+
+被排除的 53 个文件（637 KB）全是开发期资产，没有任何一个是运行时读取的：`tools/`（25 个，268 KB）、`test/`（21 个，241 KB）、`prototype/`（2 个，62 KB）、`INTEGRATION-TODO.md`（59 KB）、`.github/`（3 个，6 KB）、`.gitattributes`。已核对：`index.js` 读的是数据目录下的 `registry.json`（`$DSH_HOME/overall-mcp/`），不是仓库根这一份；`tools/registry-submission.mjs` 只由 CI 在 checkout 上运行。新增 `lib/*.js` 不需要动白名单（`lib` 是整目录），但新增 `test/`、`tools/` 下的文件不影响发布体积。
 
 ## 常见问题
 
@@ -459,6 +489,11 @@ node tools/fixture-bad-schema-mcp.mjs                     # 故意带 `^[^\0]*$`
 
 - 完全退出 DSH（桌面版注意托盘图标，关窗口不等于退出）后重新打开；
 - 新版页面会直接把这种情况提示为「宿主插件还是旧版本（缺少 /api/overall-mcp/catalog）」，而不是只显示一个 404。
+- 先看页头第二行：它写着 `插件 v… · pid … · 已运行 …`，`pid` 不变、`已运行` 一直涨，就说明你看的还是那个进程；如果这一行右边还有一颗「⚠ 代码已更新，重启 DSH 后生效」，那正是本情况被页面自己认出来了（磁盘 mtime 比进程启动时刻新）。
+
+**我改了插件代码，面板里还是旧行为**
+
+同上：宿主在启动时只载入一次，重启 DSH 才会载入新代码。页头的身份行就是为此加的——`插件 v…` 后面那颗「⚠ 代码已更新，重启 DSH 后生效」把「还是坏的」和「还没载入」分开说；`GET /api/overall-mcp/status` 里的 `plugin.source.stale` 是同一个判断的机器可读版本（`plugin.source.files` 列出 `index.js`、`client/client.js`、每个 `lib/*.js` 的 `mtime` 与大小，`plugin.dir` 是宿主实际载入的目录——用 `link:` 装在工作区时，这个目录不是 `node_modules` 里那份）。
 
 **市场里某条显示「需手动配置」**
 

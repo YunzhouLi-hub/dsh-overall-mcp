@@ -124,9 +124,16 @@ async function withHost(registry, run, { llm, files } = {}) {
 
     await run({ dir, routes, tools, call, readRegistry, readInstalls, registryText });
   } finally {
+    // The plugin's activity log is written behind the response, so a case can
+    // finish while an append is still in flight. Stop accepting events, let the
+    // queue drain, then remove the directory with retries: Windows refuses to
+    // remove a directory that a write is still targeting.
+    const { setEventSink } = await import('../lib/events.js');
+    setEventSink(null);
+    await new Promise((resolve) => { setTimeout(resolve, 25); });
     if (previous === undefined) delete process.env.DSH_HOME;
     else process.env.DSH_HOME = previous;
-    await fs.rm(home, { recursive: true, force: true });
+    await fs.rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 40 });
   }
 }
 
@@ -135,6 +142,7 @@ test('the plugin registers the documented route and tool surface', async () => {
     // The same list client/client.js documents at the top of the file: the page
     // and the host must not drift apart silently.
     for (const route of [
+      '/api/overall-mcp/status', '/api/overall-mcp/events',
       '/api/overall-mcp/servers', '/api/overall-mcp/scan', '/api/overall-mcp/catalog',
       '/api/overall-mcp/repo-stats', '/api/overall-mcp/repo-media', '/api/overall-mcp/install',
       '/api/overall-mcp/favorite', '/api/overall-mcp/favorites', '/api/overall-mcp/set-enabled',
@@ -733,6 +741,68 @@ test('a spent search budget reads as a wait, and nothing spends from it again', 
     });
   });
   forgetGithubSearchQuota();
+});
+
+test('the plugin reports which build it is running, and what it has been doing', async () => {
+  const realFetch = globalThis.fetch;
+  const stub = dockerFetchStub();
+  globalThis.fetch = stub;
+  try {
+    await withHost(FIXTURE, async ({ dir, call }) => {
+      // The page reads this before it trusts anything: which files are loaded,
+      // which process serves them, and which data files exist.
+      const before = await call('/api/overall-mcp/status', { method: 'GET' });
+      assert.equal(before.status, 200);
+      assert.equal(before.body.plugin.id, 'dsh-overall-mcp');
+      assert.ok(before.body.plugin.version, 'the running package version is reported');
+      assert.ok(before.body.plugin.dir.endsWith('dsh-overall-mcp'), before.body.plugin.dir);
+      assert.equal(before.body.host.pid, process.pid);
+      assert.ok(before.body.host.uptimeMs > 0);
+      assert.equal(before.body.data.dir, dir);
+      assert.equal(before.body.events.lines, 0, 'a fresh data directory has no log yet');
+      assert.equal(
+        before.body.plugin.source.stale,
+        false,
+        'the files on disk are the ones that were just loaded',
+      );
+      assert.ok(
+        before.body.plugin.source.files.some((f) => f.name === 'index.js'),
+        'the file list names the loaded entry point',
+      );
+      const files = new Map(before.body.data.files.map((f) => [f.name, f]));
+      assert.ok(files.get('registry.json').bytes > 0, 'a data file that exists reports its size');
+      assert.equal(files.get('github-index.json').bytes, null, 'an absent file says so instead of 0');
+
+      const browse = await call('/api/overall-mcp/catalog', { body: { source: 'docker-catalog', limit: 10 } });
+      assert.equal(browse.status, 200);
+
+      // The log is written after the response, so the read has to wait for it.
+      const logged = await waitFor(async () => {
+        const read = await call('/api/overall-mcp/events', { method: 'GET' });
+        assert.equal(read.status, 200);
+        assert.equal(read.body.damaged, 0);
+        return read.body.events.some((e) => e.kind === 'browse') ? read.body : null;
+      });
+      const kinds = logged.events.map((e) => e.kind);
+      assert.ok(kinds.includes('source'), `the per-source read is logged too (saw ${kinds.join(', ')})`);
+      const source = logged.events.find((e) => e.kind === 'source' && e.source === 'docker-catalog');
+      assert.equal(source.items, 2);
+      assert.equal(source.error, undefined);
+      const events = logged.events.find((e) => e.kind === 'browse');
+      assert.equal(events.source, 'docker-catalog');
+      assert.equal(events.items, 2);
+      assert.equal(typeof events.ms, 'number');
+
+      const after = await call('/api/overall-mcp/status', { method: 'GET' });
+      assert.ok(after.body.events.lines > 0);
+      assert.match(String(after.body.events.lastAt), /^\d{4}-\d{2}-\d{2}T/);
+      const registry = after.body.data.files.find((f) => f.name === 'registry.json');
+      assert.ok(registry.bytes > 0, 'the status lists the data files it found, with sizes');
+      assert.equal(after.body.events.damaged, 0);
+    });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
 
 /** Poll a condition until it is truthy, or fail with the last value. */
