@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   browseCatalog, catalogItemToEntry, fetchAwesomeList,
   fetchAwesomeRemote, fetchDockerCatalog, fetchGithubMcp, githubReposOf, fetchRepoStats,
+  githubItemOf, githubIndexNote, searchGithubRepos, describeAge,
   functionalGroupOf, inferGroupOf, groupSourceOf,
 } from '../lib/catalog.js';
 import { CATALOG_SOURCES } from '../lib/catalog.js';
@@ -1164,5 +1165,97 @@ test('a 404 is not retried, and a 403 that never lifts still reports its status'
   assert.equal(limited, 2);
   assert.equal(result.errors.length, 1);
   assert.equal(result.errors[0].message, 'HTTP 403');
+});
+
+// ---------------------------------------------------------------------------
+// The local GitHub index as a catalogue (lib/github-index.js walks it; this
+// module reads it). The point of holding a census is that a query reaches the
+// whole population, so these tests are about what the *read* path promises.
+// ---------------------------------------------------------------------------
+
+test('the index is read with no request at all, and a query filters the census', async () => {
+  const rows = Array.from({ length: 900 }, (_, i) => ({
+    ...githubItemOf(ghRepo(`acme/server-${i}`, 1000 - i, ['mcp']), { includeRaw: false }),
+    // Only the tail of a 900-row census matches the query.
+    description: i === 880 ? 'a calendar MCP server' : 'an MCP server',
+    title: i === 880 ? 'calendar-mcp' : `server-${i}`,
+  }));
+  let requests = 0;
+  const fetchImpl = async (url) => { requests += 1; return okFetch(url); };
+
+  const result = await fetchGithubMcp({
+    fetchImpl,
+    limit: 5,
+    query: 'calendar',
+    githubIndex: { rows, at: new Date(Date.now() - 3600_000).toISOString() },
+  });
+
+  assert.equal(requests, 0, 'an index read is a disk read: not one request, not one ETag');
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].title, 'calendar-mcp');
+  // Ranked 881st by stars, which is exactly the row a live 200-row search could
+  // never have handed back.
+  assert.equal(result.index.rows, 900);
+  assert.equal(result.index.matched, 1);
+  assert.equal(result.dataAt, result.index.at, 'the listing is dated by the census, not by now');
+  assert.match(result.note, /^本地索引 900 行/);
+  assert.match(result.note, /本次列出 1 条$/);
+});
+
+test('a cap on an index listing says how much of the census it left out', async () => {
+  const rows = Array.from({ length: 40 }, (_, i) => githubItemOf(ghRepo(`acme/server-${i}`, 500 - i, ['mcp']), { includeRaw: false }));
+  const result = await fetchGithubMcp({ limit: 10, githubIndex: { rows, at: new Date().toISOString() } });
+  assert.equal(result.items.length, 10);
+  assert.equal(result.index.matched, 40);
+  assert.equal(result.index.rows, 40);
+  assert.match(result.note, /本地索引 40 行.*本次列出 10 条/);
+});
+
+test('the index note reports its age in the same voice as the Docker note', () => {
+  const hourAgo = new Date(Date.now() - 3 * 3600_000).toISOString();
+  const note = githubIndexNote({ rows: new Array(1758).fill(0), at: hourAgo, ageMs: 3 * 3600_000 }, { listed: 200 });
+  assert.equal(note, '本地索引 1758 行・3 小时前；本次列出 200 条');
+
+  // Stale and unfinished are different facts about the same census, and both
+  // belong on the row: "1758 rows" alone would be the quiet half-truth.
+  const flagged = githubIndexNote(
+    { rows: new Array(20).fill(0), at: hourAgo, ageMs: 40 * 3600_000, stale: true, partial: '请求预算用完（48 次）' },
+    { listed: 20 },
+  );
+  assert.equal(flagged, '本地索引 20 行・1 天前・待更新・上次抓取未走完：请求预算用完（48 次）；本次列出 20 条');
+
+  // A row count with no timestamp is not a fresh index.
+  assert.equal(githubIndexNote({ rows: [] }, { listed: 0 }), '本地索引 0 行・时间未知；本次列出 0 条');
+  assert.equal(describeAge(90_000), '1 分钟前');
+  assert.equal(describeAge(undefined), '时间未知');
+});
+
+test('an indexed row carries no raw payload and no invented installer', () => {
+  const row = githubItemOf(ghRepo('acme/thing-mcp', 12, ['mcp']), { includeRaw: false });
+  assert.equal(row.raw, undefined);
+  assert.equal(row.install, null);
+  assert.equal(row.transport, 'unknown');
+  // A listing with no full_name is a fact about the answer, kept as one.
+  assert.equal(githubItemOf({ description: 'no name' }), null);
+});
+
+test('searchGithubRepos asks one window and reports its hit count', async () => {
+  const seen = [];
+  const fetchImpl = async (url, init) => {
+    seen.push({ url: new URL(String(url)), headers: init?.headers ?? {} });
+    return okFetch(url);
+  };
+  const answer = await searchGithubRepos({ query: 'mcp in:name', page: 2, perPage: 50, fetchImpl });
+
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].url.origin + seen[0].url.pathname, 'https://api.github.com/search/repositories');
+  assert.equal(seen[0].url.searchParams.get('q'), 'mcp in:name');
+  assert.equal(seen[0].url.searchParams.get('page'), '2');
+  assert.equal(seen[0].url.searchParams.get('per_page'), '50');
+  assert.equal(seen[0].url.searchParams.get('sort'), 'stars');
+  assert.equal(seen[0].headers.accept, 'application/vnd.github+json');
+  assert.equal(seen[0].headers['user-agent'], 'dsh-overall-mcp (DeepSeek Harness plugin)');
+  assert.ok(Array.isArray(answer.repos));
+  assert.equal(typeof answer.totalCount, 'number');
 });
 

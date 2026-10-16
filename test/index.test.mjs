@@ -52,13 +52,19 @@ const GHOST_ITEM = {
   install: { transport: 'stdio', command: 'npx', args: ['-y', 'ghost-mcp'] },
 };
 
-async function withHost(registry, run, { llm } = {}) {
+async function withHost(registry, run, { llm, files } = {}) {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), 'overall-mcp-contract-'));
   const dir = path.join(home, 'overall-mcp');
   await fs.mkdir(dir, { recursive: true });
   if (registry !== undefined) {
     const text = typeof registry === 'string' ? registry : JSON.stringify(registry, null, 2);
     await fs.writeFile(path.join(dir, 'registry.json'), text, 'utf8');
+  }
+  // Documents the plugin reads at startup but never writes in these cases (the
+  // GitHub census), so a case can put the host in a state it would otherwise
+  // need a real walk to reach.
+  for (const [name, text] of Object.entries(files ?? {})) {
+    await fs.writeFile(path.join(dir, name), text, 'utf8');
   }
   const previous = process.env.DSH_HOME;
   process.env.DSH_HOME = home;
@@ -473,3 +479,128 @@ test('removing a source names what went, and an unknown id is a 404', async () =
     assert.deepEqual(JSON.parse(await fs.readFile(path.join(dir, 'sources.json'), 'utf8')).sources, []);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The GitHub census (lib/github-index.js) as the host uses it. GitHub's search
+// cannot page past 1000 rows per query, so "the MCP servers on GitHub" is a
+// document the host holds and refreshes in the background — these cases pin the
+// two promises that makes: a panel read does not wait for a walk, and a census
+// we already hold costs no request at all.
+// ---------------------------------------------------------------------------
+
+/** One row as the walk stores it: a market item, trimmed, with the two stamps. */
+function censusRow(fullName, { stars = 100, description = 'An MCP server.', title = null, lastSeen } = {}) {
+  const [owner, name] = fullName.split('/');
+  return {
+    id: `github:${fullName}`,
+    title: title ?? name,
+    description,
+    source: 'github-mcp',
+    author: owner,
+    transport: 'unknown',
+    install: null,
+    repository: `https://github.com/${fullName}`,
+    tags: ['mcp'],
+    status: 'active',
+    stars,
+    lastSeen: lastSeen ?? new Date().toISOString(),
+  };
+}
+
+function censusDocument(rows, { at }) {
+  return JSON.stringify({
+    version: 1, at, minStars: 100, queries: ['mcp in:name archived:false'],
+    requests: 4, complete: true, partial: null, rows,
+  }, null, 2);
+}
+
+/** Replace global fetch for one case, and put it back whatever happens. */
+async function withFetchStub(stub, run) {
+  const real = globalThis.fetch;
+  globalThis.fetch = stub;
+  try {
+    return await run();
+  } finally {
+    globalThis.fetch = real;
+  }
+}
+
+test('a fresh census answers the panel from disk, with no request at all', async () => {
+  const rows = [
+    censusRow('acme/calendar-mcp', { stars: 90, description: 'A calendar MCP server.' }),
+    censusRow('acme/other-mcp', { stars: 500 }),
+    censusRow('acme/third-mcp', { stars: 10, title: 'third-mcp' }),
+  ];
+  const files = { 'github-index.json': censusDocument(rows, { at: new Date().toISOString() }) };
+  let requests = 0;
+  await withFetchStub(async () => { requests += 1; throw new Error('no network in this test'); }, async () => {
+    await withHost(FIXTURE, async ({ call }) => {
+      const all = await call('/api/overall-mcp/catalog', { body: { source: 'github-mcp', limit: 100 } });
+      assert.equal(all.status, 200);
+      assert.equal(all.body.errors.length, 0);
+      assert.equal(all.body.items.length, 3);
+      // Ranked by stars, exactly as the walk stored them.
+      assert.deepEqual(all.body.items.map((i) => i.title), ['other-mcp', 'calendar-mcp', 'third-mcp']);
+      assert.equal(all.body.counts['github-mcp'], 3);
+      const source = all.body.sources['github-mcp'];
+      assert.equal(source.index.rows, 3);
+      assert.equal(source.index.stale, false);
+      assert.equal(source.index.complete, true);
+      assert.match(source.note, /^本地索引 3 行/);
+      // The listing is dated by the census, not by the moment it was read.
+      assert.equal(source.at, JSON.parse(files['github-index.json']).at);
+
+      // A query filters the *census*, not the newest 200 rows of a live search.
+      const one = await call('/api/overall-mcp/catalog', { body: { source: 'github-mcp', query: 'calendar', limit: 100 } });
+      assert.deepEqual(one.body.items.map((i) => i.id), ['github:acme/calendar-mcp']);
+
+      // …and the agent-facing tool reads the same census.
+      assert.equal(requests, 0, 'not one request: a held census is a disk read');
+    }, { files });
+  });
+});
+
+test('a stale census is served immediately, and the walk behind it starts without blocking', async () => {
+  const at = new Date(Date.now() - 40 * 3600_000).toISOString();
+  const rows = [censusRow('acme/calendar-mcp', { stars: 90 }), censusRow('acme/other-mcp', { stars: 500 })];
+  const files = { 'github-index.json': censusDocument(rows, { at }) };
+  const urls = [];
+  await withFetchStub(async (url) => {
+    urls.push(String(url));
+    throw new Error('offline: no network in this test');
+  }, async () => {
+    await withHost(FIXTURE, async ({ dir, call }) => {
+      const stale = await call('/api/overall-mcp/catalog', { body: { source: 'github-mcp', limit: 100 } });
+      // The panel got the old census with the truth written next to it, rather
+      // than a spinner (or an empty source) while a walk runs for minutes.
+      assert.equal(stale.body.items.length, 2);
+      assert.equal(stale.body.sources['github-mcp'].index.stale, true);
+      assert.match(stale.body.sources['github-mcp'].note, /待更新/);
+
+      // The walk is not awaited by the response; it is already in flight, and it
+      // writes what it learned — here, that the first request failed. A failed
+      // walk keeps the last census and says so; it does not empty the source.
+      await waitFor(async () => {
+        const text = await fs.readFile(path.join(dir, 'github-index.json'), 'utf8').catch(() => '');
+        return /请求失败/.test(text) ? text : null;
+      });
+      assert.ok(urls.some((u) => u.includes('/search/repositories')), 'the crawl asked GitHub');
+      const after = JSON.parse(await fs.readFile(path.join(dir, 'github-index.json'), 'utf8'));
+      assert.equal(after.rows.length, 2, 'the rows we already had survive a failed walk');
+      assert.match(after.partial, /请求失败/);
+      assert.equal(after.complete, false);
+    }, { files });
+  });
+});
+
+/** Poll a condition until it is truthy, or fail with the last value. */
+async function waitFor(check, { timeoutMs = 3000, everyMs = 20 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let last;
+  for (;;) {
+    last = await check();
+    if (last) return last;
+    if (Date.now() > deadline) throw new Error(`waitFor timed out; last=${JSON.stringify(last)}`);
+    await new Promise((resolve) => setTimeout(resolve, everyMs));
+  }
+}

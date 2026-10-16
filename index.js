@@ -17,7 +17,11 @@ import { BlockAssembler } from '@deepseek-ai/dsh-llm';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { describeAbout, toolNamesFor, aboutSourceLabel, needsInstructionsRead } from './lib/about.js';
 import { scanHost, mergeIntoRegistry, scannedSources, findOrphans, setMountHolder, clearMountHolder } from './lib/scanner.js';
-import { browseCatalog, catalogItemToEntry, fetchRepoStats } from './lib/catalog.js';
+import { browseCatalog, catalogItemToEntry, fetchRepoStats, searchGithubRepos } from './lib/catalog.js';
+import {
+  BASE_QUERIES, INDEX_FILE, INDEX_TTL_MS,
+  crawlGithubRepos, indexDocumentOf, indexFreshness, mergeIndexRows, needsGithubCrawl, readIndexDocument,
+} from './lib/github-index.js';
 import { createCatalogCache } from './lib/catalog-cache.js';
 import {
   SOURCES_MAX, addSourceTo, readSourcesDocument, removeSourceFrom, sourcesDocumentOf,
@@ -1023,6 +1027,79 @@ export async function apply(ctx) {
   // keeps one absurd query from occupying a cache entry (and a key) of its own.
   const CATALOG_QUERY_MAX = 200;
 
+  // ---------------------------------------------------------------------------
+  // The local GitHub index (lib/github-index.js)
+  //
+  // GitHub's search API cannot page past 1000 results per query and allows 10
+  // anonymous requests a minute, so "the MCP servers on GitHub" cannot be listed
+  // by asking. It has to be *walked* — narrowly enough to stay under the ceiling
+  // — and remembered. The walk is slow (minutes, paced to the quota) and it is
+  // derived data, so it happens in the background: a listing answers with the
+  // census we hold and says how old it is, and a stale one is refreshed behind
+  // the panel rather than in front of it.
+  // ---------------------------------------------------------------------------
+  const githubIndexFile = path.join(dir, INDEX_FILE);
+  let githubIndexDoc = null;
+  let githubIndexLoaded = false;
+  let githubIndexDamaged = null;
+  let githubCrawl = null;
+
+  /** Read the census once per process; the crawl below keeps it current. */
+  async function readGithubIndex() {
+    if (!githubIndexLoaded) {
+      const { doc, damaged } = await readIndexDocument(githubIndexFile, (file, enc) => fs.readFile(file, enc));
+      githubIndexDoc = doc;
+      githubIndexDamaged = damaged;
+      githubIndexLoaded = true;
+      if (damaged) log?.warn?.(`overall-mcp: github index damaged: ${damaged}`);
+    }
+    return githubIndexDoc;
+  }
+
+  /** The census plus its freshness, in the shape `fetchGithubMcp` reads. */
+  async function githubIndexPayload() {
+    const doc = await readGithubIndex();
+    if (!doc?.rows?.length) return null;
+    return { ...doc, ...indexFreshness(doc, { ttlMs: INDEX_TTL_MS }) };
+  }
+
+  /**
+   * Walk the census in the background, unless one is already walking or the one
+   * we hold is fresh enough. Never awaited by a request: a panel read must not
+   * wait minutes for a crawl, and a crawl that fails changes nothing except the
+   * next attempt (`derived data, already reported as stale`).
+   */
+  function maybeCrawlGithubIndex({ force = false } = {}) {
+    if (githubCrawl) return githubCrawl;
+    const held = githubIndexDoc;
+    if (!needsGithubCrawl(held, { force })) return null;
+    githubCrawl = (async () => {
+      log?.info?.('overall-mcp: walking the GitHub index');
+      const walk = await crawlGithubRepos({ search: searchGithubRepos });
+      const rows = mergeIndexRows(held?.rows ?? [], walk.rows, { at: walk.at });
+      const doc = indexDocumentOf({
+        at: walk.at,
+        rows,
+        queries: [...BASE_QUERIES],
+        requests: walk.requests,
+        complete: walk.complete,
+        partial: walk.partial || (walk.truncations.length ? walk.truncations.map((t) => t.reason).join('；') : null),
+      });
+      await writeJson(githubIndexFile, doc);
+      githubIndexDoc = doc;
+      githubIndexLoaded = true;
+      githubIndexDamaged = null;
+      log?.info?.(`overall-mcp: github index ${doc.rows.length} rows in ${walk.requests} requests (complete=${walk.complete})`);
+      return doc;
+    })()
+      .catch((err) => {
+        log?.warn?.(`overall-mcp: github index walk failed: ${String(err?.message ?? err)}`);
+        return null;
+      })
+      .finally(() => { githubCrawl = null; });
+    return githubCrawl;
+  }
+
   /** Keep a `key -> { at }` map bounded by dropping its oldest entries. */
   function evictOldest(map, max) {
     while (map.size > max) {
@@ -1099,10 +1176,15 @@ export async function apply(ctx) {
   }
   async function doBrowse({ query = '', limit = 120, source = '', refresh = false } = {}) {
     const q = typeof query === 'string' ? query.slice(0, CATALOG_QUERY_MAX) : '';
+    // The GitHub census is handed to the browse, so that source reads 1700+
+    // repositories off disk instead of 200 off the network. The crawl behind a
+    // stale one starts here and is deliberately not awaited.
+    const githubIndex = await githubIndexPayload();
+    if (!source || source === 'github-mcp') maybeCrawlGithubIndex({ force: refresh });
     // The listing is cached RAW: the installed flag depends on the registry and
     // is recomputed on every read, so installing/removing never shows a stale badge.
     const result = await browseCatalog({
-      query: q, limit, source, customSources, cache: catalogCache, force: refresh,
+      query: q, limit, source, customSources, cache: catalogCache, force: refresh, githubIndex,
     });
     // The panel says how old the listing is; with several sources that can
     // differ, so the age reported is the oldest one still standing.
@@ -1354,7 +1436,7 @@ export async function apply(ctx) {
     }),
     defineTool({
       name: 'overall_mcp_search',
-      description: 'Search public open MCP server catalogs (official modelcontextprotocol registry, Smithery, Docker MCP Catalog, awesome-remote-mcp-servers, awesome-mcp-servers) by keyword and return up to 50 installable candidates.',
+      description: 'Search public open MCP server catalogs (official modelcontextprotocol registry, Smithery, Docker MCP Catalog, GitHub repository search for MCP servers, awesome-remote-mcp-servers, awesome-mcp-servers) by keyword and return up to 50 installable candidates.',
       parameters: {
         query: { type: 'string', required: true, description: 'Search keywords, e.g. "github" or "postgres".' },
       },
@@ -1366,7 +1448,11 @@ export async function apply(ctx) {
         // words cost one walk between them. The user's own sources are part of
         // "all sources" — an agent that cannot find what they added would be
         // answering a different question than the tab they are looking at.
-        return await browseCatalog({ query, limit: 50, customSources, cache: catalogCache });
+        // The GitHub census is read here too (no request, no crawl): an agent
+        // asking about a repository ranked 900th should find it.
+        return await browseCatalog({
+          query, limit: 50, customSources, cache: catalogCache, githubIndex: await githubIndexPayload(),
+        });
       },
     }),
     defineTool({

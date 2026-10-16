@@ -1,6 +1,6 @@
 # dsh-overall-mcp
 
-**DeepSeek Harness 插件：首次安装自动扫描宿主机全部 MCP 配置并注册；实时聚合 6 个网络开放 MCP 目录共 5000+ 条目（官方 Registry / Smithery / Docker MCP Catalog / GitHub MCP / Awesome 远程 / Awesome 本地），以卡片形式浏览与一键接入。**
+**DeepSeek Harness 插件：首次安装自动扫描宿主机全部 MCP 配置并注册；实时聚合 6 个网络开放 MCP 目录共 5000+ 条目（官方 Registry / Smithery / Docker MCP Catalog / GitHub MCP / Awesome 远程 / Awesome 本地），外加一份本机的 GitHub 普查索引（实测 1758 行），以卡片形式浏览与一键接入。**
 
 简体中文
 
@@ -9,7 +9,7 @@
 | | 能力 | 说明 |
 |---|---|---|
 | 🔍 | 首装全盘扫描 | 安装后自动发现 Claude Desktop、Claude Code、Cursor、VS Code (Copilot)、Windsurf、Codex CLI、Gemini CLI 配置中的所有 MCP 服务器并自动注册 |
-| 🌐 | MCP 市场 | 自动发现市面上已有的 MCP：官方 Registry、Smithery、Docker MCP Catalog、GitHub MCP、Awesome 远程、Awesome 本地共 **6 源并行聚合，实测 5364 条**（不含 GitHub 源，它按匿名配额每次刷新发 3 个请求、再取前 200 条），无需输入关键词即可浏览，带来源筛选与搜索 |
+| 🌐 | MCP 市场 | 自动发现市面上已有的 MCP：官方 Registry、Smithery、Docker MCP Catalog、GitHub MCP、Awesome 远程、Awesome 本地共 **6 源并行聚合，实测 5364 条**（不含 GitHub 源：它**读本机普查索引，有索引时不发任何请求**，见「GitHub 普查索引」一节），无需输入关键词即可浏览，带来源筛选与搜索 |
 | ⚡ | 一键接入 | 市场条目直接安装：npm 包→`npx -y <pkg>`，Python 包→`uvx`，托管端点→streamable-http，Docker 镜像→`docker run -i --rm mcp/<name>`；社区清单条目提供仓库链接 |
 | 🛠️ | 原生工具桥接 | 启用的服务器以每服务器一个 `dsh-mcp-client` 实例挂载，工具以 `mcp__<name>__<tool>` 注册为 DSH 原生工具 |
 | 🖥️ | 侧栏页面 | 左侧导航「插件」正下方的 **全局 MCP** 入口：**已注册**（按来源分组、可折叠、分组开关、统计筛选）与 **MCP 市场**（浏览/搜索/安装）两个标签页 |
@@ -76,6 +76,7 @@ dsh plugin --profile web add ./dsh-overall-mcp
 - 统计：`N 个可用 MCP · 官方 x · Smithery y · Docker z · GitHub g · 远程 a · Awesome b · 其中 M 个已安装 · 更新于 时间`；整份列表来自缓存时时间后面缀「（缓存）」，本次有来源答 `304` 时再缀上「· N 源未变」
 - 来源筛选：全部市场 / 官方 Registry / Smithery / Docker MCP Catalog / GitHub MCP / Awesome 远程 / Awesome 清单；支持关键词搜索（关键词同样匹配安装命令，搜 `docker` 或端点域名也能命中）
 - **GitHub MCP 源（第十一轮，第十二轮补第三个查询）**：把 GitHub 自己当成一个发现源，而不再是只从别人的清单里读项目。走官方的仓库搜索 API，三个查询各发一次请求（`mcp-server in:name archived:false`、`topic:mcp-server mcp in:description archived:false`、`topic:model-context-protocol mcp in:name archived:false`，都按 Star 降序、每查 100 条、跨查询按 `owner/repo` 去重）——**匿名搜索配额是 10 次/分钟**（与核心 API 的 60 次/小时是两本账），所以这一源固化为每次浏览 3 个请求、候选 300 行、上限 200 条，`ETag` 层的 `304` 会把重复浏览变成零成本。请求必须带一个 `User-Agent`（本插件用自己的名字）：实测不带时 GitHub 的搜索接口一律回 `403` 并给出 `x-ratelimit-remaining: 0`，带上之后同一台机器同一分钟就正常返回——那不是一个能靠重试解决的问题，所以它写在请求头里而不是交给重试。三个查询回答三个问题：名字里带 `mcp-server` 的（实测 5.37 万条命中）是真的自称 MCP server；带 `mcp-server` 标签的（3.67 万条）是别人给它打的标签，**打过标签的不一定是 server**（光看标签，榜首是 n8n、gemini-cli 这些只是内置或消费 MCP 的项目），所以标签那个查询额外要求描述里出现 `mcp`，把噪声压下去（收窄后榜首是 TrendRadar、codebase-memory-mcp、github-mcp-server、serena 这类真东西）；第三个查询补上前两个都够不着的缺口——名字写成 `…-mcp` 而不是 `…-mcp-server` 的 server（`topic:model-context-protocol` 与 `mcp in:name` 求交，2.2 万条），实测它把 `codebase-memory-mcp`（4.66 万 Star）与 `mcp-for-blender`（3.09 万）捞了进来，而这两个前两个查询都返回不了（裸标签 3.67 万条的榜首是 rea、nanobot、fastmcp 这类产品与 SDK，所以照样不用裸标签）。三份答案**先合并、按 Star 排出全局前 200 再截断**：每个查询在上游各自有序，但「能找到的最好的 200 个仓库」是关于并集的事实，不是关于哪个查询先跑的事实。收窄后剩下的行照常收，卡片会显示语言、Fork、Issue 与最近推送时间，让人自己判断。这一源的行是**纯发现行**（`install: null`）：仓库列表里没有任何关于怎么运行它的信息（没有包名、没有命令），猜一个 `npx <仓库名>` 只会在卡片上放一个必然失败的按钮。有仓库、Star、Fork、Issue、语言与最近推送；要装就顺着仓库去读它自己的 README
+- **GitHub 普查索引（第十三轮）**：搜索 API 每个查询最多只能翻到 **1000 条**、匿名配额只有 10 次/分钟，所以「GitHub 上到底有多少 MCP server」用一次搜索答不出来。宿主于是把这件事从「每次浏览现搜」改成「**慢慢走一遍、把结果留在本机**」：`lib/github-index.js` 走两个形状——名字里带 `mcp` 的，以及打了 `mcp-server` 标签**且**描述里出现 `mcp` 的（裸标签的榜首是 n8n 20.7 万 Star、gemini-cli 10.7 万，实测**加 Star 下限也挡不住它们**，所以索引与实时搜索共用同一条收窄规则）——再按 **Star 窗口**切分（一个查询命中超过 1000 就用 `stars:>=X` / `stars:min..max` 收窄，上界取上一窗口的最低 Star，边界重复靠 `owner/repo` 去重），请求间隔 **6.5 秒**（给 10 次/分钟留余量）、单次最多 **48 个请求**、每个查询最多 10 页、最多 8 个窗口、Star 下限 100，走不完就停下并记下是哪一类截断。结果写 `$DSH_HOME/overall-mcp/github-index.json`，每行就是市场条目的形状（`github:` 前缀、`install: null`），带 `firstSeen` / `lastSeen`：新走到的行覆盖旧的（Star、描述跟着更新），**没走到的行不删**，只是不再刷新 `lastSeen`，连续 **30 天**没再见到才移除——所以索引是「并集」而不是「这一轮看到的全部」。读取是**零请求**的：面板每次浏览都从磁盘读，搜索关键词在**整个普查**上过滤（而不是只搜前 200 条），超过 **24 小时**算旧、宿主在**后台**重新走一遍（不阻塞这次浏览；走失败只记 `partial` 并保留上一份普查）。行里会写明它是本地索引而不是实时结果：「本地索引 1758 行・3 小时前・待更新；本次列出 200 条」，列表的时间戳用的是**普查时间**而不是读取时刻。首次运行没有索引时退回原来的三个查询实时搜索（行为不变），并在后台开始第一遍普查。索引文件损坏只记一条警告并按「没有索引」处理——它全是**派生数据**、没有用户输入，丢了只是重新走一遍，所以**不隔离**（不像 `registry.json` 那样改名留证）。单测见 `test/github-index.test.mjs`
 - **限流与瞬时错误会重试一次，缺文件不会**：上游对自己不认识的东西各有各的脾气——`hub.docker.com` 在密集抓取下会回 `403`，GitHub 搜索会回 `429`（带 `Retry-After`），偶发 `5xx` 也一样。这些**都不是**「这里没有东西」，而是「等会儿再来」，所以 `lib/catalog.js` 的 JSON 目录抓取（`fetchJson`：官方 registry、Smithery、Docker、GitHub 搜索、自定义源）对 `403/408/425/429/5xx`（以及网络层的 `fetch failed`）各重试**一次**：先等 1.5 秒，仍被拒则再等 2.5 秒，最多给一个源多花 4 秒；`404` 与其它 4xx **一次都不重试**（重试一个不存在的文件只是让人多等 2.5 秒），而**按「谁在问」给出的策略性拒绝**（Docker Hub 的匿名翻页上限：`403 pagination offset too large for anonymous requests`，见来源表）也**不重试**——等 2.5 秒不会改变策略，只会让人白等；这类答复由适配器识别后当作「列表读到这里为止」，交回已读到的条目并附一句覆盖说明。重试后仍然失败才按失败处理：该源降级、其余源不受影响；若这个源上一轮有结果，就把旧清单交回去并标 `stale`，同时把 `HTTP 403` 这样的确切原因报给面板（这一轮 Docker 源就是这么暴露出来的：它的 `hub.docker.com` 列表在连续抓取里被限流，而面板上原本只显示一个「不可用」）。两个 Awesome README 走的是镜像链（raw / jsdelivr / fastly / testingcf 四个 URL 同时竞速，见镜像链一节），它们本身就有四次机会，所以不在这条重试规则里
 - **自定义目录源**：市场不再只有编译进来的那六个来源。市场页有一块可折叠的「目录源」——内置六源列出**各自的条数与时间**，下面是你自己加的源（标签 / 地址 / 条数或错误 / 移除），底部是地址输入框 + 「添加」。宿主把它存在 `$DSH_HOME/overall-mcp/sources.json`（`{version:1, sources:[{id,label,url}]}`，写盘走临时文件 + rename；文件读不出来时面板照报原因，内置六源不受影响），**只接受 https**：地址里的安装命令会被本机执行，所以 `http://` 和带用户名口令的地址在入口就被拒；最多 8 个；重复地址报 409、非法地址报 400、删除未知 id 报 404——三种都在面板上原样显示，不吞成「失败」。源的 id 由宿主签发（`custom:<host+path 的 slug>`，≤48 字符），标签默认从地址推（GitHub raw / jsDelivr 能解析出 `owner/repo`，否则取主机名），也可以自己给。一个自定义源与内置源**完全同权**：它出现在来源下拉里、能单独筛（`/catalog?source=<id>`）、参与合并与排序，抓取同样走 ETag/304 + 60 秒 TTL，失败同样保留上一次的清单并标 `stale`（错误照报）。移除一个源只是把它从下一次抓取里拿掉，并顺手丢掉它的缓存行——正在显示的列表要等下一次刷新。这一块需要新版宿主：旧 bundle 上这里写明「需要新版宿主插件」，而不是显示成一个空列表
 - **卡片形式**呈现（与 dsh-market 插件一致）：图标（Smithery 图标 / GitHub 头像，缺失时用首字母色块）、**标题即入口**（有仓库链仓库、否则链上游官网、Smithery 条目链其目录页——与 dshmarket 卡片名一致的真锚点；卡片正文是 div 而不是 button，链接不会和点击详情打架）、标题旁**GitHub 标记**（只在 `repository` 真的是 GitHub 仓库时出现，悬停才上色）、作者行末尾的**版本**、✓认证/官方/已安装/已废弃徽标、三行描述、标签（分类 / 语言 / 部署范围 / 操作系统 / 仓库 topics）。悬停反馈通过注入的样式表实现（内联样式表达不了 :hover / keyframes / 宽度断点）：卡片描边高亮、主按钮不透明度、详情弹窗入场动画
@@ -320,7 +321,7 @@ key 就是市场卡片的 React key，因为官方 Registry 的 id 随版本变�
 | 官方 Registry | `registry.modelcontextprotocol.io/v0/servers` | 记录**按版本存储**（一条一个 version），因此全量翻页约 7242 条记录对应 2582 个 server；插件按 `_meta.io.modelcontextprotocol.registry/official.isLatest` 去重（无该标记时退到 `updatedAt`，再退到版本号），翻页后保留每个 server 的最新记录。安装信息取 `packages`（npm→`npx`，其他→`uvx`）或 `remotes`（streamable-http）；作者取 `namespace` |
 | Smithery | `registry.smithery.ai/servers` | 使用 `displayName`；`useCount`→使用次数、`iconUrl`→卡片图标、`verified`→认证徽标；安装走 `npx -y @smithery/cli run <qualifiedName>` |
 | Docker MCP Catalog | `hub.docker.com/v2/repositories/mcp/` | 约 245 个命名空间镜像，安装走 `docker run -i --rm mcp/<name>`；`pull_count`→使用次数（这个列表上比 Star 更可靠的流行度信号）；官方镜像标 ✓认证。**匿名只能读第一页**：第 2 页起上游回 `403 pagination offset too large for anonymous requests; sign in to page further`——这不是故障，而是它按「谁在问」给的答复，因此该源**不再整源降级**，而是交回已读到的 100 条并在来源行注明「匿名只放出第一页（共 245 个镜像，已取 100）——翻页需要登录」；面板的统计行会标「部分」。该 403 也不会被重试（重试 2.5 秒改变不了策略），只有真正的限流 403 才重试 |
-| GitHub MCP | `api.github.com/search/repositories`（`q=mcp-server in:name archived:false`、`q=topic:mcp-server mcp in:description archived:false`、`q=topic:model-context-protocol mcp in:name archived:false`，请求带 `User-Agent`） | 仓库**发现**源：每查 100 条、Star 降序，跨查询按 `owner/repo` 去重后再按 Star 排全局前 200；只发 `full_name/description/homepage/topics/language/stargazers_count/forks_count/open_issues_count/pushed_at/archived`，**没有任何安装信息**（所以 `install: null`，卡片只给仓库、Star/Fork/Issue、语言与最近推送）；`archived` 的行标已废弃。匿名配额 10 次/分钟 → 每次浏览固定 3 个请求、候选 300 行、上限 200 条 |
+| GitHub MCP | `api.github.com/search/repositories`（`q=mcp-server in:name archived:false`、`q=topic:mcp-server mcp in:description archived:false`、`q=topic:model-context-protocol mcp in:name archived:false`，请求带 `User-Agent`） | 仓库**发现**源：每查 100 条、Star 降序，跨查询按 `owner/repo` 去重后再按 Star 排全局前 200；只发 `full_name/description/homepage/topics/language/stargazers_count/forks_count/open_issues_count/pushed_at/archived`，**没有任何安装信息**（所以 `install: null`，卡片只给仓库、Star/Fork/Issue、语言与最近推送）；`archived` 的行标已废弃。匿名配额 10 次/分钟 → 每次浏览固定 3 个请求、候选 300 行、上限 200 条；本机**有普查索引时改读索引（0 请求、上限 800 条、关键词在全量普查上过滤）**，见下文「GitHub 普查索引」 |
 | Awesome 远程 | `raw.githubusercontent.com/punkpeye/awesome-remote-mcp-servers/main/README.md` | **托管端点**清单，条目形如 `- [标题](主页) \`https://端点/mcp\``，反引号里的 URL 可直接装成 streamable-http；🔓 免登录 / 🔐 需凭据，转成标签 |
 | Awesome 清单 | `raw.githubusercontent.com/punkpeye/awesome-mcp-servers/main/README.md` | 社区索引（200+ 条），解析 `### <emoji> <分类>` + `- [owner/repo](url) [glama 徽标] <语言/范围/系统 emoji> - 描述`；跳过 `![...]` 徽标图，取真正的仓库链接；作者/头像取 GitHub owner。仅发现 + 仓库链接（无法安全推断启动命令，显示「需手动配置」） |
 
@@ -337,6 +338,7 @@ key 就是市场卡片的 React key，因为官方 Registry 的 id 随版本变�
 - `$DSH_HOME/overall-mcp/registry.json` — 注册表（权威）。写盘走临时文件 + `rename`（不会留下半截 JSON）；解析失败时先把原文件复制成 `registry.json.corrupt-<时间戳>`，再用空注册表启动，并把原因随列表响应报给面板（`registryError`）——**不会被当成「首次运行」而覆盖**
 - `$DSH_HOME/overall-mcp/installs.json` — 本市场安装计数（键是目录条目的 `id`，无 id 时回退 `name:<服务器名>`；只在挂载成功之后 +1）
 - `$DSH_HOME/overall-mcp/scan-report.json` — 最近一次扫描报告
+- `$DSH_HOME/overall-mcp/github-index.json` — GitHub 普查索引（派生数据，删掉只会触发一次重新普查）：`{version, at, minStars, queries, requests, complete, partial, rows}`，每行是市场条目的形状 + `firstSeen`/`lastSeen`；写盘同样走临时文件 + `rename`，文件损坏只记警告并按「没有索引」处理（不隔离、不备份）
 - 市场列表每个来源各缓存 60 秒（只缓存原始数据，"已安装"标记每次读取时重新计算）；上游 URL 的 `ETag` 与正文另存一层，`304` 时复用而不重抓（详见上文 `/catalog` 的两层缓存）
 - GitHub Star 补充数据缓存 6 小时（失败结果同样缓存，避免反复冲击 GitHub 的未认证额度）
 
@@ -383,8 +385,9 @@ node tools/fixture-bad-schema-mcp.mjs                     # 故意带 `^[^\0]*$`
 | 文件 | 职责 |
 |---|---|
 | `lib/scanner.js` | 宿主机 MCP 配置扫描与规范化（纯函数） |
-| `lib/catalog.js` | 6 个远程开放目录的拉取、归一化、跨目录合并、排序与 GitHub 补充；GitHub 仓库搜索源（`fetchGithubMcp`，请求带 `User-Agent`）与限流重试（`withFastRetry`：`429/403/408/425/5xx` 与瞬时网络错误各重试一次、退避 2.5 秒，`404` 从不重试）；自定义目录源的解析（`mapCustomEntries`）与 `runSource` 的分支也在这里（纯 fetch） |
-| `lib/catalog-cache.js` | 两级缓存：URL 层的 ETag/304 复用（LRU 64 个 URL / 8MB）与来源层的 60 秒 TTL；`forgetSourceId` 用于删源后清账 |
+| `lib/catalog.js` | 6 个远程开放目录的拉取、归一化、跨目录合并、排序与 GitHub 补充；GitHub 仓库搜索源（`fetchGithubMcp`，请求带 `User-Agent`，有普查索引时改读索引）与限流重试（`withFastRetry`：`429/403/408/425/5xx` 与瞬时网络错误各重试一次、退避 2.5 秒，`404` 从不重试）；自定义目录源的解析（`mapCustomEntries`）与 `runSource` 的分支也在这里（纯 fetch） |
+| `lib/github-index.js` | GitHub 普查：按 Star 窗口切分查询、限速走页、跨窗口去重、与上一份索引合并（`firstSeen`/`lastSeen`、30 天滑出）、文件读取与损坏容错、新鲜度与 `note` 文案；纯逻辑，搜索函数由调用方注入 |
+| `lib/catalog-cache.js` | 两级缓存：URL 层的 ETag/304 复用（LRU 64 个 URL / 8MB）与来源层的 60 秒 TTL（连 `note` / `index` / `dataAt` 一起存，否则命中缓存那一次会把「本地索引 N 行」和普查时间戳吃掉）；`forgetSourceId` 用于删源后清账 |
 | `lib/custom-sources.js` | 自定义目录源的文档形状：地址校验（只收 https、拒凭据）、id 派生、标签推断、增删与读写容错 |
 | `lib/submission.js` | 投稿上行：从 issue 正文解析一条 listings 条目、校验规则、去重键，以及面板用的预填 `issues/new` 地址（`buildIssueUrl`） |
 | `lib/install-diagnosis.js` | 安装失败时的诊断文本：系统提示、条目事实抽取（不发 `env`/`headers`）、凭据遮蔽、读取模型回答（纯函数，便于单测） |
@@ -401,11 +404,12 @@ node tools/fixture-bad-schema-mcp.mjs                     # 故意带 `^[^\0]*$`
 | 官方 Registry | 8 | 800（去重后约 220 个 server） | 单页上限 100，按 `nextCursor` 翻页后按 `isLatest` 去重 |
 | Smithery | 1 | 10 | 上游列表本身只返回 10 条 |
 | Docker MCP Catalog | 3 | 300 | `hub.docker.com` 分页，`next` 为空即停；网络封锁期会 403/超时，此时该源降级、其余源不受影响；真正的限流 `403` 会先重试一次（见上节），而「匿名翻页上限」的那种 `403` 不重试、按列表读完处理并附上覆盖说明 |
-| GitHub MCP | 3 | 300（合并后取前 200） | 搜索 API 的匿名配额是 10 次/分钟，所以按**请求数**而不是页数设上限：三个查询各一次，`per_page=100`、Star 降序、跨查询去重，再把三份答案按 Star 排出全局前 200 |
+| GitHub MCP | 3 | 300（合并后取前 200） | 搜索 API 的匿名配额是 10 次/分钟，所以按**请求数**而不是页数设上限：三个查询各一次，`per_page=100`、Star 降序、跨查询去重，再把三份答案按 Star 排出全局前 200。**本机有普查索引时这一行变成 0 个请求**：改读 `github-index.json`，上限 800 条 |
+| GitHub 普查（后台） | 每 24 小时一轮，单轮 ≤48 | 索引上限 20000 行 | 按 Star 窗口切分慢慢走（见上节）：6.5 秒/请求、每查询最多 10 页、最多 8 个窗口、Star ≥100；走不完记 `partial` 并把原因写进来源行的说明。只在索引缺失或超过 24 小时时触发，且**不阻塞**当前这次浏览 |
 | Awesome 远程 | 1（+镜像链） | 1000 | 单个 README，实测 928 行；经镜像链获取（见上节） |
 | Awesome 本地 | 1（+镜像链） | 5000 | 单个 README，实测 **4224** 行；经镜像链获取（见上节） |
 
-默认一次浏览约 18 个上游请求（含 GitHub 源的 3 个；两个 Awesome README 走镜像链、以及限流重试时可能再多一两个），聚合 **5364 个去重 MCP**（2026-10 实测，不含 GitHub 源，该源另计 200 行），结果按来源各缓存 60 秒；单来源筛选时只请求该来源。**这些请求里，重复浏览时绝大多数会变成 `304`**（正文不重传），而 60 秒内的第二次浏览一个请求都不发。
+默认一次浏览约 18 个上游请求（含 GitHub 源的 3 个——**本机有普查索引时这一项是 0**，索引的抓取在后台另算；两个 Awesome README 走镜像链、以及限流重试时可能再多一两个），聚合 **5364 个去重 MCP**（2026-10 实测，不含 GitHub 源；该源在索引模式下另计最多 800 行），结果按来源各缓存 60 秒；单来源筛选时只请求该来源。**这些请求里，重复浏览时绝大多数会变成 `304`**（正文不重传），而 60 秒内的第二次浏览一个请求都不发。
 
 > 两个 Awesome 清单必须整份读取：它们合计约 5150 条，而读取其中 200 条与读取整份的请求数完全相同（都是 1 次）——之前市场只有 551 条，正是因为把社区清单截断到了 200。
 

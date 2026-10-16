@@ -94,13 +94,15 @@ const MARKET = {
     'official-registry': { at: new Date().toISOString(), cached: true, stale: false, notModified: 1, items: 1 },
     'awesome-list': { at: new Date().toISOString(), cached: true, stale: false, notModified: 1, items: 1 },
     'awesome-remote': { at: new Date().toISOString(), cached: false, stale: false, notModified: 0, items: 1 },
-    // The GitHub search source contributed rows, and Docker answered nothing:
-    // a rate limit has to be visible as a reason, not as a bare zero.
+    // The GitHub census contributed rows, and Docker answered nothing: a rate
+    // limit has to be visible as a reason, not as a bare zero.
     // GitHub also carries a coverage note here, so the panel's "部分" marker and
-    // the reason behind it are both exercised by this probe.
+    // the reason behind it — how big the census is, how old, and how much of it
+    // this listing took — are all exercised by this probe.
     'github-mcp': {
       at: new Date().toISOString(), cached: false, stale: false, notModified: 0, items: 2,
-      note: 'Docker Hub 匿名只放出第一页（共 245 个镜像，已取 100）——翻页需要登录。',
+      note: '本地索引 1758 行・3 小时前；本次列出 2 条',
+      index: { rows: 1758, matched: 2, at: new Date().toISOString(), ageMs: 3 * 3600_000, stale: false, complete: true, partial: null },
     },
     'docker-catalog': { error: 'HTTP 403' },
   },
@@ -432,8 +434,11 @@ assert.ok(sourceText.includes('其中 1 个已安装'), 'per-source line names t
   // nothing shows the reason — a bare `0` would read as "this catalog is empty".
   assert.ok(rowText.includes('GitHub MCP 2'), `the GitHub source and its row count are on the line (got ${rowText})`);
   // A source that only read part of its list says so beside the count: the
-  // number alone would overstate what the market actually holds.
-  assert.ok(rowText.includes('匿名只放出第一页'), `a source's own coverage note is shown (got ${rowText})`);
+  // number alone would overstate what the market actually holds. For the GitHub
+  // census that means the size of the census and its age, not just the slice.
+  assert.ok(rowText.includes('本地索引 1758 行'), `the census size is on the line, not only the slice (got ${rowText})`);
+  assert.ok(rowText.includes('3 小时前'), 'and how old it is');
+  assert.ok(rowText.includes('本次列出 2 条'), 'and how much of it this listing took');
   assert.ok(rowText.includes('Docker MCP Catalog 不可用：HTTP 403'), `a failed source shows why (got ${rowText})`);
   assert.ok(textOf(srcSelect).includes('GitHub MCP'), 'and the new source is offered as a filter');
   assert.ok(rowText.includes('最多 8 个'), 'the cap and the https rule are stated where the URL is typed');
