@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/YunzhouLi-hub/dsh-overall-mcp/main/docs/images/icon.png" width="112" height="112" alt="Overall MCP：一个蓝色中心连着五个卫星点">
+ <img src="https://raw.githubusercontent.com/YunzhouLi-hub/dsh-overall-mcp/main/docs/images/icon.png" width="112" height="112" alt="Overall MCP：一个蓝色中心连着五个卫星点">
 </p>
 
 <h1 align="center">dsh-overall-mcp</h1>
@@ -7,10 +7,12 @@
 <p align="center"><a href="README.md">English</a> | 中文</p>
 
 <p align="center">
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.5.0-4d6bfe" alt="version 0.5.0"></a>
+ <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.5.0-4d6bfe" alt="version 0.5.0"></a>
 </p>
 
 **DeepSeek Harness 插件：首次安装自动扫描宿主机全部 MCP 配置并注册；实时聚合 6 个网络开放 MCP 目录共 5000+ 条目（官方 Registry / Smithery / Docker MCP Catalog / GitHub MCP / Awesome 远程 / Awesome 本地），外加一份本机的 GitHub 普查索引（实测 1758 行），并把这些仓库里能从证据恢复出来的安装命令带上出处补进行里，以卡片形式浏览与一键接入。**
+
+每一轮改动背后的推理、实测数字与被否掉的替代方案记在 [docs/ENGINEERING.zh-CN.md](https://github.com/YunzhouLi-hub/dsh-overall-mcp/blob/main/docs/ENGINEERING.zh-CN.md)：README 讲它做什么，那份文件讲它怎么变成这样的。
 
 ## 界面预览
 
@@ -42,10 +44,10 @@
 | 🪪 | 身份行 | 页头第二行写清**这个面板此刻在跑哪份代码**：插件版本、`pid`、已运行时长、能读到的数据文件数、日志条数；磁盘上的代码比进程新时另挂一颗「⚠ 代码已更新，重启 DSH 后生效」——「还是坏的」和「还没载入」从此不是同一句话（`GET /status`） |
 | 🧾 | 动作日志 | 宿主把自己的动作写进 `events.ndjson`（浏览/各源成败/配额/扫描/普查/证据/安装是否挂上/更新/挂载/注册表修复），页头「运行日志」一键展开；只记元数据，不记密钥，最多留最近 400 行 |
 | 🔑 | GitHub 凭据与普查续跑 | 面板上可填 token（或一键取 `gh auth token`），校验通过才生效、只发给 GitHub 主机；**匿名照样能普查**，只是配额从 5000 次/小时降到 60 次/小时。一次网络失败不再终结整场普查（按仓库重试 + 退避 + 连续被拒才收工），并且下一次普查从断点继续（`GET\|POST\|DELETE /auth`） |
-| ⏯️ | 普查手动启停 | 「已注册」页的 GitHub 访问卡里直接写普查状态（索引多少行、上次读到什么时候、谁停的），并按状态给动词：没在跑是「开始普查」（不等缓存过期），在跑是「停止普查」并显示进度。停止是安全的——已收到的行边收边落盘，下次从缺的仓库接着走，且不会再顺带花额度去抓安装证据（`GET\|POST /census`，第二十二轮） |
-| 🔧 | 恢复走查手动启停 | 同一张卡里，**第二趟走查**（读仓库证据恢复安装命令）有自己的状态行与动词：`查过 N 个仓库 · 恢复出 M 条安装命令`，还有剩的就写「接着恢复」，跑起来了就写「停止恢复」并报「已试 N / M 个仓库」。此前它只在打开市场时自己开始、只能靠卸载插件停下——而它跑满一轮是 150ms × 两千多个仓库（`GET\|POST /install-evidence`，第二十三轮） |
-| 🗂️ | 本地普查也能当来源看 | 来源筛选里 `本地普查（索引）` 就排在 `GitHub` 右边：读的是同一份本机索引，但**一次请求都不发**，也不会因为索引过期就顺手走一遍。它不是一个新来源（条数仍算在 GitHub 那一个里，一个上游一个数字），只是让「我在看本机已有的清单，不是刚去 GitHub 问的」成为一个可以选的动作（`?source=census`，第二十四轮） |
-| 🧮 | 数字与时间都写明口径 | 每源条数与「共 N 条」用同一把尺子（去重后计入本页，`deduped` 单列）；「列表读取于」是本地读目录的时间、「上游更新于」是仓库最近一次 push，两者不再共用一个「更新于」；按使用量排序时没有使用量数据的卡片直接写「无使用量数据」而不是静默按质量分排；推断出来的分类在卡片、详情与分类下拉里都带「（推断）」（第二十轮） |
+| ⏯️ | 普查手动启停 | 「已注册」页的 GitHub 访问卡里直接写普查状态（索引多少行、上次读到什么时候、谁停的），并按状态给动词：没在跑是「开始普查」（不等缓存过期），在跑是「停止普查」并显示进度。停止是安全的——已收到的行边收边落盘，下次从缺的仓库接着走，且不会再顺带花额度去抓安装证据（`GET\|POST /census`） |
+| 🔧 | 恢复走查手动启停 | 同一张卡里，**第二趟走查**（读仓库证据恢复安装命令）有自己的状态行与动词：`查过 N 个仓库 · 恢复出 M 条安装命令`，还有剩的就写「接着恢复」，跑起来了就写「停止恢复」并报「已试 N / M 个仓库」。此前它只在打开市场时自己开始、只能靠卸载插件停下——而它跑满一轮是 150ms × 两千多个仓库（`GET\|POST /install-evidence`） |
+| 🗂️ | 本地普查也能当来源看 | 来源筛选里 `本地普查（索引）` 就排在 `GitHub` 右边：读的是同一份本机索引，但**一次请求都不发**，也不会因为索引过期就顺手走一遍。它不是一个新来源（条数仍算在 GitHub 那一个里，一个上游一个数字），只是让「我在看本机已有的清单，不是刚去 GitHub 问的」成为一个可以选的动作（`?source=census`） |
+| 🧮 | 数字与时间都写明口径 | 每源条数与「共 N 条」用同一把尺子（去重后计入本页，`deduped` 单列）；「列表读取于」是本地读目录的时间、「上游更新于」是仓库最近一次 push，两者不再共用一个「更新于」；按使用量排序时没有使用量数据的卡片直接写「无使用量数据」而不是静默按质量分排；推断出来的分类在卡片、详情与分类下拉里都带「（推断）」 |
 
 ## 快速开始
 
@@ -63,56 +65,56 @@ dsh plugin --profile web add ./dsh-overall-mcp
 - 筛选：来源下拉、状态下拉（已启用/已停用/已连接/连接异常）、名称搜索
 - 分组：按导入来源聚合（Claude Desktop / Claude Code / Cursor / VS Code / Windsurf / Codex CLI / Gemini CLI / 官方 Registry …），每组显示数量与"已启用"计数，右侧总开关批量启停，点击组头折叠/展开
 - 每行：连接状态点、名称、**用途行**、事实行（传输方式 · 状态 · 工具数 · 工具前缀 `mcp__<serverName>__` · 包名版本）、启用/停用、移除
-- **写者串行、原子落盘、工具说真话（第十二轮）**：这一轮修的是「宿主自己的账本」——审核时发现的都是同一类问题：**文档/工具描述说的和代码做的不一致，而失败的样子和成功长得一样**。
-  1. **一次只让一个写者改注册表**：宿主每个「读整份注册表 → await（扫盘 / 起 npx / 查 npm）→ 写回」的动作（扫描、安装、启停、来源总开关、移除、清理来源已删除、检查更新、更新、收藏）现在排在同一条 promise 队列上（`serialized()`，`index.js`）。交错的两次「读-改-写」会让后一次写回它开始时的快照，把前一次的改动丢掉（例如一次早于安装开始的扫描，结束后会把刚装的那条覆盖掉）。读路径（列表、市场）不进队列，仍然并行。
-  2. **落盘走临时文件 + rename**（`writeJson`）：原来注册表是就地 `writeFile`，写一半崩掉就留下半截 JSON——而这是唯一一份「丢了就所有服务器都挂不上」的文件（`lib/installs.js` 早就用了临时文件 + rename，注册表反而是漏的那个）。
-  3. **坏文件不再被当成首次运行**：`readJson` 的「解析失败 → 返回空」换成 `readRegistryDocument()` 的三态——没有文件（真正的首次运行）、**解析失败（损坏）**、正常文档。损坏时先把原文件复制成 `registry.json.corrupt-<时间戳>`，再把原因随每个列表响应带给面板，在页签上方显示一行红字。旧行为下「读不出来」和「你从没加过服务器」完全一样，而随后的第一次保存会把用户唯一的一份覆盖成空注册表。
-  4. **扫描不再清空收藏**：`favorites` 和 `servers` 在同一个文档里，而 `mergeIntoRegistry` 只返回 `{version, servers}`，调用方又保存它的返回值——一次扫描就会把所有星标清掉。现在它保留自己不负责的顶层键（单测 `mergeIntoRegistry keeps the document keys a scan does not own`）。
-  5. **安装不覆盖手工条目**：`source: manual`（或没有 source）的行是用户自己写的配置，扫描器一直保护它，只有「从市场安装」这条路会把它连同命令、args、env 一起替换掉，还回报成功。现在冲突返回 **409**，要用 `overwrite: true` 明说；`overall_mcp_install` 与 `/install` 都接受这个参数。
-  6. **失败安装不计数**：「本市场 N 次」现在只在**挂载成功之后** +1。进了注册表但没挂起来的条目仍然留着（用户能修好再重试），但返回体会带 `counted: false` 和一句说明，而不是像成功一样回答。
-  7. **来源总开关按名字收敛**（`syncFiber`）：关掉一个来源时，同名条目可能还属于别的来源，那个来源没关就不该把它的 fiber 拿走。旧循环逐行断开再逐行重连，会把不属于这个来源的同名行的工具一起带走。
-  8. **工具描述与参数对齐代码**（`overall_mcp_scan` 不再声称「同名不同契约会改名导入，绝不覆盖」——改名导入早在 `820641c` 就删了，现在是同名原地更新、手工条目不动）；`overall_mcp_update` 补上 `slot`/`from`，而且**同名不唯一时报错而不是取第一条**（此前只有面板能指明是哪一行，agent 只能猜，更新错行的结果还回报「无需更新」）；`overall_mcp_remove` 的「不带 `slot` 就删第一条」改成同一套 409 语义。
-  9. **宿主契约有了单测**：`test/index.test.mjs` 用假宿主跑 `apply(ctx)`（mount 必定失败，正好走容错路径），覆盖路由/工具面、同名行的拒绝与 `slot` 命中、手工条目 409 与 `overwrite`、失败安装不计数、损坏注册表被隔离并上报、安装失败时的诊断（问到 / 问不到 / 没有路由 / 没有模型四种）、以及工具参数与文案。三个宿主 peer 依赖（`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-mcp-client`、`@deepseek-ai/dsh-llm`）本仓库不安装，由 `test/hooks.mjs` 映射到 `test/stubs/`；每个用例一个临时 `DSH_HOME`，绝不碰真实 `~/.dsh`。`package.json` 的 `test` 脚本是显式文件列表，这个文件也已列进去（否则新增测试会被静默跳过）。
-  10. **面板能看见注册表坏掉**：`registryError` 随 `/servers` 返回，页签上方显示「⚠ 注册表文件无法解析（…），本次以空注册表启动；原文件已备份为 registry.json.corrupt-…」——空的列表不再等于「你从没加过服务器」。
-- **用途行（第十一轮）**：用户要求「MCP下载好之后后面的应该是解释这个MCP的作用」——一行只说 `stdio · 已连接 · 工具前缀 mcp__x__` 等于没说它是干什么的。宿主现在按**证据强度**取一句人话（`lib/about.js`，上限 150 字符、渲染两行）：
-  1. **服务器自己的说明**（`source: 'server'`）：MCP `initialize` 结果里的 `instructions`。dsh-mcp-client 把它**原样**发布成 system prompt 的 `mcp:<serverName>` 节（`### MCP server: <name>` 前缀由它加，宿主会剥掉），所以宿主只要 `ctx.inject(['systemPrompt'])` + `assemble({})` 把这一段读回来，就是服务器自我介绍的原话——不是我们从名字猜的；
-  2. **已注册的工具**（`source: 'tools'`）：服务器没写说明时的兜底，形如「工具：search、fetch、describe 等 4 个」（`ctx.tools.schemas()` 按 `mcp__<serverName>__` 前缀筛出）；
-  3. **启动命令**（`source: 'command'`）：还没连上过的条目至少能看到将要运行什么。
-  三者的取舍写在 `describeAbout()` 里，来源用 `aboutSourceLabel()` 标注成用途行的 `title`（「来自服务器自身的说明（MCP initialize）」/「根据该服务器已注册的工具推断」/「尚未连接，显示启动命令」），**不把推断伪装成事实**；三样都没有（连名字都推不出 serverName）就**不显示**这一行，而不是编一句。`lib/about.js` 还会剥掉行内 markdown（`###`、`**`、反引号、图片），跳过 `Tools:` 这类标签行与纯图片行——`instructions` 常常整段是 markdown 文档，第一段往往只是它的标题。
-  重读规则（`needsInstructionsRead()`，单测 + 探针都钉住）：dsh-mcp-client **只在服务器连接期间**发布该节，所以「没找到」不能当成最终结论缓存——否则第一次读到的是启动命令、连上之后也永远不会换成服务器自己的说明。宿主记下**上次读取时该服务器的存活状态**，只有状态翻转（或从未读过）才重新 `assemble()`；`source: 'server'` 即终态，`tools`/`command` 只在服务器存活时按 30 秒节流重试，停用的服务器不再产生任何读取。宿主日志里每次补齐都会留一行 `overall-mcp: purpose lines — server N, tools M, command K`，用来核对每台服务器实际命中的是哪一种证据。探针：`tools/probe-server-about.mjs`（离屏渲染三行，断言用途行在事实行之前、被 clamp、`title` 与证据一致）
+- **写者串行、原子落盘、工具说真话**：这一轮修的是「宿主自己的账本」——审核时发现的都是同一类问题：**文档/工具描述说的和代码做的不一致，而失败的样子和成功长得一样**。
+ 1. **一次只让一个写者改注册表**：宿主每个「读整份注册表 → await（扫盘 / 起 npx / 查 npm）→ 写回」的动作（扫描、安装、启停、来源总开关、移除、清理来源已删除、检查更新、更新、收藏）现在排在同一条 promise 队列上（`serialized()`，`index.js`）。交错的两次「读-改-写」会让后一次写回它开始时的快照，把前一次的改动丢掉（例如一次早于安装开始的扫描，结束后会把刚装的那条覆盖掉）。读路径（列表、市场）不进队列，仍然并行。
+ 2. **落盘走临时文件 + rename**（`writeJson`）：原来注册表是就地 `writeFile`，写一半崩掉就留下半截 JSON——而这是唯一一份「丢了就所有服务器都挂不上」的文件（`lib/installs.js` 早就用了临时文件 + rename，注册表反而是漏的那个）。
+ 3. **坏文件不再被当成首次运行**：`readJson` 的「解析失败 → 返回空」换成 `readRegistryDocument()` 的三态——没有文件（真正的首次运行）、**解析失败（损坏）**、正常文档。损坏时先把原文件复制成 `registry.json.corrupt-<时间戳>`，再把原因随每个列表响应带给面板，在页签上方显示一行红字。旧行为下「读不出来」和「你从没加过服务器」完全一样，而随后的第一次保存会把用户唯一的一份覆盖成空注册表。
+ 4. **扫描不再清空收藏**：`favorites` 和 `servers` 在同一个文档里，而 `mergeIntoRegistry` 只返回 `{version, servers}`，调用方又保存它的返回值——一次扫描就会把所有星标清掉。现在它保留自己不负责的顶层键（单测 `mergeIntoRegistry keeps the document keys a scan does not own`）。
+ 5. **安装不覆盖手工条目**：`source: manual`（或没有 source）的行是用户自己写的配置，扫描器一直保护它，只有「从市场安装」这条路会把它连同命令、args、env 一起替换掉，还回报成功。现在冲突返回 **409**，要用 `overwrite: true` 明说；`overall_mcp_install` 与 `/install` 都接受这个参数。
+ 6. **失败安装不计数**：「本市场 N 次」现在只在**挂载成功之后** +1。进了注册表但没挂起来的条目仍然留着（用户能修好再重试），但返回体会带 `counted: false` 和一句说明，而不是像成功一样回答。
+ 7. **来源总开关按名字收敛**（`syncFiber`）：关掉一个来源时，同名条目可能还属于别的来源，那个来源没关就不该把它的 fiber 拿走。旧循环逐行断开再逐行重连，会把不属于这个来源的同名行的工具一起带走。
+ 8. **工具描述与参数对齐代码**（`overall_mcp_scan` 不再声称「同名不同契约会改名导入，绝不覆盖」——改名导入早在 `820641c` 就删了，现在是同名原地更新、手工条目不动）；`overall_mcp_update` 补上 `slot`/`from`，而且**同名不唯一时报错而不是取第一条**（此前只有面板能指明是哪一行，agent 只能猜，更新错行的结果还回报「无需更新」）；`overall_mcp_remove` 的「不带 `slot` 就删第一条」改成同一套 409 语义。
+ 9. **宿主契约有了单测**：`test/index.test.mjs` 用假宿主跑 `apply(ctx)`（mount 必定失败，正好走容错路径），覆盖路由/工具面、同名行的拒绝与 `slot` 命中、手工条目 409 与 `overwrite`、失败安装不计数、损坏注册表被隔离并上报、安装失败时的诊断（问到 / 问不到 / 没有路由 / 没有模型四种）、以及工具参数与文案。三个宿主 peer 依赖（`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-mcp-client`、`@deepseek-ai/dsh-llm`）本仓库不安装，由 `test/hooks.mjs` 映射到 `test/stubs/`；每个用例一个临时 `DSH_HOME`，绝不碰真实 `~/.dsh`。`package.json` 的 `test` 脚本是显式文件列表，这个文件也已列进去（否则新增测试会被静默跳过）。
+ 10. **面板能看见注册表坏掉**：`registryError` 随 `/servers` 返回，页签上方显示「⚠ 注册表文件无法解析（…），本次以空注册表启动；原文件已备份为 registry.json.corrupt-…」——空的列表不再等于「你从没加过服务器」。
+- **用途行**：用户要求「MCP下载好之后后面的应该是解释这个MCP的作用」——一行只说 `stdio · 已连接 · 工具前缀 mcp__x__` 等于没说它是干什么的。宿主现在按**证据强度**取一句人话（`lib/about.js`，上限 150 字符、渲染两行）：
+ 1. **服务器自己的说明**（`source: 'server'`）：MCP `initialize` 结果里的 `instructions`。dsh-mcp-client 把它**原样**发布成 system prompt 的 `mcp:<serverName>` 节（`### MCP server: <name>` 前缀由它加，宿主会剥掉），所以宿主只要 `ctx.inject(['systemPrompt'])` + `assemble({})` 把这一段读回来，就是服务器自我介绍的原话——不是我们从名字猜的；
+ 2. **已注册的工具**（`source: 'tools'`）：服务器没写说明时的兜底，形如「工具：search、fetch、describe 等 4 个」（`ctx.tools.schemas()` 按 `mcp__<serverName>__` 前缀筛出）；
+ 3. **启动命令**（`source: 'command'`）：还没连上过的条目至少能看到将要运行什么。
+ 三者的取舍写在 `describeAbout()` 里，来源用 `aboutSourceLabel()` 标注成用途行的 `title`（「来自服务器自身的说明（MCP initialize）」/「根据该服务器已注册的工具推断」/「尚未连接，显示启动命令」），**不把推断伪装成事实**；三样都没有（连名字都推不出 serverName）就**不显示**这一行，而不是编一句。`lib/about.js` 还会剥掉行内 markdown（`###`、`**`、反引号、图片），跳过 `Tools:` 这类标签行与纯图片行——`instructions` 常常整段是 markdown 文档，第一段往往只是它的标题。
+ 重读规则（`needsInstructionsRead()`，单测 + 探针都钉住）：dsh-mcp-client **只在服务器连接期间**发布该节，所以「没找到」不能当成最终结论缓存——否则第一次读到的是启动命令、连上之后也永远不会换成服务器自己的说明。宿主记下**上次读取时该服务器的存活状态**，只有状态翻转（或从未读过）才重新 `assemble()`；`source: 'server'` 即终态，`tools`/`command` 只在服务器存活时按 30 秒节流重试，停用的服务器不再产生任何读取。宿主日志里每次补齐都会留一行 `overall-mcp: purpose lines — server N, tools M, command K`，用来核对每台服务器实际命中的是哪一种证据。探针：`tools/probe-server-about.mjs`（离屏渲染三行，断言用途行在事实行之前、被 clamp、`title` 与证据一致）
 
 ### 「MCP 市场」标签页（自动发现市面上的 MCP）
 
 - 打开即自动拉取**整份市场列表**（全部 ~5.4k 条一次载入：上游成本与小切片完全相同，本地载荷 ~3MB；每个来源各 60 秒 TTL，可手动「刷新」）
-- **抓取本身是有条件的**：每个上游 URL 记住自己上一次的 `ETag`，下一次带 `If-None-Match` 去问；上游答 `304` 就直接复用本地那份正文，连 JSON 都不重新解析（GitHub raw / jsDelivr / 官方 registry / Smithery / Docker 都支持）。源级 TTL 内连问都不问；TTL 过了才去问，而问的结果又常常是 `304`。元信息行会把这件事实写出来：`列表读取于 12:34:56（缓存）· 3 源未变`——否则「刚刷新过」和「问了、上游说没变」在界面上长得一模一样（第二十轮起写「列表读取于」而不是「更新于」：这一行说的是本地读目录的时间，条目在仓库里什么时候更新过是另一回事，见「界面口径与并发」）
+- **抓取本身是有条件的**：每个上游 URL 记住自己上一次的 `ETag`，下一次带 `If-None-Match` 去问；上游答 `304` 就直接复用本地那份正文，连 JSON 都不重新解析（GitHub raw / jsDelivr / 官方 registry / Smithery / Docker 都支持）。源级 TTL 内连问都不问；TTL 过了才去问，而问的结果又常常是 `304`。元信息行会把这件事实写出来：`列表读取于 12:34:56（缓存）· 3 源未变`——否则「刚刷新过」和「问了、上游说没变」在界面上长得一模一样
 - 抓取**失败时保留上一次的那份列表**（标 `stale`，条目照常可用），同时把错误照报给界面；冷启动失败才真的报空。上游抽风不该让整个市场页变空
 - 总数以紧凑形式显示：`5.3k 个可用 MCP`（5364 → 5.3k，**截断而非四舍五入**，避免标题数大于真实条数）
 - **市场页三段式 chrome**（按 v4 原型）：① 一整行搜索胶囊（🔍 + 输入框 + 右侧「搜索」按钮，回车即搜）；② 分类 chip 行（可横向滚动）+ 同一行右端的紧凑筛选控件（来源下拉 / 排序下拉 / 刷新，描边小按钮样式，不是大蓝块）；③ 灰字元信息行 `5.3k 个可用 MCP · 第 1 / 1 页 · 每页 20 条`，右端是缓存时间；各来源条数与已安装数退到下面一行更轻的灰字——控件是一行，数字是另一行，互不挤占
 - 统计：各来源条数 · 已安装数 · 当前页码 · 缓存时间。各来源那一行现在带**每个源自己的时间与状态**（`官方 800（12:03）· acme/mcp-registry 42（缓存 12:01）· …`）：每个源有自己的 TTL 和验证器，所以它们是**各自变旧**的，一个时间戳说不清五份上游
 - **排序**（用户自选，切换即生效，不重新请求上游）：
-  - `默认（综合推荐）` — 质量分：已认证(400) > 官方(300) > 可安装(120)，再加 log 量纲的流行度（`installs` 与 Star 各最多 +200）；已废弃 −500
-  - `质量最高` — 与默认**同一个**加权分。下拉把它单列，是为了让标签承诺的排序真的被应用，而不是一个和默认同序的空选项
-  - `使用量最多` — 按**合并后的使用量**倒序：Smithery 的调用次数 + Docker 的拉取次数 + 本面板的安装次数。三者单位不同（`lib/catalog.js` 自己也标注为不可比），因此它只是热度参考；下拉的悬停提示与列表上方的提示行都写明了这一点
-  - `Star 最多` — 按 GitHub Star 倒序
-  - `最近更新` — 按 `updatedAt` 倒序
-  - `名称 A→Z`
+ - `默认（综合推荐）` — 质量分：已认证(400) > 官方(300) > 可安装(120)，再加 log 量纲的流行度（`installs` 与 Star 各最多 +200）；已废弃 −500
+ - `质量最高` — 与默认**同一个**加权分。下拉把它单列，是为了让标签承诺的排序真的被应用，而不是一个和默认同序的空选项
+ - `使用量最多` — 按**合并后的使用量**倒序：Smithery 的调用次数 + Docker 的拉取次数 + 本面板的安装次数。三者单位不同（`lib/catalog.js` 自己也标注为不可比），因此它只是热度参考；下拉的悬停提示与列表上方的提示行都写明了这一点
+ - `Star 最多` — 按 GitHub Star 倒序
+ - `最近更新` — 按 `updatedAt` 倒序
+ - `名称 A→Z`
 - **分页**：每页 20 / 50 / 100 条三档可切，带「« 首页 / ‹ 上一页 / n / N / 下一页 › / 末页 »」。5364 条在每页 20 下为 20 页、50 下 8 页、100 下 4 页
 - **功能分类**（下拉选择，不是 chip 行）：筛选行左端是「分类 + 下拉」——「全部分类 (N)」开头（总数只在它上面显示），随后是功能组（不带数量、仍按数量降序排列），「未分类」收尾；右端是来源 / 排序 / 刷新，用 `margin-left:auto` 贴到行尾，所以分类与筛选之间是行内的空白而不是固定的 8px。19 个功能组放不进一行：早先的横向滚动 chip 行永远有一半看不见，换成换行的 chip 行又会撑出三行「表单感」，因此改成原生下拉。75 个上游 `###` 标题（两清单合计，含同义异名如 Finance / Finance & Fintech、两个 Multimedia）归并为 **19 个功能组**（金融支付、开发工具、办公协作、搜索与知识、营销与客户、多媒体创作、数据与存储、安全与身份、聚合网关、出行与生活、商业与法律、云与运维、其他、社交媒体、自然环境、浏览器自动化、医疗健康、游戏娱乐、语音与语言）。归并在宿主完成（`group` 字段），上游原标题保留在条目上（`category` + 卡片第一个标签）用于溯源；未映射的新标题兜底进「其他」而非消失；三个 registry 不发布类目，其条目归入「未分类」桶；合并记录时类目跟随存活（Smithery 赢得合并的条目仍能按功能组筛出）
 - 排序、分类与分页都是**视图层**行为：宿主一次返回整份列表，翻页/换排序/切分类不产生任何上游请求- 任一字段缺失的条目不会因此排到最后——缺失不等于 0：有数字的条目优先于无数字的，两者皆无时回落到质量分
-- **「未分类」为什么这么多，以及怎么减少**（第十轮）：六个来源里只有两个社区清单带类目（它们的 `###` 标题），**Smithery 与官方 registry 一个类目字段都不发**——实测（2026-10-14）Smithery `/servers` 只发 `id, qualifiedName, namespace, slug, displayName, description, iconUrl, verified, useCount, remote, isDeployed, unlisted, inactive, createdAt, homepage, bySmithery, owner, score`，官方 `/v0/servers` 只发 `name, description, title, version, remotes, packages`。这两类合计 233 条（约 5.4k 条里的 4%），但默认「综合推荐」排序恰好把它们排在第一页（官方 + 认证的 Smithery 条目质量分最高），所以首屏曾经 100% 是「未分类」。现在宿主对**没有上游类目**的条目做一次**关键词推断**（`lib/catalog.js` 的 `inferGroupOf`：19 组词表 + 标题双权重 + 词组越长越优先，`\b` 只加在词首以免 `\bspreadsheet\b` 匹配不到 `spreadsheets`；刻意不收 `server` 这种词——每条都是 MCP server，会把「招聘」的 DevMatch 拖进「云与运维」）。实测官方 registry 抽样 100 条里 **78 条**得到分类、Smithery 10/10；匹配不到的仍然老实显示「未分类」（`其他` 的语义是「上游说了但我们归不了」，与「我们不知道」不同）。推断结果带 `groupSource:'inferred'`，卡片胶囊的悬停提示写「分类（按名称与描述推断）：…」，绝不把我们的判断伪装成上游事实。单测见 `test/catalog.test.mjs`（真实条目做样本：Brave Search→搜索与知识、Gmail/Google Sheets→办公协作、DevMatch→商业与法律、匹配不到→未分类）
-- **本市场安装计数**（第十轮）：上游的使用量只覆盖 Smithery（`useCount`→次启动）与 Docker（`pull_count`→次拉取），谁都不统计「从本面板装的」。用户要求「下载量以后从我们市场下载的也要统计一下」，因此宿主新增 `lib/installs.js`，把每次**成功**安装记到 `$DSH_HOME/overall-mcp/installs.json`（键就是目录条目的 `id`，和卡片、收藏、安装按钮用的是同一个；无 id 时回退成 `name:<服务器名>`；写盘走临时文件 + rename，缺文件/坏文件都退化成「还没装过」而不是抛错）。面板上它是**第二条序列**：卡片统计行显示「⤓ 3 本市场」（悬停给出最近一次安装日期），详情面板有「本市场安装」一行；只有当**排序**用「使用量最多」时两者才相加（`usageOf()`），因为那个问题问的是「这东西有多常用」，而对那 233 条上游不发数字的条目来说，我们自己的安装就是唯一的证据。单测见 `test/installs.test.mjs`（计数递增/首次时间不动/坏文件容错/键回退/写读往返 + 不留临时文件）
-- **卡片墙是「行优先」的等宽网格，不是多列瀑布流**（第九轮）：`column-count` 的多列墙是**竖着**铺的（先把第 1 列填到底再开第 2 列），于是排好序的列表读起来是「顺着每列往下」——用户选了「使用量最多」后横向扫一眼看到 87.5k / 9.1k / 无数据，就断定排序没生效（实际每列内部都是降序，第三个来源根本没发布使用量），并明确要求「应该是从左到右排序而不是从上到下的排序，这样第三列都是最后的」。现在 `.omkt-grid` 是 `display:grid` + `grid-template-columns:repeat(N, minmax(0,1fr))`（N 由容器查询给出，内联的 `repeat(2, …)` 是没有容器支持时的兜底），卡片按行从左到右铺、名次 `#1` 落在左上角。两个要点：① 必须是 `minmax(0,1fr)` 而不是裸 `1fr`（裸 `1fr` 会被最宽卡片的 min-content 顶开，墙的最小内容宽度从 12082px 降到 14px）；② 行的对齐**不是** `align-items:start`——那样一行的矮卡片下面会留个洞（fixture 里那张超高卡片留了 300px），所以用默认的 `stretch` 把整行拉齐，再由卡片自己的 `grid-template-rows:1fr auto` 把富余高度放在正文与页脚之间，页脚始终贴在卡片底边；卡片正文的 `alignContent:start` 保证这些富余不会摊到正文各行之间。`tools/shot.mjs` 的列数断言随之从 `getComputedStyle(grid).columnCount` 改成数 `gridTemplateColumns` 的轨道数（两种窗口盒子：1140px→3 列、820px→2 列）
-- **排序必须看得见**（第六轮修复，第九轮改口径）：① 一旦选了非默认排序，每张卡片页脚最前面出现 `#1 #2 #3…` 名次胶囊（`title` 写明「当前排序下的名次：第 N 名」，等宽数字对齐）；② 筛选行里**正在起作用的控件**（排序、来源、分类、注册表的状态/来源）显示为墨色边框 + 浅灰底（`omkt-select-on`），默认态不标记；③ meta 行写出「按使用量最多排序」（`title` 补充「名次从左到右、再下一行；没有该项数据的条目排在后面」）。另外这些控件的 inline `border` 会盖住样式表里的 `:hover`/`:focus` 规则，所以注入样式表里的悬停/聚焦规则都带 `!important`；搜索胶囊没有自己的边框（边框画在胶囊上），聚焦时用 `.omkt-search:has(.omkt-input:focus-visible)` 把胶囊本身染成墨色。`tools/render-market-tab.mjs` 现在直接驱动真实 `<select>`：断言「使用量最多」把卡片按 installs 降序重排（缺失项垫底）、名次胶囊是 `#1 #2 #3`、meta 行写出排序名、控件带上 `omkt-select-on`，并断言分类下拉原地收窄为 1 张卡、来源下拉会带 `source=` 重新问宿主
+- **「未分类」为什么这么多，以及怎么减少**：六个来源里只有两个社区清单带类目（它们的 `###` 标题），**Smithery 与官方 registry 一个类目字段都不发**——实测（2026-10-14）Smithery `/servers` 只发 `id, qualifiedName, namespace, slug, displayName, description, iconUrl, verified, useCount, remote, isDeployed, unlisted, inactive, createdAt, homepage, bySmithery, owner, score`，官方 `/v0/servers` 只发 `name, description, title, version, remotes, packages`。这两类合计 233 条（约 5.4k 条里的 4%），但默认「综合推荐」排序恰好把它们排在第一页（官方 + 认证的 Smithery 条目质量分最高），所以首屏曾经 100% 是「未分类」。现在宿主对**没有上游类目**的条目做一次**关键词推断**（`lib/catalog.js` 的 `inferGroupOf`：19 组词表 + 标题双权重 + 词组越长越优先，`\b` 只加在词首以免 `\bspreadsheet\b` 匹配不到 `spreadsheets`；刻意不收 `server` 这种词——每条都是 MCP server，会把「招聘」的 DevMatch 拖进「云与运维」）。实测官方 registry 抽样 100 条里 **78 条**得到分类、Smithery 10/10；匹配不到的仍然老实显示「未分类」（`其他` 的语义是「上游说了但我们归不了」，与「我们不知道」不同）。推断结果带 `groupSource:'inferred'`，卡片胶囊的悬停提示写「分类（按名称与描述推断）：…」，绝不把我们的判断伪装成上游事实。单测见 `test/catalog.test.mjs`（真实条目做样本：Brave Search→搜索与知识、Gmail/Google Sheets→办公协作、DevMatch→商业与法律、匹配不到→未分类）
+- **本市场安装计数**：上游的使用量只覆盖 Smithery（`useCount`→次启动）与 Docker（`pull_count`→次拉取），谁都不统计「从本面板装的」。用户要求「下载量以后从我们市场下载的也要统计一下」，因此宿主新增 `lib/installs.js`，把每次**成功**安装记到 `$DSH_HOME/overall-mcp/installs.json`（键就是目录条目的 `id`，和卡片、收藏、安装按钮用的是同一个；无 id 时回退成 `name:<服务器名>`；写盘走临时文件 + rename，缺文件/坏文件都退化成「还没装过」而不是抛错）。面板上它是**第二条序列**：卡片统计行显示「⤓ 3 本市场」（悬停给出最近一次安装日期），详情面板有「本市场安装」一行；只有当**排序**用「使用量最多」时两者才相加（`usageOf()`），因为那个问题问的是「这东西有多常用」，而对那 233 条上游不发数字的条目来说，我们自己的安装就是唯一的证据。单测见 `test/installs.test.mjs`（计数递增/首次时间不动/坏文件容错/键回退/写读往返 + 不留临时文件）
+- **卡片墙是「行优先」的等宽网格，不是多列瀑布流**：`column-count` 的多列墙是**竖着**铺的（先把第 1 列填到底再开第 2 列），于是排好序的列表读起来是「顺着每列往下」——用户选了「使用量最多」后横向扫一眼看到 87.5k / 9.1k / 无数据，就断定排序没生效（实际每列内部都是降序，第三个来源根本没发布使用量），并明确要求「应该是从左到右排序而不是从上到下的排序，这样第三列都是最后的」。现在 `.omkt-grid` 是 `display:grid` + `grid-template-columns:repeat(N, minmax(0,1fr))`（N 由容器查询给出，内联的 `repeat(2, …)` 是没有容器支持时的兜底），卡片按行从左到右铺、名次 `#1` 落在左上角。两个要点：① 必须是 `minmax(0,1fr)` 而不是裸 `1fr`（裸 `1fr` 会被最宽卡片的 min-content 顶开，墙的最小内容宽度从 12082px 降到 14px）；② 行的对齐**不是** `align-items:start`——那样一行的矮卡片下面会留个洞（fixture 里那张超高卡片留了 300px），所以用默认的 `stretch` 把整行拉齐，再由卡片自己的 `grid-template-rows:1fr auto` 把富余高度放在正文与页脚之间，页脚始终贴在卡片底边；卡片正文的 `alignContent:start` 保证这些富余不会摊到正文各行之间。`tools/shot.mjs` 的列数断言随之从 `getComputedStyle(grid).columnCount` 改成数 `gridTemplateColumns` 的轨道数（两种窗口盒子：1140px→3 列、820px→2 列）
+- **排序必须看得见**：① 一旦选了非默认排序，每张卡片页脚最前面出现 `#1 #2 #3…` 名次胶囊（`title` 写明「当前排序下的名次：第 N 名」，等宽数字对齐）；② 筛选行里**正在起作用的控件**（排序、来源、分类、注册表的状态/来源）显示为墨色边框 + 浅灰底（`omkt-select-on`），默认态不标记；③ meta 行写出「按使用量最多排序」（`title` 补充「名次从左到右、再下一行；没有该项数据的条目排在后面」）。另外这些控件的 inline `border` 会盖住样式表里的 `:hover`/`:focus` 规则，所以注入样式表里的悬停/聚焦规则都带 `!important`；搜索胶囊没有自己的边框（边框画在胶囊上），聚焦时用 `.omkt-search:has(.omkt-input:focus-visible)` 把胶囊本身染成墨色。`tools/render-market-tab.mjs` 现在直接驱动真实 `<select>`：断言「使用量最多」把卡片按 installs 降序重排（缺失项垫底）、名次胶囊是 `#1 #2 #3`、meta 行写出排序名、控件带上 `omkt-select-on`，并断言分类下拉原地收窄为 1 张卡、来源下拉会带 `source=` 重新问宿主
 - Star 补充只覆盖**当前页**可见的仓库，翻页不重复消耗 GitHub 额度
-- 统计：`N 个可用 MCP · 官方 x · Smithery y · Docker z · GitHub g · 远程 a · Awesome b · 其中 M 个已安装 · 列表读取于 时间`（各源数字是**去重后计入本页**的条数，与 `N` 同一把尺子，第二十轮起；重叠掉的条数单独写「去重合并 M 条」）；整份列表来自缓存时时间后面缀「（缓存）」，本次有来源答 `304` 时再缀上「· N 源未变」
+- 统计：`N 个可用 MCP · 官方 x · Smithery y · Docker z · GitHub g · 远程 a · Awesome b · 其中 M 个已安装 · 列表读取于 时间`（各源数字是**去重后计入本页**的条数，与 `N` 同一把尺子；重叠掉的条数单独写「去重合并 M 条」）；整份列表来自缓存时时间后面缀「（缓存）」，本次有来源答 `304` 时再缀上「· N 源未变」
 - 来源筛选：全部市场 / 官方 Registry / Smithery / Docker MCP Catalog / GitHub MCP / Awesome 远程 / Awesome 清单；支持关键词搜索（关键词同样匹配安装命令，搜 `docker` 或端点域名也能命中）
-- **GitHub MCP 源（第十一轮，第十二轮补第三个查询）**：把 GitHub 自己当成一个发现源，而不再是只从别人的清单里读项目。走官方的仓库搜索 API，三个查询各发一次请求（`mcp-server in:name archived:false`、`topic:mcp-server mcp in:description archived:false`、`topic:model-context-protocol mcp in:name archived:false`，都按 Star 降序、每查 100 条、跨查询按 `owner/repo` 去重）——**匿名搜索配额是 10 次/分钟**（与核心 API 的 60 次/小时是两本账），所以这一源固化为每次浏览 3 个请求、候选 300 行、上限 200 条，`ETag` 层的 `304` 会把重复浏览变成零成本。请求必须带一个 `User-Agent`（本插件用自己的名字）：实测不带时 GitHub 的搜索接口一律回 `403` 并给出 `x-ratelimit-remaining: 0`，带上之后同一台机器同一分钟就正常返回——那不是一个能靠重试解决的问题，所以它写在请求头里而不是交给重试。三个查询回答三个问题：名字里带 `mcp-server` 的（实测 5.37 万条命中）是真的自称 MCP server；带 `mcp-server` 标签的（3.67 万条）是别人给它打的标签，**打过标签的不一定是 server**（光看标签，榜首是 n8n、gemini-cli 这些只是内置或消费 MCP 的项目），所以标签那个查询额外要求描述里出现 `mcp`，把噪声压下去（收窄后榜首是 TrendRadar、codebase-memory-mcp、github-mcp-server、serena 这类真东西）；第三个查询补上前两个都够不着的缺口——名字写成 `…-mcp` 而不是 `…-mcp-server` 的 server（`topic:model-context-protocol` 与 `mcp in:name` 求交，2.2 万条），实测它把 `codebase-memory-mcp`（4.66 万 Star）与 `mcp-for-blender`（3.09 万）捞了进来，而这两个前两个查询都返回不了（裸标签 3.67 万条的榜首是 rea、nanobot、fastmcp 这类产品与 SDK，所以照样不用裸标签）。三份答案**先合并、按 Star 排出全局前 200 再截断**：每个查询在上游各自有序，但「能找到的最好的 200 个仓库」是关于并集的事实，不是关于哪个查询先跑的事实。收窄后剩下的行照常收，卡片会显示语言、Fork、Issue 与最近推送时间，让人自己判断。这一源的行是**纯发现行**（`install: null`）：仓库列表里没有任何关于怎么运行它的信息（没有包名、没有命令），猜一个 `npx <仓库名>` 只会在卡片上放一个必然失败的按钮。有仓库、Star、Fork、Issue、语言与最近推送；要装就顺着仓库去读它自己的 README
-- **GitHub 普查索引（第十三轮）**：搜索 API 每个查询最多只能翻到 **1000 条**、匿名配额只有 10 次/分钟，所以「GitHub 上到底有多少 MCP server」用一次搜索答不出来。宿主于是把这件事从「每次浏览现搜」改成「**慢慢走一遍、把结果留在本机**」：`lib/github-index.js` 走两个形状——名字里带 `mcp` 的，以及打了 `mcp-server` 标签**且**描述里出现 `mcp` 的（裸标签的榜首是 n8n 20.7 万 Star、gemini-cli 10.7 万，实测**加 Star 下限也挡不住它们**，所以索引与实时搜索共用同一条收窄规则）——再按 **Star 窗口**切分（一个查询命中超过 1000 就用 `stars:>=X` / `stars:min..max` 收窄，上界取上一窗口的最低 Star，边界重复靠 `owner/repo` 去重），请求间隔 **6.5 秒**（给 10 次/分钟留余量）、单次最多 **48 个请求**、每个查询最多 10 页、最多 8 个窗口、Star 下限 100，走不完就停下并记下是哪一类截断。结果写 `$DSH_HOME/overall-mcp/github-index.json`，每行就是市场条目的形状（`github:` 前缀、`install: null`），带 `firstSeen` / `lastSeen`：新走到的行覆盖旧的（Star、描述跟着更新），**没走到的行不删**，只是不再刷新 `lastSeen`，连续 **30 天**没再见到才移除——所以索引是「并集」而不是「这一轮看到的全部」。读取是**零请求**的：面板每次浏览都从磁盘读，搜索关键词在**整个普查**上过滤（而不是只搜前 200 条），超过 **24 小时**算旧、宿主在**后台**重新走一遍（不阻塞这次浏览；走失败只记 `partial` 并保留上一份普查）。行里会写明它是本地索引而不是实时结果：「本地索引 1758 行・3 小时前・待更新；本次列出 200 条」，列表的时间戳用的是**普查时间**而不是读取时刻。首次运行没有索引时退回原来的三个查询实时搜索（行为不变），并在后台开始第一遍普查。索引文件损坏只记一条警告并按「没有索引」处理——它全是**派生数据**、没有用户输入，丢了只是重新走一遍，所以**不隔离**（不像 `registry.json` 那样改名留证）。单测见 `test/github-index.test.mjs`
-- **从仓库证据恢复安装命令（第十四轮）**：普查索引解决的是「GitHub 上有哪些 MCP」，但它每一行都是 `install: null`——仓库列表不含任何安装信息，而卡片上没有安装方式的条目只能给你一个必然失败的按钮。所以宿主会**额外走一遍**：对索引里没有 `install` 的行，去读它自己仓库里的证据（`package.json` / `pyproject.toml` / npm 与 PyPI 的 `server.json` / README），走 `raw.githubusercontent.com`（**不吃 API 配额**，实测 96 个请求无一次 `403/429`，但自己限速 **150ms/请求**），最多 **6000 个请求 / 25 分钟**一轮，把结果写 `$DSH_HOME/overall-mcp/github-install.json`。恢复的规则是**宁可没有，也不猜**：`package.json` 必须给出 `bin`（`npx -y <包名>`），`pyproject.toml` 必须给出一个能被 `uvx` 跑的脚本，`server.json` 里作者自己声明的远程端点可以直接用；**只要能猜到包名，就先查这个包在 npm / PyPI 上真的存在**（`registry.npmjs.org/<name>`、`pypi.org/pypi/<name>/json`），查不到就整条作废；README 里只认**作者自己写的 fenced 代码块**里那条可执行命令（`npx` / `uvx` / `docker run` / `pip install`），正文里的散文提到不算。**每条恢复出来的命令都带出处**，并且这句话跟着命令一起走：详情面板的命令块下面写「命令来自仓库 package.json；npm 上已确认这个包存在」，卡片上安装 chip 的悬停提示同样带上它——一条从 `package.json` 里读出来的命令不是「registry 已发布」，用户看不出区别就没法判断眼前这条命令。这一趟走完之前，那一行仍然是发现行（卡片照旧只给仓库与 Star），恢复到的行会在下一次浏览时变成带安装按钮的行；来源行的说明里会写明进度（「已从仓库恢复 320 条安装命令，还在继续」）。触发方式是**打开市场页时问一次**（`POST /api/overall-mcp/install-evidence`，单飞、可中止、`unref` 计时器）——不在插件加载时偷偷联网、也**不阻塞**任何一次浏览；`GET` 同一个路由只读状态，永远不触发工作。单测见 `test/repo-install.test.mjs`
-- **搜索预算是一份共享状态，空了就不再发请求（第十五轮）**：这一轮修的是用户报的「github-mcp 源不可用」。实测定位：那台机器上匿名搜索配额已经用满（`403 API rate limit exceeded`，`x-ratelimit-remaining: 0`，恢复要 45 分钟以上），而面板**每一次浏览都还在照发那 3 个请求**——每次都拿回同一个 `403`，界面上看起来就是「这个来源坏了」，实际上是我们自己把配额用完了。现在 `lib/catalog.js` 里有一份进程级的窗口状态（读 `x-ratelimit-remaining` / `x-ratelimit-reset` / `Retry-After`），三件事随之改变：① **空窗口不重试、也不再用**——`withFastRetry` 认得出这是配额而不是限流，直接放行不再等 2.5 秒重试（重试改变不了「这个小时已经没有额度」），实时回退那一路连请求都不发，面板拿到的是「搜索配额已用完（约 N 秒后恢复）；本机普查索引建好后这里不再发请求」。配额用完**不是**「来源不可用」：前者是我们自己的账，后者才是上游坏了，两者在界面上的说法必须不同（`errors` 里也不会因此多一条）。② **普查走查在跑时，浏览读它的进度而不是去和它抢**：这类答复带一个 `walk` 事实，这一源显示「正在建立本机普查索引（已收 N 行）·本次未发请求」，浏览这次就是 **0 个请求**；它同时被标成 `transient`——**不进来源层那 60 秒缓存**，否则一句「正在建立」会被缓存住，紧接着的刷新就看不到其实已经建好了。③ **一趟两小时的普查不再只赌最后那一刻**：每写满 **5 秒**就把当前进度落盘（`complete:false` + `partial:"正在抓取（已收 N 行）"`），走查被拒绝、进程退出或被中止时，下一次浏览至少能看到已经收到的那些行；被拒绝时也记下确切原因（「GitHub 搜索配额已用完（约 N 秒后恢复），下次继续」），而不是一个没有下文的 `partial`。单测：`test/catalog.test.mjs` 的四个配额用例（空窗口只问一次、`refresh` 也不额外花请求、可用窗口的 `remaining` 会记下来、走查在飞时浏览 0 请求）与 `test/index.test.mjs` 的端到端用例（面板上读到的是一句等待、且再怎么刷新都不再发请求）
+- **GitHub MCP 源**：把 GitHub 自己当成一个发现源，而不再是只从别人的清单里读项目。走官方的仓库搜索 API，三个查询各发一次请求（`mcp-server in:name archived:false`、`topic:mcp-server mcp in:description archived:false`、`topic:model-context-protocol mcp in:name archived:false`，都按 Star 降序、每查 100 条、跨查询按 `owner/repo` 去重）——**匿名搜索配额是 10 次/分钟**（与核心 API 的 60 次/小时是两本账），所以这一源固化为每次浏览 3 个请求、候选 300 行、上限 200 条，`ETag` 层的 `304` 会把重复浏览变成零成本。请求必须带一个 `User-Agent`（本插件用自己的名字）：实测不带时 GitHub 的搜索接口一律回 `403` 并给出 `x-ratelimit-remaining: 0`，带上之后同一台机器同一分钟就正常返回——那不是一个能靠重试解决的问题，所以它写在请求头里而不是交给重试。三个查询回答三个问题：名字里带 `mcp-server` 的（实测 5.37 万条命中）是真的自称 MCP server；带 `mcp-server` 标签的（3.67 万条）是别人给它打的标签，**打过标签的不一定是 server**（光看标签，榜首是 n8n、gemini-cli 这些只是内置或消费 MCP 的项目），所以标签那个查询额外要求描述里出现 `mcp`，把噪声压下去（收窄后榜首是 TrendRadar、codebase-memory-mcp、github-mcp-server、serena 这类真东西）；第三个查询补上前两个都够不着的缺口——名字写成 `…-mcp` 而不是 `…-mcp-server` 的 server（`topic:model-context-protocol` 与 `mcp in:name` 求交，2.2 万条），实测它把 `codebase-memory-mcp`（4.66 万 Star）与 `mcp-for-blender`（3.09 万）捞了进来，而这两个前两个查询都返回不了（裸标签 3.67 万条的榜首是 rea、nanobot、fastmcp 这类产品与 SDK，所以照样不用裸标签）。三份答案**先合并、按 Star 排出全局前 200 再截断**：每个查询在上游各自有序，但「能找到的最好的 200 个仓库」是关于并集的事实，不是关于哪个查询先跑的事实。收窄后剩下的行照常收，卡片会显示语言、Fork、Issue 与最近推送时间，让人自己判断。这一源的行是**纯发现行**（`install: null`）：仓库列表里没有任何关于怎么运行它的信息（没有包名、没有命令），猜一个 `npx <仓库名>` 只会在卡片上放一个必然失败的按钮。有仓库、Star、Fork、Issue、语言与最近推送；要装就顺着仓库去读它自己的 README
+- **GitHub 普查索引**：搜索 API 每个查询最多只能翻到 **1000 条**、匿名配额只有 10 次/分钟，所以「GitHub 上到底有多少 MCP server」用一次搜索答不出来。宿主于是把这件事从「每次浏览现搜」改成「**慢慢走一遍、把结果留在本机**」：`lib/github-index.js` 走两个形状——名字里带 `mcp` 的，以及打了 `mcp-server` 标签**且**描述里出现 `mcp` 的（裸标签的榜首是 n8n 20.7 万 Star、gemini-cli 10.7 万，实测**加 Star 下限也挡不住它们**，所以索引与实时搜索共用同一条收窄规则）——再按 **Star 窗口**切分（一个查询命中超过 1000 就用 `stars:>=X` / `stars:min..max` 收窄，上界取上一窗口的最低 Star，边界重复靠 `owner/repo` 去重），请求间隔 **6.5 秒**（给 10 次/分钟留余量）、单次最多 **48 个请求**、每个查询最多 10 页、最多 8 个窗口、Star 下限 100，走不完就停下并记下是哪一类截断。结果写 `$DSH_HOME/overall-mcp/github-index.json`，每行就是市场条目的形状（`github:` 前缀、`install: null`），带 `firstSeen` / `lastSeen`：新走到的行覆盖旧的（Star、描述跟着更新），**没走到的行不删**，只是不再刷新 `lastSeen`，连续 **30 天**没再见到才移除——所以索引是「并集」而不是「这一轮看到的全部」。读取是**零请求**的：面板每次浏览都从磁盘读，搜索关键词在**整个普查**上过滤（而不是只搜前 200 条），超过 **24 小时**算旧、宿主在**后台**重新走一遍（不阻塞这次浏览；走失败只记 `partial` 并保留上一份普查）。行里会写明它是本地索引而不是实时结果：「本地索引 1758 行・3 小时前・待更新；本次列出 200 条」，列表的时间戳用的是**普查时间**而不是读取时刻。首次运行没有索引时退回原来的三个查询实时搜索（行为不变），并在后台开始第一遍普查。索引文件损坏只记一条警告并按「没有索引」处理——它全是**派生数据**、没有用户输入，丢了只是重新走一遍，所以**不隔离**（不像 `registry.json` 那样改名留证）。单测见 `test/github-index.test.mjs`
+- **从仓库证据恢复安装命令**：普查索引解决的是「GitHub 上有哪些 MCP」，但它每一行都是 `install: null`——仓库列表不含任何安装信息，而卡片上没有安装方式的条目只能给你一个必然失败的按钮。所以宿主会**额外走一遍**：对索引里没有 `install` 的行，去读它自己仓库里的证据（`package.json` / `pyproject.toml` / npm 与 PyPI 的 `server.json` / README），走 `raw.githubusercontent.com`（**不吃 API 配额**，实测 96 个请求无一次 `403/429`，但自己限速 **150ms/请求**），最多 **6000 个请求 / 25 分钟**一轮，把结果写 `$DSH_HOME/overall-mcp/github-install.json`。恢复的规则是**宁可没有，也不猜**：`package.json` 必须给出 `bin`（`npx -y <包名>`），`pyproject.toml` 必须给出一个能被 `uvx` 跑的脚本，`server.json` 里作者自己声明的远程端点可以直接用；**只要能猜到包名，就先查这个包在 npm / PyPI 上真的存在**（`registry.npmjs.org/<name>`、`pypi.org/pypi/<name>/json`），查不到就整条作废；README 里只认**作者自己写的 fenced 代码块**里那条可执行命令（`npx` / `uvx` / `docker run` / `pip install`），正文里的散文提到不算。**每条恢复出来的命令都带出处**，并且这句话跟着命令一起走：详情面板的命令块下面写「命令来自仓库 package.json；npm 上已确认这个包存在」，卡片上安装 chip 的悬停提示同样带上它——一条从 `package.json` 里读出来的命令不是「registry 已发布」，用户看不出区别就没法判断眼前这条命令。这一趟走完之前，那一行仍然是发现行（卡片照旧只给仓库与 Star），恢复到的行会在下一次浏览时变成带安装按钮的行；来源行的说明里会写明进度（「已从仓库恢复 320 条安装命令，还在继续」）。触发方式是**打开市场页时问一次**（`POST /api/overall-mcp/install-evidence`，单飞、可中止、`unref` 计时器）——不在插件加载时偷偷联网、也**不阻塞**任何一次浏览；`GET` 同一个路由只读状态，永远不触发工作。单测见 `test/repo-install.test.mjs`
+- **搜索预算是一份共享状态，空了就不再发请求**：这一轮修的是用户报的「github-mcp 源不可用」。实测定位：那台机器上匿名搜索配额已经用满（`403 API rate limit exceeded`，`x-ratelimit-remaining: 0`，恢复要 45 分钟以上），而面板**每一次浏览都还在照发那 3 个请求**——每次都拿回同一个 `403`，界面上看起来就是「这个来源坏了」，实际上是我们自己把配额用完了。现在 `lib/catalog.js` 里有一份进程级的窗口状态（读 `x-ratelimit-remaining` / `x-ratelimit-reset` / `Retry-After`），三件事随之改变：① **空窗口不重试、也不再用**——`withFastRetry` 认得出这是配额而不是限流，直接放行不再等 2.5 秒重试（重试改变不了「这个小时已经没有额度」），实时回退那一路连请求都不发，面板拿到的是「搜索配额已用完（约 N 秒后恢复）；本机普查索引建好后这里不再发请求」。配额用完**不是**「来源不可用」：前者是我们自己的账，后者才是上游坏了，两者在界面上的说法必须不同（`errors` 里也不会因此多一条）。② **普查走查在跑时，浏览读它的进度而不是去和它抢**：这类答复带一个 `walk` 事实，这一源显示「正在建立本机普查索引（已收 N 行）·本次未发请求」，浏览这次就是 **0 个请求**；它同时被标成 `transient`——**不进来源层那 60 秒缓存**，否则一句「正在建立」会被缓存住，紧接着的刷新就看不到其实已经建好了。③ **一趟两小时的普查不再只赌最后那一刻**：每写满 **5 秒**就把当前进度落盘（`complete:false` + `partial:"正在抓取（已收 N 行）"`），走查被拒绝、进程退出或被中止时，下一次浏览至少能看到已经收到的那些行；被拒绝时也记下确切原因（「GitHub 搜索配额已用完（约 N 秒后恢复），下次继续」），而不是一个没有下文的 `partial`。单测：`test/catalog.test.mjs` 的四个配额用例（空窗口只问一次、`refresh` 也不额外花请求、可用窗口的 `remaining` 会记下来、走查在飞时浏览 0 请求）与 `test/index.test.mjs` 的端到端用例（面板上读到的是一句等待、且再怎么刷新都不再发请求）
 - **限流与瞬时错误会重试一次，缺文件不会**：上游对自己不认识的东西各有各的脾气——`hub.docker.com` 在密集抓取下会回 `403`，GitHub 搜索会回 `429`（带 `Retry-After`），偶发 `5xx` 也一样。这些**都不是**「这里没有东西」，而是「等会儿再来」，所以 `lib/catalog.js` 的 JSON 目录抓取（`fetchJson`：官方 registry、Smithery、Docker、GitHub 搜索、自定义源）对 `403/408/425/429/5xx`（以及网络层的 `fetch failed`）各重试**一次**：先等 1.5 秒，仍被拒则再等 2.5 秒，最多给一个源多花 4 秒；`404` 与其它 4xx **一次都不重试**（重试一个不存在的文件只是让人多等 2.5 秒），而**按「谁在问」给出的策略性拒绝**（Docker Hub 的匿名翻页上限：`403 pagination offset too large for anonymous requests`，见来源表）也**不重试**——等 2.5 秒不会改变策略，只会让人白等；这类答复由适配器识别后当作「列表读到这里为止」，交回已读到的条目并附一句覆盖说明。重试后仍然失败才按失败处理：该源降级、其余源不受影响；若这个源上一轮有结果，就把旧清单交回去并标 `stale`，同时把 `HTTP 403` 这样的确切原因报给面板（这一轮 Docker 源就是这么暴露出来的：它的 `hub.docker.com` 列表在连续抓取里被限流，而面板上原本只显示一个「不可用」）。两个 Awesome README 走的是镜像链（raw / jsdelivr / fastly / testingcf 四个 URL 同时竞速，见镜像链一节），它们本身就有四次机会，所以不在这条重试规则里
 - **自定义目录源**：市场不再只有编译进来的那六个来源。市场页有一块可折叠的「目录源」——内置六源列出**各自的条数与时间**，下面是你自己加的源（标签 / 地址 / 条数或错误 / 移除），底部是地址输入框 + 「添加」。宿主把它存在 `$DSH_HOME/overall-mcp/sources.json`（`{version:1, sources:[{id,label,url}]}`，写盘走临时文件 + rename；文件读不出来时面板照报原因，内置六源不受影响），**只接受 https**：地址里的安装命令会被本机执行，所以 `http://` 和带用户名口令的地址在入口就被拒；最多 8 个；重复地址报 409、非法地址报 400、删除未知 id 报 404——三种都在面板上原样显示，不吞成「失败」。源的 id 由宿主签发（`custom:<host+path 的 slug>`，≤48 字符），标签默认从地址推（GitHub raw / jsDelivr 能解析出 `owner/repo`，否则取主机名），也可以自己给。一个自定义源与内置源**完全同权**：它出现在来源下拉里、能单独筛（`/catalog?source=<id>`）、参与合并与排序，抓取同样走 ETag/304 + 60 秒 TTL，失败同样保留上一次的清单并标 `stale`（错误照报）。移除一个源只是把它从下一次抓取里拿掉，并顺手丢掉它的缓存行——正在显示的列表要等下一次刷新。这一块需要新版宿主：旧 bundle 上这里写明「需要新版宿主插件」，而不是显示成一个空列表
-- **卡片形式**呈现（与 dsh-market 插件一致）：图标（Smithery 图标 / GitHub 头像，缺失时用首字母色块）、**标题即入口**（有仓库链仓库、否则链上游官网、Smithery 条目链其目录页——与 dshmarket 卡片名一致的真锚点；卡片正文是 div 而不是 button，链接不会和点击详情打架）、标题旁**GitHub 标记**（只在 `repository` 真的是 GitHub 仓库时出现，悬停才上色）、作者行末尾的**版本**、✓认证/官方/已安装/已废弃徽标、三行描述、标签（分类 / 语言 / 部署范围 / 操作系统 / 仓库 topics）。悬停反馈通过注入的样式表实现（内联样式表达不了 :hover / keyframes / 宽度断点）：卡片描边高亮、主按钮不透明度、详情弹窗入场动画
+- **卡片形式**呈现：图标（Smithery 图标 / GitHub 头像，缺失时用首字母色块）、**标题即入口**（有仓库链仓库、否则链上游官网、Smithery 条目链其目录页；卡片正文是 div 而不是 button，链接不会和点击详情打架）、标题旁**GitHub 标记**（只在 `repository` 真的是 GitHub 仓库时出现，悬停才上色）、作者行末尾的**版本**、✓认证/官方/已安装/已废弃徽标、三行描述、标签（分类 / 语言 / 部署范围 / 操作系统 / 仓库 topics）。悬停反馈通过注入的样式表实现（内联样式表达不了 :hover / keyframes / 宽度断点）：卡片描边高亮、主按钮不透明度、详情弹窗入场动画
 - **卡片布局**：按 `frontend-card-style-v4.html` 原型——卡片左右分栏（左内容 / 右「安装 + 详情」，右列**右对齐**贴在卡片右上角），下方是标签 + 收藏/⋯ 图标按钮的页脚（**无分隔线**，标签是描边胶囊而非灰底）；**收藏与 ⋯ 在正文外**，点星星不会顺带打开详情。卡片流用**行优先的等宽网格**砌墙（宽容器三列约 371px、中等两列、≤720px 单列；见下一条为何不是 `column-count`）。断点用**容器查询**（`@container`）而不是媒体查询：面板只是应用窗口里的一块，窗口 1600px 而面板 820px 时必须仍是两列——`tools/shot.mjs` 在一个 1600px 窗口里同时摆 1140px 与 820px 两个盒子来钉住这一点（内联 `repeat(2, minmax(0,1fr))` 只是没有容器支持时的兜底，`@media` 同理）。页面自己**不加水平内边距**：卡片区外面那层「板」已经是 20px 内衬，再叠一层就会把 1140px 的容器压到 1060px，正好掉出三列区间（1100px 是临界值）。整条宽度链（`page` → `tabBody` → `gridHost` → `.omkt-grid`）都显式写了 `min-width: 0`：它们都是网格项，默认的 `min-width: auto` 解析成 min-content——真机上这条链把自动轨道撑到 1891px（621px × 3 列）而页面只有 1180px，于是整页出现横向滚动条、第三列被推到屏幕外（`minmax(0,1fr)` 之后墙的 min-content 只剩 14px 的行间距）。更根本的修法是**轴的选择**：`page` 与 `tabBody` 现在都是 `display:flex; flex-direction:column`（而不是 `display:grid`）——列向 flex 的主轴竖直、横向不存在 `min-width:auto`，子项一律按容器宽度拉伸，所以墙宽恒等于可用宽度；这同时修掉另一个真机现象：`height:100%` 的网格会把隐式行**拉伸铺满整个面板**（`align-content: normal` 即 stretch），于是「刚切到 MCP 市场」的加载态里页头、页签、搜索框被摊在一屏空白上，列向 flex 把主轴内容压在顶部、剩余空间留在底部。`tools/shot.mjs` 因此有两组探针：**框架探针**（240px 侧栏 + 中栏、4 种窗口宽度，注入超长 URL、660px 宽幻灯片、94 字符长名字，外加一张 min-content 达 6000px 的卡片）断言「墙宽 == 可用宽度、页面无横向溢出、最宽卡片不溢出自身盒子、描述截断到 3 行」；**首帧探针**把目录请求挂起后冷启动渲染一次，断言「没有任何一行比自己内容更高」（旧版网格页面是 315px 的拉伸空白，现在 7px 取整误差）。两个探针各带一个反向自检开关（`OMKT_RED_FRAME` / `OMKT_RED_PAINT`），能把旧设计原样装回去，用来证明探针真的会失败。列向 flex 有一个必须显式关掉的行为：**主轴上的子项默认会收缩**，而页面是有确定高度的滚动容器——市场页内容很高时页签行是最便宜的可收缩项，于是它被压成 1px 的边框、「已注册」按钮消失，市场页变成单向门。所以注入样式表里有一条 `.omkt-page > *,.omkt-tabbody > *{flex-shrink:0;min-width:0}`，框架探针同时断言「页面每一行都保留自己的高度」（输出里的 `page rows [...]`；把旧行为装回去时页签行是 1px，探针立刻失败）
 - **卡上的传输方式是一枚小 chip 而不是命令行**：v4 原型卡片只有 `MCP · stdio` / `MCP · remote` 这样的兼容性小标（`title` 仍是可执行命令，悬停可见），完整命令留给详情面板——每张卡再压一段等宽字体，正是原型刻意去掉的东西
 - **卡片页脚先说事实，再说上游标签**：页脚的前两枚胶囊固定是「**分类**」（宿主机算出的 19 个功能组，`title` 补上游原标题）与「**安装方式**」（`stdio · npx` / `stdio · uvx` / `stdio · python` / `远程 · 免安装` / `需手动配置`，`title` 补完整命令或端点）。此前的页脚直接铺上游标签，而六个来源给 `tags` 打的根本不是一回事——Smithery 打「托管 / 本地」（是**托管形态**，既不是分类也不是安装方式）、官方 registry 打 `npm` / `pypi`（是包管理器，已被安装方式覆盖）、awesome 清单打自己的 `###` 标题（与分类重复）——于是卡片上出现了对读者没有信息量的「托管」。现在这四类标签不再作为胶囊出现（`category`、`托管`、`本地`、`npm`、`pypi` 以及等于分类的标签都被过滤），只保留真正补充说明的上游标签（最多 3 枚，`title` 标明「上游标签」）。断言在 `tools/render-card.mjs`：四类样本（官方 / awesome / Smithery / 远程端点）逐张检查前两枚胶囊的文案与 `title` 前缀，并断言「托管」不再出现
@@ -130,7 +132,7 @@ dsh plugin --profile web add ./dsh-overall-mcp
 - 操作：可安装的显示「安装」，已注册的显示「已安装」，只有仓库链接的显示「需手动配置」+「仓库」/「主页」
 - **站外链接**：卡片标题/GitHub 标、详情页标题与仓库链接等外链默认**在右侧栏的浏览器标签页里打开**（`ctx.sidebarRight.openTab("browser", { params: { url } })`，与 DSH 自家 markdown 链接同一入口）；侧栏浏览器没注册时不动手，让 `<a target="_blank">` 继续走 Electron 的「交给系统浏览器」。带修饰键（⌘/Ctrl/Shift/Alt）或中键的点击一律不拦，属平台原生行为（新窗口/后台标签）。这些锚点仍保留 `target="_blank" rel="noreferrer"` 作为无 JS 回落
 - **详情页**：点卡片主体或「详情」按钮弹出完整面板（按 v4 原型：680px、圆角 16、**一整张白纸**——页头不再是灰底带、底部只有一条分隔线），含：页头（头像 + 标题 + 贴着标题的徽标，关闭按钮在右上角）、完整描述（卡片只显示 3 行）、全部标签、**GitHub 仓库区块**（浅灰底卡片、owner/repo 锚点用品牌蓝、★ Star · Fork · Issue（含 PR）· Watch（订阅）竖排大数字带小标签、语言/许可证/最近推送/创建于事实行、归档警示；缺失数字保持缺失——没有任何目录发布 GitHub 数据，缺数字不等于 0，也不等于排最后）、逐项标注的**无底色事实表**（来源/作者/版本/传输/Star/使用量口径/上游更新时间（优先 GitHub pushed_at）/安装方式）、**将执行的确切命令**（stdio 为完整命令行，http 为端点 URL；标题右侧有**复制**按钮，成功显示「已复制」、两条复制路径都失败时显示「复制失败，请手动选中」而不是谎报成功）、按 URL 去重的链接组（官网 / GitHub 仓库 / **GitHub 镜像** / MCP 端点 / Smithery 页面）、底部「安装 + ♡ 收藏」。Smithery 的 `repository` 指向它自己的列表页而非上游项目，因此额外提供其目录页链接（实测 `smithery.ai/server/<name>` 308 到 `/servers/<name>`，直接用后者）
-- **GitHub 镜像链接**：GitHub 在本网络环境下时通时断（实测连续数小时 TCP 超时后恢复 200）。实测（2026-10-12）`gh-proxy.com` 现已代理 github.com 仓库页面（200/640ms）——与 dshmarket 2026-09 实测的 403 相反，其注释明确要求"重新测量而非推断"。因此有仓库的条目同时提供直连与镜像两个链接，由用户择一
+- **GitHub 镜像链接**：GitHub 在本网络环境下时通时断（实测连续数小时 TCP 超时后恢复 200）。实测（2026-10-12）`gh-proxy.com` 现已代理 github.com 仓库页面（200/640ms）——上一次实测还是 403，所以这个结论必须重新测量，不能从旧结论推断。因此有仓库的条目同时提供直连与镜像两个链接，由用户择一
 - **废弃标记**：上游标记为 deprecated 的条目不隐藏、仍可安装（有人可能需要旧版），但降到最后、显示橙色「已废弃」徽标、按钮改为「仍要安装」，并附上上游自己的 `statusMessage` 说明。目前仅官方 Registry（`_meta…official.status`）与 Smithery（`inactive`）发布该信号；两个 Awesome 清单没有生命周期字段，因此这些条目的 `status` 为**缺省**而非 `active`——界面不会把"没人扫过"显示成"正常"
 
 ### 安装失败时的自动诊断（可选，静默）
@@ -164,10 +166,10 @@ dsh plugin --profile web add ./dsh-overall-mcp
 可以单独跑：
 
 ```bash
-node tools/registry-submission.mjs --body-file /tmp/issue.md                  # 只校验，不改文件
+node tools/registry-submission.mjs --body-file /tmp/issue.md # 只校验，不改文件
 node tools/registry-submission.mjs --body-file /tmp/issue.md --write --comment /tmp/comment.md
-node tools/registry-submission.mjs --check --registry registry.json           # 复核已提交的清单
-npm run test:registry                                                         # 上面那条，进 verify
+node tools/registry-submission.mjs --check --registry registry.json # 复核已提交的清单
+npm run test:registry # 上面那条，进 verify
 ```
 
 **投稿规则（`lib/submission.js`，单测 `test/submission.test.mjs`）**：名称与说明必填（120 / 600 字符）；**启动命令**（stdio）与**服务地址**（streamable-http）二选一，都填或都不填都被拒；命令上限 200 字符、参数最多 32 个（每个 120 字符）；命令与参数里出现 `|` `;` `&&` 反引号 重定向 或 `$()` 一律拒绝——这一行会在**别人的机器上**执行，一个需要 shell 的条目不是这个格式能承载的，宁可拒掉也不静默执行；仓库/主页只接受 https；标签最多 8 个；所有字段都剥掉控制字符（否则一个字段就能伪造出别的字段）。**同一份清单只保留一行**：先按仓库地址（`github.com/owner/repo`，小写、去 `.git`）认，其次服务地址，最后名称；所以「编辑 issue 补个说明」是就地更新而不是新增第二份。写入按这个键排序（diff 小），而且**内容没变时连 `updatedAt` 都不动**——工作流据此判断「没有东西要提交」，编辑一次 issue 不会凭空产生一个 commit。
@@ -203,12 +205,6 @@ npm run test:registry                                                         # 
 - GitHub Star 数是本地补充的：目录本身不提供，卡片先渲染，随后一次性补齐当前可见的 GitHub 仓库（最多 30 个，宿主缓存 6 小时）
 - GitHub 未认证接口**每小时仅 60 次**且没有批量端点，因此宿主会读取额度状态：一旦耗尽即暂停补充并显示提示「额度恢复后会自动补齐」（额度是自首次请求起 60 分钟滚动恢复，不是整点重置）。Star 只是装饰，额度不足时卡片内容依然完整
 - 配图（详情页轮播与卡片头像）同样来自外部（GitHub OG 图与仓库图片）：单个仓库取图失败时**不会**被当成「这个仓库没有图」缓存 6 小时，而是按 5 分钟短 TTL 重试，并把失败的仓库报给界面——市场页与详情页都会显示「配图加载失败（可能被 GitHub 限流）」和「重试」按钮
-
-### 与 dshmarket 的 4508 条相比
-
-dshmarket 的插件市场显示约 4508 条，但它**不是爬来的**：它读取发布在 npm 上的 `dsh-plugin-catalog` 包内的 `plugins.json`（约 5.4 MB），那是 [awesome-dsh-plugin.com](https://awesome-dsh-plugin.com) 每天流水线收录、构建并发布的产物，每条自带 `stars`、`downloads`、`capabilities`（权限标记）和双语描述。
-
-MCP 生态目前**没有对等物**——没有站点把上千个 MCP 收录成同样结构化的产物。最接近的 PulseMCP（自称索引 8000+）公开 API 已日落，Glama 需要 API Key。所以本插件选择现场聚合开放 API：数字会随生态增长，字段来自一手来源，代价是 Star/下载量需本地补充、且受各上游限流约束。
 
 ## 模型工具
 
@@ -293,7 +289,7 @@ Invalid schema for function 'mcp__rea-om__analyze_javascript_application':
 
 这类条目没有本插件挂载的 fiber，所以本插件**无法**停掉或移除那些工具：界面上仍然可以点「停用」/「移除」（那是在记录本插件的意图或清掉本插件的记录），但两个按钮的悬停提示、动作返回的 `note` 与模型工具的描述都会说明「工具仍由另一个插件提供」，不会反过来宣称已经断开（返回体带 `stillProvided: true`）。
 
-## 注册表里的重复行（第十五轮）
+## 注册表里的重复行
 
 用户报的第二个问题是「多个 rea 的 MCP 这个事也没解决」：那台机器的 `registry.json` 里，同一条 `npx -y rea-agents@6.5.0 mcp` 有 **5 行**（4 个 `rea-cursor` + 1 个 `rea`）。原因有两层：① 早先的合并把与手工条目冲突的导入**改名**成 `name-<source>`，而它每次扫描都可能再推进一行，于是同一份配置被改名前后各导入一次就留下两行，反复几次就是四行；② 折叠的依据不能只是名字——本插件给条目补的 `serverName`（挂载身份）会让旧记录看起来「不是同一条」，而 `findOrphans()`（按名字清理「来源已删除」的记录）刻意跳过带 `serverName` 的行，于是那些幽灵行永远清不掉。现在 `lib/scanner.js` 的 `collapseDuplicateRows(registry)` 在合并**写入前**先折叠：同一个「名字 + 命令契约（`transport`/`command`/`args`/`url`）」只留一行。留下的那一行优先带 `serverName`（挂载身份是最难重新推导的字段，留着它才能把已挂载的服务器认回来），其次是 `providedExternally: true`（外部提供的记录不能因为折叠而消失），再不行才是第一条；`enabled` **取自存活的那一行而不是整组 OR**——那一行才是真正被挂载的那条，折叠不允许改变服务器跑不跑；`about` / `updateCheck` / `updatedAt` 取最新，`importedAt` 取最早（它记的是「第一次见到」），整组里出现过 `providedExternally` 就保留该标记。折叠在三处发生：**插件加载时**对磁盘上的注册表跑一次（真的删了行才写盘，并 `log.warn` 记下名字与删了几行）、`mergeIntoRegistry` 的前后各一次，以及 `POST /api/overall-mcp/scan` 的返回体里带 `collapsed:[{name,dropped}]`——面板与调用方不需要猜。单测见 `test/scanner.test.mjs`（同一个服务器只留一行、带挂载身份的那一行活下来并且 `enabled` 不被改动、结果如实报告删了什么）。注意区分：这里的「重复行」是**同一条目在注册表里出现多次**（本插件负责），与下面「已由其他插件提供」的**跨插件重复挂载**是两回事——`rea`（harness 家目录补丁 `~/.dsh/cordis.patch.yml` 的 `rea-mcp`，界面显示「已由其他插件提供」）与 `rea-cursor`（本插件挂载的同一命令）本来就是两份配置，本插件不会替用户删掉其中一份。
 
@@ -306,7 +302,7 @@ Invalid schema for function 'mcp__rea-om__analyze_javascript_application':
 `GET|POST /api/overall-mcp/install-evidence`（恢复安装命令的走查：读状态 / `{action:'start'|'stop', force?}`，见下）、
 `GET|POST|DELETE /api/overall-mcp/auth`（GitHub 凭据：读状态 / 存一个 token / 清除，见下）、
 `GET|POST /api/overall-mcp/updates`（版本检查）、`POST /api/overall-mcp/update`（更新并重连）、
-`GET|POST /api/overall-mcp/catalog?query=&source=&limit=&refresh=`（`source=census` 是本机普查索引的视图，见第二十四轮）、
+`GET|POST /api/overall-mcp/catalog?query=&source=&limit=&refresh=`（`source=census` 是本机普查索引的视图）、
 `GET|POST /api/overall-mcp/sources`（自定义目录源：列出 / 添加）、`POST /api/overall-mcp/sources/remove`（移除一个，见下）、
 `POST /api/overall-mcp/scan`、
 `POST /api/overall-mcp/install`、`POST /api/overall-mcp/set-enabled`、
@@ -317,11 +313,11 @@ Invalid schema for function 'mcp__rea-om__analyze_javascript_application':
 
 错误码分层（`lib/http-status.js`，单测 `test/http-status.test.mjs`）：`unknown server`/`unknown source` → **404**；缺参数（`item/key/name/source/enabled ... required`）、`no installable transport`、`is not launched through a package runner`、给了值但不可用（`on must be a boolean`）、枚举里的非法动词（`unknown census action`、`unknown evidence action`）、把动词放进 GET（`... must be sent as a POST`）→ **400**；`ambiguous server name`（同名多条目，没带 `slot`/`from`）、`stale entry`（你读到的那一行已经不在原位）、`manual entry`（这个名字属于手工添加的记录，安装不覆盖它）→ **409**；上游版本查询失败（`version lookup failed`）→ **502**；其余一律 **500** 并由宿主 `log.warn` 记一行（含方法、URL 与消息）——500 的含义就是「这条路径我们没预料到」，早先它和「你参数写错了」共用 400，真正的事故看起来像用户的错。
 
-读与写分得比参数校验更硬：`GET /census?action=start`、`GET /install-evidence?action=stop` 一律 **400**，因为一次预取不该成为「一次正在跑的走查到底停没停」的分界线（第二十三轮补严；两条路由同规矩）。
+读与写分得比参数校验更硬：`GET /census?action=start`、`GET /install-evidence?action=stop` 一律 **400**，因为一次预取不该成为「一次正在跑的走查到底停没停」的分界线。
 
 `POST /api/overall-mcp/install` 的 body 是 `{ item, overwrite? }`；`/update`、`/remove`、`/set-enabled` 是 `{ name, slot?, from? }`（同名多条目时不带 `slot`/`from` 返回 409）；`POST /api/overall-mcp/sources` 是 `{ url, label? }`（`label` 省略时由地址推断）；`POST /api/overall-mcp/sources/remove` 是 `{ id }`。
 
-`POST /api/overall-mcp/install` 的回复里 `server` 是**服务器名**（就是刚写进注册表、也是挂载用的那个名字），`installed` 是**布尔**——它与市场条目上的 `installed` 同一个意思（第二十轮改名：此前这个名字被当成字符串复用，一个词两个意思）。回复把两层结果分开：`connect` 是挂载结果（`{ok:false, error}` 时条目已写入注册表但**没有连上**，此时 `counted:false` 且 `note` 说明没有计入本市场安装数），后面可能跟着 `diagnosis: {text, route, cached?}`（模型给的解释）、`diagnosisSkipped: "no-llm"|"no-route"`（解释不了的原因）或 `diagnosisError`（调用失败的原因）——三者的取舍见「MCP 市场」一节的「安装失败时的自动诊断」。
+`POST /api/overall-mcp/install` 的回复里 `server` 是**服务器名**（就是刚写进注册表、也是挂载用的那个名字），`installed` 是**布尔**——它与市场条目上的 `installed` 同一个意思。回复把两层结果分开：`connect` 是挂载结果（`{ok:false, error}` 时条目已写入注册表但**没有连上**，此时 `counted:false` 且 `note` 说明没有计入本市场安装数），后面可能跟着 `diagnosis: {text, route, cached?}`（模型给的解释）、`diagnosisSkipped: "no-llm"|"no-route"`（解释不了的原因）或 `diagnosisError`（调用失败的原因）——三者的取舍见「MCP 市场」一节的「安装失败时的自动诊断」。
 
 `GET|POST /api/overall-mcp/sources` 与 `POST /api/overall-mcp/sources/remove` 是「自定义目录源」的读写面（`lib/custom-sources.js`，单测 `test/custom-sources.test.mjs`）：GET 回 `{sources:[{id,label,url,submission}], max:8, error}`（`error` 是 `sources.json` 读不出来的原因，此时 `sources` 为空**但仍然可用内置六源**），POST 添加一个。`submission` 由宿主从地址推出（`lib/submission.js` 的 `githubRepoOfSourceUrl`）：住在 GitHub 仓库里的清单得到 `{repo, url}`（`url` 就是预填好的 `issues/new` 地址），别处托管的清单得到 `null`、面板于是不画那个链接。校验在 `normalizeSourceUrl`（只放行 `https:`、必须带主机、拒掉带用户名口令的地址、长度上限 600）与 `validateSourceInput`（地址重复 → 409，含与自己的对比；标签上限 40 字符），落盘前还兜一层 `addSourceTo` 的上限检查（第 9 个 → 409 `too-many-sources`）。id 由 `sourceIdFor` 从 `host + pathname` 生成 `custom:<slug>`（≤48 字符，小写、非字母数字折成 `-`、去重尾），所以「同一个地址」永远是同一个 id；标签由 `defaultLabelFor` 推出 `owner/repo`（GitHub raw、jsDelivr 的 `gh/owner/repo@ref`）或主机名。`normalizeSourcesDocument` 在**读取时**重跑地址校验：手改文件塞进来的 `http://` / 带口令 / 超长的行会被丢掉而不是带着进市场。删除成功会调 `catalogCache.forgetSourceId(id)`，否则被删源的行还能从来源层缓存里活 60 秒。
 
@@ -332,7 +328,7 @@ Invalid schema for function 'mcp__rea-om__analyze_javascript_application':
 - 缓存按参数显式传入（`browseCatalog({ cache })`），不传就是老行为（每次真抓）——单测里近百次 `browseCatalog({ fetchImpl })` 因此不需要知道缓存存在。
 - 查询串截断到 200 字符后才参与缓存键（否则请求方可以拿超长 query 撑出无界键空间、每条都吃一份整份列表的内存）。手动 `refresh` 跳过来源层 TTL，但**仍然**走 URL 层的条件请求：刷新通常就是一次 `304`，元信息行会把「N 源未变」写出来。
 - 用户自己加的目录源（见「MCP 市场」一节）走的是**同一条**路径：它们进 `CATALOG_SOURCES` 之外的动态列表，来源层缓存键就是它们的 id，`/catalog?source=<自定义 id>` 与内置源行为一致；`sources` 返回体因此把每个源写成 `{at, cached, stale, notModified, items, merged}`（或一个 `{error}`），面板的各源时间/状态行读的就是它。
-- **`counts` 是合并后的数**（第二十轮）：`sources[id].items` 仍是该源这次**走过**的条数，而 `counts[id]` 与 `sources[id].merged` 是**去掉重复之后计入本页**的条数——面板把它们与「共 N 条」并排，两者必须用同一把尺子（此前 `counts` 是 merge 前的 walked 数，加起来永远比总数多）。`deduped` 是这次被合并掉的重复条数（同一个仓库被多个来源同时收录），答空但没报错的来源显式给 0 而不是缺席。
+- **`counts` 是合并后的数**：`sources[id].items` 仍是该源这次**走过**的条数，而 `counts[id]` 与 `sources[id].merged` 是**去掉重复之后计入本页**的条数——面板把它们与「共 N 条」并排，两者必须用同一把尺子（此前 `counts` 是 merge 前的 walked 数，加起来永远比总数多）。`deduped` 是这次被合并掉的重复条数（同一个仓库被多个来源同时收录），答空但没报错的来源显式给 0 而不是缺席。
 
 模型工具 `overall_mcp_search` 与市场页共用同一条聚合查询（`lib/catalog.js` 的 `browseCatalog`）：同一套去重、分组与排序，只是服务端把结果截到 50 条。
 
@@ -344,67 +340,6 @@ key 就是市场卡片的 React key，因为官方 Registry 的 id 随版本变�
 `GET /api/overall-mcp/favorites` → `{"favorites":["<source>:<id|title>",...],"count":N}`：**读取面**。需要它是因为 `/catalog` 只标注本次查询命中的条目：来源筛选或搜索词会把其余的藏起来，于是「我到底收藏了什么」需要独立答案。
 面板上对应的是市场页筛选行里的**仅看收藏 (N)** 按钮：它是对当前列表的视图过滤（不是重新查询），并在宿主总数多于当前可见数时明说「共 N 条收藏；当前来源与搜索下能看到 M 条」，免得筛出来的空列表看起来像「一条都没收藏」。
 实测：`{"key":"official-registry:official:ai.0si/disclosures","favorite":true,"favorites":[...]}`，再次浏览同一条目即返回 `favorite: true`。
-
-## 面板身份行与动作日志（第十八轮）
-
-宿主插件的代码在 DSH 启动时只载入一次（见「常见问题」）。这带来一个用版本号答不上来的问题：**这个面板此刻到底在跑哪份代码？** 页头原来的第二行是一句写死的标语，现在它改读 `GET /api/overall-mcp/status`：
-
-`插件 v0.5.0 · pid 4242 · 已运行 3 小时 12 分 · 5 个数据文件 · 日志 2 条`
-
-`/status` 把三组事实分开报，因为它们的失效方式不同：
-
-- `plugin`：`id` / `version`（读 `package.json`，不是前端那个字面量）/ `dir`（宿主实际载入的目录）/ `loadedAt`（进程启动时刻），以及 `source`——`index.js`、`client/client.js` 与 `lib/*.js` 各自在磁盘上的 `mtime` 与大小；`stale` 表示**磁盘上的代码比当前进程新**。这时页头画一颗琥珀色「⚠ 代码已更新，重启 DSH 后生效」（悬停给出进程启动时刻），因为它和「这个 bug 还在」看起来一模一样，而两者之间只差一次重启。
-- `host`：`pid`、`startedAt`、`uptimeMs`、`node` / `electron` / `platform` / `arch`。用户报问题时需要的正是这四行里的东西。
-- `data`：数据目录与其中每个文件的 `{bytes, at}`（没写出来的文件 `bytes: null`，身份行也只数存在的那些），外加 `census` / `evidence` / `quota` / `errors` 的现状摘要。
-
-与之配套的是 `GET /api/overall-mcp/events?limit=`：宿主把**动作**追加进 `$DSH_HOME/overall-mcp/events.ndjson`（一行一个 JSON，见「数据」），面板上「运行日志」按钮展开即读。记的是动作而不是聊天：`browse`（哪个源、命中几条、耗时、是否命中缓存）、`source`（每个源的成败与原因）、`quota`（GitHub 搜索配额用尽的那一次）、`scan`（读到几个文件、导入/跳过/折叠/孤儿各几条）、`census`、`evidence`、`install`（挂载是否成功、是否计入安装数）、`source-config`、`update`、`mount`、`registry`（损坏、折叠修复、清理孤儿）。**只写元数据**：服务器名、来源 id、条目 id、条目数、耗时、错误文本——不写查询正文之外的用户内容，也不写任何密钥（安装命令里的 token 从不经过这里）。
-
-几条实现上的取舍（`lib/events.js`，单测 `test/events.test.mjs`）：
-
-- **日志不能把插件写挂**：`emit()` 在没有 sink 时是空操作，sink 抛错被吞掉，写盘走一条串行队列（并发 `append` 不会互相截断），失败返回 `null` 而不是抛出——一个写不进去的日志文件不该让扫描或安装失败。
-- **有界**：默认保留最近 400 行 / 256KB（按行数或字节数先到者），修剪时在最前面补一行 `{"kind":"log","action":"trim"}` 说明丢了多少行，而不是让日志悄悄从中间断掉。
-- **不因为一个字段而丢一行**：单个字段超过 600 字符截断、数组超过 20 项折成计数、对象在两层以上折成 `{…}`；极端到整行都序列化不了（例如含 `BigInt`）时写 `{"kind":"log","action":"unserializable"}`——这一行本身就是证据。反过来，面板的渲染器也不只为已知字段写模板：认不出来的字段会以 `key=value` 追加在同一行（`server=codegraph · mounted=true`），所以新版本宿主多记一个字段时旧面板也能看见它，而不是把它藏起来。
-- **读的是尾部**：`/events` 默认回最近 100 条（`limit` 上限 500），从旧到新排列，另报 `total` 与 `damaged`（读不动的行数，文件被外部写过时的取证）。宿主若比面板旧、根本没有这条路由，日志框里写「宿主插件还是旧版本（没有 /api/overall-mcp/events）；重启 DSH 后再看运行日志」，而不是把整页标红，也不会假装「这次运行还没有记录」——前者是版本事实，后者是对一份读不到的日志撒谎。
-
-## GitHub 凭据与普查续跑（第十九轮）
-
-普查（GitHub 仓库发现 + 从仓库证据恢复安装命令）在**匿名**下一直就能跑，这一点本轮没有改；改动是让它跑得完，并且在有 token 时快得多。
-
-### 凭据从哪来
-
-五级来源，**只有校验通过的 token 才成为活跃凭据**——否则一个打错的 token 会把每个请求变成 401，比匿名更差：
-
-| 顺序 | 来源 | 说明 |
-|---|---|---|
-| 1 | 面板填写的 token | 「已注册」页顶部的 GitHub 访问卡，存 `$DSH_HOME/overall-mcp/github-auth.json`（0600，临时文件 + `rename`） |
-| 2 | `DSH_GITHUB_TOKEN` | 宿主进程环境变量 |
-| 3 | `GITHUB_TOKEN` | 通用环境变量 |
-| 4 | `gh auth token` | 机器上已经登录过 GitHub CLI 时不必再填一次（Windows 上找 `gh.cmd`） |
-| 5 | 匿名 | 上面都没有、或校验失败时的最终归属 |
-
-那张卡写着当前来源、掩码后的 token（`ghp_ab…6789`）、登录名、配额余量（`4999/5000`）与下一次重置时刻，按钮是「换成我的 GitHub 登录」/「填写 token」/「清除」/「重新检测」。`gh` **只在你点「换成我的 GitHub 登录」时才问一次**（不在启动时偷偷跑子进程）；粘贴的 token 也不会被复制到别的地方。
-
-### 为什么不是 OAuth 设备码
-
-设备码流程需要一个**属于注册方**的 client_id：这个 id 印在代码里，谁都能拿去别处用，而本插件不持有、也不该转发任何人的第三方应用身份。`gh auth token` 是「这台机器上已经有一个人登录过」这一事实的诚实读法，不替用户保管凭据。
-
-### token 只发给 GitHub
-
-凭据**永不离开 `lib/github-auth.js`**（单测 `test/github-auth.test.mjs`）：调用方拿到的是掩码、登录名与配额，唯一读到明文的是 `withGithubAuth(url, headers)`，而它按**主机白名单**放行——只有 `api.github.com` 与 `raw.githubusercontent.com` 会拿到 `Authorization`。插件同时打 Docker Hub / npm / PyPI / Smithery / 官方 registry，把 GitHub token 发过去等于把凭据交给第三方。
-
-### 普查不再因为一次网络失败而终结
-
-`lib/repo-install.js` 的走查原来是「第一次失败就 `break`」。直播日志里那次是 **260 次请求 / 124 秒只覆盖 2111 行里的 77 行（3.6%）**，结束语是「第 260 次请求失败：fetch failed」——剩下的 2034 行一次都没走到。现在：
-
-- 网络错误、上游 5xx、以及被上游拒绝（403/429）都**按仓库重试**（默认 2 次：退避 400ms 起、翻倍、封顶 5 秒），重试前的等待会跳过该仓库的下一次节流等待（不再空转）；
-- 连续被拒绝 3 次才收工——有些上游是真的在要求你降速，反复撞墙比停手更糟；
-- 走查报告 `{requests, planned, attempted, remaining, retries, partial}`：`/status`、`/events` 与面板因此能说「计划 3 个仓库、走到 1 个、剩 2 个、重试 2 次」，而不是只说一句「失败」；
-- **续跑本来就有**：下一次普查只挑「还没有证据、或证据已过期」的行（`needsInstallEvidence`），所以中断后重启 DSH 再点一次「重新普查」是从断点继续，不是从头再来——本轮补的是「它为什么会中断」；
-- token 被上游拒绝（401）时宿主**立刻退回匿名**并记一行日志说明，匿名走查照旧继续，而不是整场退出。
-
-### 匿名不是残废，只是慢
-
-匿名 `api.github.com/search/repositories` 是 **10 次/分钟**、核心 API 是 **60 次/小时**；带 token 分别是 30 次/分钟与 5000 次/小时。取仓库文件（`raw.githubusercontent.com`）匿名也能做，只是配额紧。所以面板上的措辞是「匿名访问：在下面填一个 GitHub token，上限从 60 次/小时升到 5000 次/小时」，而不是「必须登录才能用」。
 
 ## 扫描的宿主机位置
 
@@ -419,71 +354,6 @@ key 就是市场卡片的 React key，因为官方 Registry 的 id 随版本变�
 | Gemini CLI | `~/.gemini/settings.json`（`mcpServers`） |
 
 仅读取上述白名单路径；不递归扫描任意目录，不收集遥测。
-
-## 界面口径与并发（第二十轮）
-
-这一轮没有新面板，改的是六处「界面说的和宿主做的不是一回事」。它们都不影响能不能用，只影响**你读到的数字与时间到底是什么意思**——而这类错误恰恰是最难自己发现的，因为它看起来永远是对的。
-
-1. **组开关与启动挂载改有界并发**。一次挂载 = 起一个子进程 + 握手（`CONNECT_WAIT_MS` 8 秒封顶），此前是串行 `for` 循环，最坏 `成员数 × 8 秒`：2026-10-16 的实测里，五个成员的分组开关卡在「正在切换…」40 秒。现在 `CONNECT_CONCURRENCY = 4` 条同时在飞（`mapLimited`，保序——客户端按数组下标读结果），`connectEnabled`、组开关、扫描后连接新条目三处共用它。并发还顺手修掉一个不真实的断言：注册表里同名多行（第十五轮的重复行）在串行时代会**各自去挂一次**，败者的名字冲突被写成「另一个 mcp-client 已提供」，读起来像宿主出了问题。现在按名字去重——**每个名字只挂一次**，同名兄弟共享第一行的裁决，失败只记在真正做了挂载尝试的那一行上，兄弟如实读作「启用但未挂载」。
-2. **每源条数与「共 N 条」用同一把尺子**：`counts` 改为合并后的数，另给 `deduped`（见 HTTP API 一节）。此前它们一个是 walked、一个是去重后的总数，加起来永远对不上。
-3. **两个「更新于」拆开**：面板此前在两处都写「更新于」，一处是**本地读目录**的时间（列表元信息行、每源行），一处是**仓库最近一次 push**（卡片与详情）。现在前者写「列表读取于」、后者写「上游更新于」，悬停各自说明它是什么时间——同一个词指两件事，就等于没有说。
-4. **`installed` 一义一名**：`/install` 回复里原本用 `installed` 装服务器**名字**，而市场条目上 `installed` 是**布尔**。现在名字叫 `server`、`installed` 永远是布尔（见 HTTP API 一节）。
-5. **「无使用量数据」直接写出来**：按「使用量最多」排序时，没有任何使用量数字的条目此前会静默按质量分落位，界面上看不出它为什么在这儿。现在卡片上写一颗「无使用量数据」，悬停说明该来源没发布使用量、本机也没装过，且它按使用量排序时排在后面（不是排错，是没得比）。
-6. **推断出来的分类处处带「（推断）」**：卡片分类胶囊的悬停文案早就有这句，但详情面板与分类下拉里没有——同一个推断出来的分类，换个地方看就变成了事实。现在三处一致（`groupSource === "inferred"`）。
-
-验证：`node --test` 284/284（新增两条宿主契约用例：启动挂载与组开关「同名只挂一次、每行都有答案」），`tools/render-market-tab.mjs` 14 节全绿（新增第 4c-2 节：无使用量数据、上游推送时间、推断分类三件事都在界面上说清了）。
-
-## 工程化与版本（第二十一轮）
-
-这一轮没有新功能。加的是**别人（以及三个月后的自己）能不能复核这份代码**：三条会被真实失败触发的契约、两支持续探测进入 CI、一个真的会红的工作流、一份英文入口，和一份更新日志。
-
-1. **收藏路由的往返契约**（`test/index.test.mjs`）。收藏此前只有渲染探针覆盖，而渲染探针喂的是桩状态：它证明面板画得对，不证明宿主真的把收藏写进了 `registry.json`。新用例走真路由与真文件：`{key:'smithery:brave', on:true}` → 200 且 `favorite:true`、`favorites:['smithery:brave']`；重复发 `on:true` 仍为 `true` 且只有一条（这就是面板为什么要发 `on` 而不是发「切换」：重发一次不能让收藏消失）；`GET /favorites` → `{favorites:['smithery:brave'], count:1}`，且**从磁盘回读**的 `registry.favorites` 与它深等（写到了文档，而不只是改了内存）；`on:false` → `false` 与空数组；**不带 `on` 的两次调用分别给出 `true`/`false`**（旧的切换语义保留，因为它已经在工具与既有调用方那里）；`on:'yes'` → **400** 且随后 `GET /favorites` 的 `count === 0`（坏输入不能留下半个状态）；缺 `key` → 400。
-2. **畸形 `on` 不再算内部故障**。`lib/http-status.js` 新增一条规则：消息里出现 `must be a boolean` 的调用方错误映射到 400（`test/http-status.test.mjs` 有断言）。`on: "yes"` 是「值给了但不可用」，与「没给」同类，此前会落到 500——而 500 的含义是「这条路径我们没预料到」。
-3. **两支持续探测进入 `test:probes`**：`tools/verify-detail-links.mjs`（逐源链接覆盖、零死链、零重复 URL）与 `tools/verify-group-row.mjs`（chip 行的显示/隐藏判定与计数之和）。两者都读**实时目录**，所以没有任何来源应答时它们 `exit 2`（不是 1）并打印「no source answered — nothing was verified (offline?)」——已用 `node --import` 把 `fetch` 打桩成全部失败实测过这条路：没有来源时它们的断言是空真的，而「0 条死链」在 0 个条目上正是这些文件存在的意义所反对的那种假绿。让 CI 把离线读成失败，是这两支探针能进 CI 的唯一诚实方式。`tools/probe-favorites.mjs` 需要活实例的 base 与 token，因此留在 `npm run test:live` 里单跑。
-4. **`verify:ci` 与 `verify` 拆开**，以及一个真的会失败的 CI：`verify:ci` = `lint && test && test:registry && test:probes`，`verify` = `verify:ci && test:layout`。`test:layout` 需要本机真实的 Chromium（`tools/layout-probe.mjs` / `tools/shot.mjs` 走 `CHROME_PATH`，默认指向 Windows 上的 Chrome），所以它留在本地。新增 `.github/workflows/verify.yml`：`push`/`pull_request`/`workflow_dispatch`，矩阵 `node 22.x` 与 `24.x`（对应 `engines` 的 `^22.19.0 || >=24.0.0`）；这个包**没有任何依赖**，所以工作流里没有安装步骤、没有锁文件、没有缓存。
-5. **版本策略与更新日志**。`package.json` 从 `0.1.0` 提到 **`0.2.0`**：此前二十轮一直是 `0.1.0`、也没有任何发布记录，而第二十轮的六处口径修正已够一次 minor。两处版本号（`package.json` 与 `client/client.js` 的 `CLIENT_VERSION`）由 `tools/client-smoke.mjs` 钉住相等，并且这一轮新增 `CHANGELOG.md` 后，同一个探针还断言**最新一节 == `package.json` 的版本**——缺文件、没有版本小节、与 `package.json` 不一致三种情况都失败（实测删掉 `CHANGELOG.md` 时 exit 1）。理由是 `CLIENT_VERSION` 是一个字面量：没有这条断言，它就会在某次升版本时悄悄落后，而面板上的版本号正是第十八轮那条身份行用来回答「你现在跑的是哪份代码」的东西。
-6. **英文入口 `README.md`**。两份文档分工不同：英文那份是入口与实际用法（快速开始、三个标签页、模型工具、API、数据、安全、常见问题），中文这份是完整工程记录——每一轮的理由、实测数字和取舍都在这里。
-
-验证：`npm test` **285/285**（新增收藏往返契约；`lib/http-status.js` 的布尔规则断言加在既有用例里，故只 +1），`npm run lint` exit 0，`npm pack --dry-run` **26 个文件** / tarball **280.1 kB** / 解包 **796.2 kB**（第二十轮时 23 个 / 229 kB；`README.md` 与 `CHANGELOG.md` 是这一轮进 `files` 的）。
-
-## 普查可以手动启停（第二十二轮）
-
-这一轮没有新数据，加的是两个此前**只有后果、没有按钮**的动词：开始普查、停止普查。
-
-1. **为什么需要**。普查（`github-index.json`）此前只在一件事发生时开始：缓存过期后有人浏览 GitHub 来源。想要一份更新的索引，只能去点浏览；**想让它停下来则完全没有办法**——中止它的 handle 一直存在（插件卸载用它），却没有调用方，所以「停下来」的实际含义是重启 DSH。而一次普查是 6.5 秒一个请求、最多 48 个请求，也就是最长约五分钟。
-2. **一条路由，两个动词**。`/api/overall-mcp/census`（见 HTTP API 一节）：`GET` 读状态且**不触发任何请求**（索引是磁盘读，这一点和面板里那一行悬停写的一致）；`POST {action:'start'}` 不等缓存过期、现在就把缺的补上；已经有一个在跑时不会再起第二个（`started:false` 但 `walking:true`，这是诚实答案）；搜索额度还没恢复时**不起步**并回 `skipped:'quota'` 与 `waitMs`，而不是花掉一次请求去换一个 403。`POST {action:'stop'}` 中止在飞的那一次，回 `stopping:true`；没有在跑时回 `stopping:false`——那不是错误，是「没有东西可停」。
-3. **状态里有的东西，以及为什么要单列「谁停的」**。`/status` 与这条路由共用同一个 `censusState()`：`rows/at/complete/partial/requests` 来自索引文件，`walking/progress` 只有宿主进程知道（文件在跑的时候只写「正在抓取」，从不写走到第几个请求），`ended:{reason,at}` 记**是谁**停的（`user` 或 `dispose`）。最后这项值得单列，是因为 `crawlGithubRepos` 自己只会报一句「已中止」：读者要区分「我按了停止」与「插件被卸载了」，而理由只有宿主知道，所以由宿主写下来——面板上那句是「上次是手动停止的」，文件里那句是「已手动停止（已收 N 行，下次接着走）」。
-4. **面板**：已注册标签页的 GitHub 访问卡里多了一行普查状态（形如 `普查索引 1.8k 行 · 读完于 09:30`，悬停说明索引是本地文件、读它不花请求），右侧按状态给动词——没在跑给「开始普查」，在跑给「停止普查」并同时显示进度（`正在普查：已收 N 行 · M 次请求 · 每 6.5 秒一次请求，可以随时停止`）。停止之后再看这一行，它会写「上次是手动停止的」：这条行最该回答的问题就是「为什么停了」。
-5. **停止是安全的**。已收到的行在走的过程中就会落盘（写作 `正在抓取（已收 N 行）`、`complete:false`），所以停止不会丢掉它们，下一次 `start` 从缺的仓库接着走；另外，**被停止的普查不会顺带去抓安装证据**（`maybeCrawlInstallEvidence` 只在自然结束时触发）——读者既然按了停止，就不该在别处继续花额度。
-6. **未知动词是调用方错误**：`{action:'stpo'}` → **400**（`lib/http-status.js` 新增一条 `unknown <x> action` 规则）。若不拒绝，它会读成「没有动作」并回一份状态，对发送者而言和成功无法区分。
-
-验证：`npm test` **286/286**（`test/index.test.mjs` 新增「the census is a GET that starts nothing, and stop really ends the walk」：读不触发请求、未知动词 400、`start` 只起一个、`stop` 中止在飞的那次并写下 `reason:'user'`、停止本身不额外花请求），`tools/render-market-tab.mjs` **15 节**全绿（新增第 6e 节：状态行与动词随状态互换）。整条 `npm run verify` exit 0。
-
-## 恢复安装命令可以手动启停（第二十三轮）
-
-第二十二轮把普查的两个动词交到读者手上；同一张卡里还有**第二趟走查**，它此前仍然是「打开市场就自己开始、只能靠卸载插件停下」——读两千多个仓库、每个 150ms、最多 6000 个请求 / 25 分钟。普查回答「GitHub 上有哪些 MCP」，这趟走查回答「这些仓库该怎么装」，而这趟走查一直没有按钮。
-
-1. **为什么需要**。`github-install.json` 由一个后台走查维护，触发点是**打开市场页时问一次**（`POST /install-evidence`，缓存新鲜时宿主自己跳过）：读者没按过任何按钮，一次可能长达二十五分钟的抓取就开始了；而中止它的 handle（`evidenceStop`）此前只被插件卸载使用——所以「让它停下来」和普查一样，等于重启 DSH。
-2. **一条路由，两个动词**。`/api/overall-mcp/install-evidence`：`GET` 只读状态、不触发任何请求；`POST {action:'start'}` 开始或从断点续跑，`force: true` 才忽略新鲜度检查（不带 `force` 时正新鲜的走查回 `skipped:'nothing-to-do'`，没有索引时回 `skipped:'no-census'`——两者都不是错误）；已经有一个在跑时不会再起第二个（`started:false` + `walking:true`）；`POST {action:'stop'}` 中止在飞的那次并写下 `ended:{reason:'user'}`，没有在跑时回 `stopping:false`（「没有东西可停」不是错误）。**不带 `action` 的 POST 仍然等于 start**：面板打开市场时发的就是这一种，旧调用方不必改。
-3. **状态与进度**。`/status` 与这条路由共用 `evidenceState()`：`rows/withCommand/at/requests/partial/plan/loaded/damaged` 来自文件，`walking/progress` 只有宿主进程知道，`ended.reason` 记**是谁**停的（`user` 或 `dispose`）。进度是**对着它自己的计划**报的（`已试 78 / 2.1k 个仓库`），因为这趟走查的主循环知道自己打算试多少个、以及第几个仓库正在读（`progressOf(id, kind)`，`lib/repo-install.js`）。
-4. **停止发生在两个请求之间，而不是走完之后**。走查每读一个仓库都会检查停手把手，并把 `signal` 一路传给 `readRepoFile` / `fetchText`，所以按了停止不会再等 2111 个仓库：当前这一条读完立刻收手，已恢复的命令照旧落盘，`partial` 写明停在哪（「已手动停止（已试 78 个仓库，下次接着走）」）。这与普查停止的语义一致——两趟走查都把自己写进文件，所以停止不会丢结果。
-5. **面板**：同一张 GitHub 访问卡里多了第二行（形如 `查过 77 个仓库 · 恢复出 54 条安装命令 · 上次是手动停止的 · 没读完：…`），右侧按状态给动词——还有剩的写「接着恢复」（走查自己会跳过已试过的行），跑起来了写「停止恢复」并报进度。两行各自带自己的动词，因为这两趟走查**共享零预算、零时钟**，把两者都叫「普查」正是有人按错按钮的原因。
-6. **GET 不能改状态**（这一轮顺手补严的）：`GET /install-evidence?action=stop` 与 `GET /census?action=start` 一律 **400**（`lib/http-status.js` 新增一条 `action must be sent as a POST` 规则），未知动词同样 400（`unknown evidence action`）。一个预取请求不该成为「一次正在跑的恢复到底停没停」的分界线。
-
-验证：`npm test` **288/288**（`test/index.test.mjs` 新增两条：恢复走查 GET 不花请求 / 未知动词 400 / `start` 只起一个 / `stop` 写下 `reason:'user'`；以及 GET 带动词一律 400），`tools/render-market-tab.mjs` **15 节**全绿（新增第 6f 节：恢复行自己的状态与动词随状态互换），整条 `npm run verify` exit 0。
-
-## 本地普查也能当来源看（第二十四轮）
-
-第二十二、二十三轮把两趟走查的启停交到读者手上，但索引建起来之后还缺一件事：**去看它**。此前市场页只有 `GitHub` 一个来源，而它读的就是本机普查索引——于是「我刚去 GitHub 问了一遍」与「我在看你本机已经有的那份清单」在面板上长得一模一样，尽管后者的代价是零。
-
-1. **一个视图，不是第七个来源**。`/api/overall-mcp/catalog` 接受 `?source=census`（`lib/catalog.js` 的 `CENSUS_SOURCE`）：这一趟被归一成 `github-mcp`，所以条数仍然计入 `github-mcp` 那一个键，回复里的 `aliasOf:'github-mcp'` 只用来告诉面板「这份名单是借来的」。不新增来源是有代价的理由：普查的那 1.8k 行本来就以 `github-mcp` 的身份计过数，再加一个来源会让「共 N 条」重复计一次，而来源列表是公开契约——**一个上游，一个数字**这条口径因此没变。
-2. **它只读索引，一次请求都不花**。`fetchGithubMcp` 在视图模式下只走索引分支，之后**立刻**返回：没有索引就写「本机还没有普查索引：在 GitHub 访问卡里开始一次普查，建好后这里直接读它，不发请求」，绝不落回「索引过期就顺手走一遍」那一段（视图下 `githubWalk` 固定为 `null`）。索引自己超过 24 小时只影响它标不标「旧」，不影响能不能读——「看清单」不该变成「花最多 48 次请求」。
-3. **名字按你选的那个写**。面板的来源筛选里 `本地普查（索引）` 就排在 `GitHub` 右边，数字行原先写「GitHub 1.8k」、在视图下改写成「本地普查（索引） 1.8k」：数字没动，名字取自选项自己的标签，所以筛选器和数字行不会各说一套。缓存也各分一份（键里带 `|census` 后缀），先看视图再看 `GitHub` 不会互相冒充。
-4. **视图不动任何状态**：不触发普查、不推进恢复走查、也不算「有人看过 GitHub」——它只是一次读盘。要开始或停下来，仍然是那张 GitHub 访问卡上的两个动词（第二十二、二十三轮）。
-5. **命令行等价物**：`POST /api/overall-mcp/catalog {"source":"census","query":"filesystem","limit":50}`——`aliasOf`、`transient`、`counts` 与面板看到的是同一份回复。
-6. **仓库元数据**（这一轮顺带做完的第二件事）：`package.json` 的 `repository`/`homepage`/`bugs` 不再留空，填的是真实存在的三个页面（`https://github.com/YunzhouLi-hub/dsh-overall-mcp`、其 `#readme`、其 `/issues`），并且 `main` 已经推到那个远端——此前留空正是因为「不写没验证过的地址」。
-
-验证：`npm test` **292/292**（`test/catalog.test.mjs` 两条：视图零请求、没有索引时如实说「还没有普查索引」、有索引时只读本机不出网、与所读上游共用一个计数键；`test/index.test.mjs` 两条：`aliasOf` 与计数键不变、没有普查时视图也不发请求），`tools/render-market-tab.mjs` **16 节**全绿（新增第 4d-2 节：选项位置与标签、请求确实带 `source=census`、数字行按选择命名而不是写成 `GitHub`），整条 `npm run verify` exit 0。
 
 ## 市场数据来源（2026-10 实测）
 
@@ -526,47 +396,47 @@ key 就是市场卡片的 React key，因为官方 Registry 的 id 随版本变�
 ## 开发
 
 ```sh
-npm test                                                   # 纯逻辑测试（lib/ 零依赖）；脚本是显式文件列表
-npm run test:registry                                      # 复核已发布的 registry.json
-npm run test:probes                                        # 渲染探针：把真页面渲染出来并断言 DOM（含两支读实时目录的校验）
-npm run test:layout                                        # 需要本机真实 Chromium（CHROME_PATH），只在本机跑
-npm run test:live                                          # 需要活实例的 base 与 token（活实例专用）
-npm run verify:ci                                          # lint && test && test:registry && test:probes ← CI 跑这个
-npm run verify                                             # verify:ci && test:layout ← 提交前跑这个
-#   .github/workflows/verify.yml 在 push / PR / workflow_dispatch 上跑 verify:ci，矩阵 node 22.x 与 24.x；
-#   本包无任何依赖，所以工作流里没有安装步骤、没有锁文件、没有缓存
-node --test test/events.test.mjs                           # 动作日志本身：往返、按行/按字节修剪并留痕、损坏行计数、并发追加不互相截断、写不进去只回 null
-node --test test/index.test.mjs                            # 宿主契约测试：真跑 apply(ctx)，假宿主 + 临时 DSH_HOME（见下）
-#   三个宿主 peer 依赖本仓库不安装，由 test/hooks.mjs 映射到 test/stubs/；npm test 的脚本是显式文件列表，新增测试要加进去
-node tools/client-smoke.mjs                               # 客户端注册契约 smoke（模拟前端 module loader；断言客户端版本号 == package.json == CHANGELOG 最新小节）
-node tools/render-detail.mjs                              # 渲染详情页：事实表有值、链接齐全、命令可见、复制按钮真的把命令交给剪贴板（打桩 navigator.clipboard 后驱动真实按钮）
-node tools/render-card.mjs                                # 渲染卡片：标题是链接、正文不是 button、无嵌套交互元素、GitHub 标记/版本在位、命令行只在详情面板
-node tools/render-market-tab.mjs                          # 渲染整个市场页 chrome：页头两行（含身份行与折叠的运行日志）、页签计数、搜索行、筛选行、元信息行、卡片流、页脚分工，以及「仅看收藏」过滤后如实说明藏了多少条
-node tools/probe-server-about.mjs                          # 渲染「已注册」行：用途行在事实行之前、被 clamp 成两行、title 与证据来源一致、无证据时不留空元素
-node tools/verify-css.mjs                                 # 校验所有 className 在注入的样式表里都有对应规则（探针选择器除外，见文件内 HOOKS）
-node tools/layout-probe.mjs                               # 真实 Chrome 量卡片几何：长名称必须省略号、CTA 必须在卡内（npm run test:layout）
-node tools/shot.mjs                                       # 把真页面渲染成 HTML 交给 headless Chrome：出七张对照截图（tools/out/*.png，含带 240px 侧栏的 frame-2col.png / frame-wide.png / frame-loading.png），断言栅格列数跟着**容器**走而不是窗口走、四种窗口宽度下面板都不出现横向滚动、且加载态不会把行拉伸铺满面板（`npm run test:layout`）
+npm test # 纯逻辑测试（lib/ 零依赖）；脚本是显式文件列表
+npm run test:registry # 复核已发布的 registry.json
+npm run test:probes # 渲染探针：把真页面渲染出来并断言 DOM（含两支读实时目录的校验）
+npm run test:layout # 需要本机真实 Chromium（CHROME_PATH），只在本机跑
+npm run test:live # 需要活实例的 base 与 token（活实例专用）
+npm run verify:ci # lint && test && test:registry && test:probes ← CI 跑这个
+npm run verify # verify:ci && test:layout ← 提交前跑这个
+# .github/workflows/verify.yml 在 push / PR / workflow_dispatch 上跑 verify:ci，矩阵 node 22.x 与 24.x；
+# 本包无任何依赖，所以工作流里没有安装步骤、没有锁文件、没有缓存
+node --test test/events.test.mjs # 动作日志本身：往返、按行/按字节修剪并留痕、损坏行计数、并发追加不互相截断、写不进去只回 null
+node --test test/index.test.mjs # 宿主契约测试：真跑 apply(ctx)，假宿主 + 临时 DSH_HOME（见下）
+# 三个宿主 peer 依赖本仓库不安装，由 test/hooks.mjs 映射到 test/stubs/；npm test 的脚本是显式文件列表，新增测试要加进去
+node tools/client-smoke.mjs # 客户端注册契约 smoke（模拟前端 module loader；断言客户端版本号 == package.json == CHANGELOG 最新小节）
+node tools/render-detail.mjs # 渲染详情页：事实表有值、链接齐全、命令可见、复制按钮真的把命令交给剪贴板（打桩 navigator.clipboard 后驱动真实按钮）
+node tools/render-card.mjs # 渲染卡片：标题是链接、正文不是 button、无嵌套交互元素、GitHub 标记/版本在位、命令行只在详情面板
+node tools/render-market-tab.mjs # 渲染整个市场页 chrome：页头两行（含身份行与折叠的运行日志）、页签计数、搜索行、筛选行、元信息行、卡片流、页脚分工，以及「仅看收藏」过滤后如实说明藏了多少条
+node tools/probe-server-about.mjs # 渲染「已注册」行：用途行在事实行之前、被 clamp 成两行、title 与证据来源一致、无证据时不留空元素
+node tools/verify-css.mjs # 校验所有 className 在注入的样式表里都有对应规则（探针选择器除外，见文件内 HOOKS）
+node tools/layout-probe.mjs # 真实 Chrome 量卡片几何：长名称必须省略号、CTA 必须在卡内（npm run test:layout）
+node tools/shot.mjs # 把真页面渲染成 HTML 交给 headless Chrome：出七张对照截图（tools/out/*.png，含带 240px 侧栏的 frame-2col.png / frame-wide.png / frame-loading.png），断言栅格列数跟着**容器**走而不是窗口走、四种窗口宽度下面板都不出现横向滚动、且加载态不会把行拉伸铺满面板（`npm run test:layout`）
 node tools/preview-paged.mjs "<base-url-with-?token=…>" 20 1 installs
-                                                          # 按面板页的方式渲染某一页（可带 pageSize/page/sort/group，group 如"金融支付"/"__none__"）
-node tools/verify-sort-paging.mjs                         # 校验 6 种排序、3 种页宽、越界夹取、紧凑计数
-node tools/verify-detail-links.mjs                        # 校验详情页链接：逐源覆盖、零死链、零重复 URL（进 test:probes）
-node tools/verify-group-row.mjs                           # 校验分类 chip 行的显示/隐藏判定与计数之和 == 条目数（进 test:probes）
-#   上面两支读实时目录：没有任何来源应答时它们 exit 2（不是 1）并打印「no source answered — nothing was verified (offline?)」，
-#   因为「0 条死链」在 0 个条目上是空真的——CI 必须把离线读成失败，而不是读成通过
+ # 按面板页的方式渲染某一页（可带 pageSize/page/sort/group，group 如"金融支付"/"__none__"）
+node tools/verify-sort-paging.mjs # 校验 6 种排序、3 种页宽、越界夹取、紧凑计数
+node tools/verify-detail-links.mjs # 校验详情页链接：逐源覆盖、零死链、零重复 URL（进 test:probes）
+node tools/verify-group-row.mjs # 校验分类 chip 行的显示/隐藏判定与计数之和 == 条目数（进 test:probes）
+# 上面两支读实时目录：没有任何来源应答时它们 exit 2（不是 1）并打印「no source answered — nothing was verified (offline?)」，
+# 因为「0 条死链」在 0 个条目上是空真的——CI 必须把离线读成失败，而不是读成通过
 node tools/registry-submission.mjs --check --registry registry.json
-                                                          # 复核已发布的清单（npm run test:registry，进 verify）
+ # 复核已发布的清单（npm run test:registry，进 verify）
 node tools/registry-submission.mjs --body-file /tmp/issue.md
-                                                          # 单独跑一遍投稿校验（--write 才写盘；退出码 0/1/2 见「投稿到社区清单」）
-node tools/probe-real-cards.mjs                           # 拉真实市场条目逐条渲染卡片+详情（活实例）
-node tools/probe-media.mjs <token>                        # 实测 /repo-media：五个真实仓库的图片数/尺寸/缓存命中耗时
-node tools/probe-favorites.mjs <token>                    # 收藏闭环实测（活实例：POST /favorite on/off → GET /favorites 计数 → /catalog 回读）
-node tools/measure-awesome.mjs                           # 测量两个 Awesome 清单的真实深度（4224 + 928）
-node tools/measure-sources.mjs                           # 逐源测上游返回条数（分页与截断的真相）
-node tools/inspect-dsh-catalog.mjs [pkg]                 # 剖析 dshmarket 的 dsh-plugin-catalog 包结构
-node tools/probe-sources.mjs                              # 探测各市场端点可用性与响应形状
-node tools/probe-mcp-schema.mjs -- <cmd> [args...]        # 体检某个 MCP 服务器的工具 schema
-node tools/dump-mcp-tool.mjs <tool> -- <cmd> [args...]    # 打印某个 MCP 工具的原始 schema
-node tools/fixture-bad-schema-mcp.mjs                     # 故意带 `^[^\0]*$` 的测试用 MCP 服务器
+ # 单独跑一遍投稿校验（--write 才写盘；退出码 0/1/2 见「投稿到社区清单」）
+node tools/probe-real-cards.mjs # 拉真实市场条目逐条渲染卡片+详情（活实例）
+node tools/probe-media.mjs <token> # 实测 /repo-media：五个真实仓库的图片数/尺寸/缓存命中耗时
+node tools/probe-favorites.mjs <token> # 收藏闭环实测（活实例：POST /favorite on/off → GET /favorites 计数 → /catalog 回读）
+node tools/measure-awesome.mjs # 测量两个 Awesome 清单的真实深度（4224 + 928）
+node tools/measure-sources.mjs # 逐源测上游返回条数（分页与截断的真相）
+node tools/inspect-dsh-catalog.mjs [pkg] # 剖析社区目录包的内部结构
+node tools/probe-sources.mjs # 探测各市场端点可用性与响应形状
+node tools/probe-mcp-schema.mjs -- <cmd> [args...] # 体检某个 MCP 服务器的工具 schema
+node tools/dump-mcp-tool.mjs <tool> -- <cmd> [args...] # 打印某个 MCP 工具的原始 schema
+node tools/fixture-bad-schema-mcp.mjs # 故意带 `^[^\0]*$` 的测试用 MCP 服务器
 ```
 
 | 文件 | 职责 |
@@ -586,51 +456,9 @@ node tools/fixture-bad-schema-mcp.mjs                     # 故意带 `^[^\0]*$`
 | `client/client.js` | `__ModuleLoader__` 客户端插件：注册侧栏入口（`sidebar.panellist`，id `overall-mcp`，order 5）与面板本体（布局的 `main` 键控插槽，同一 id） |
 | `cordis.patch.yml` | 宿主 composition 补丁 |
 
-## 市场来源配额（每次浏览的实际上限）
+## 发布包内容
 
-| 来源 | 上游请求 | 读取条数 | 说明 |
-|---|---|---|---|
-| 官方 Registry | 8 | 800（去重后约 220 个 server） | 单页上限 100，按 `nextCursor` 翻页后按 `isLatest` 去重 |
-| Smithery | 1 | 10 | 上游列表本身只返回 10 条 |
-| Docker MCP Catalog | 3 | 300 | `hub.docker.com` 分页，`next` 为空即停；网络封锁期会 403/超时，此时该源降级、其余源不受影响；真正的限流 `403` 会先重试一次（见上节），而「匿名翻页上限」的那种 `403` 不重试、按列表读完处理并附上覆盖说明 |
-| GitHub MCP | 3 | 300（合并后取前 200） | 搜索 API 的匿名配额是 10 次/分钟，所以按**请求数**而不是页数设上限：三个查询各一次，`per_page=100`、Star 降序、跨查询去重，再把三份答案按 Star 排出全局前 200。**本机有普查索引时这一行变成 0 个请求**：改读 `github-index.json`，上限 800 条。**配额用完（`403` + `x-ratelimit-remaining: 0`）时这一行也是 0 个请求**：在上游给出的恢复时间之前连问都不问，面板显示「搜索配额已用完（约 N 秒后恢复）」而不是把来源标成不可用；后台普查在飞时，这一行同样 0 请求，显示的是走查进度（见上节第十五轮） |
-| GitHub 普查（后台） | 每 24 小时一轮，单轮 ≤48 | 索引上限 20000 行 | 按 Star 窗口切分慢慢走（见上节）：6.5 秒/请求、每查询最多 10 页、最多 8 个窗口、Star ≥100；走不完记 `partial` 并把原因写进来源行的说明（配额用尽是其中一个具名原因：「GitHub 搜索配额已用完（约 N 秒后恢复），下次继续」）。每 5 秒把进度落盘一次（`complete:false`），所以中途停下也留下已收到的行。只在索引缺失或超过 24 小时时触发，且**不阻塞**当前这次浏览；配额已空时连这一轮都不开 |
-| 安装证据恢复（后台） | 一轮 ≤6000 | 每行最多一条命令 | 只对**没有安装信息**的索引行走一遍，读它自己仓库里的 `package.json`/`pyproject.toml`/`server.json`/README（`raw.githubusercontent.com`，不限配额、自己限速 150ms），外加确认包存在的 npm/PyPI 查询（按包名缓存，同一个包只问一次）；25 分钟没走完就停下、记 `partial`，下次接着走。打开市场页时问一次，单飞、可中止、**不阻塞**浏览 |
-| Awesome 远程 | 1（+镜像链） | 1000 | 单个 README，实测 928 行；经镜像链获取（见上节） |
-| Awesome 本地 | 1（+镜像链） | 5000 | 单个 README，实测 **4224** 行；经镜像链获取（见上节） |
-
-默认一次浏览约 18 个上游请求（含 GitHub 源的 3 个——**本机有普查索引时这一项是 0**，索引的抓取在后台另算；两个 Awesome README 走镜像链、以及限流重试时可能再多一两个），聚合 **5364 个去重 MCP**（2026-10 实测，不含 GitHub 源；该源在索引模式下另计最多 800 行，其中一部分会因安装证据恢复而带上命令），结果按来源各缓存 60 秒；单来源筛选时只请求该来源。**这些请求里，重复浏览时绝大多数会变成 `304`**（正文不重传），而 60 秒内的第二次浏览一个请求都不发。后台那两趟（普查索引、安装证据恢复）都**不计入**这里：它们按自己的节拍走，且都在浏览之外。
-
-> 两个 Awesome 清单必须整份读取：它们合计约 5150 条，而读取其中 200 条与读取整份的请求数完全相同（都是 1 次）——之前市场只有 551 条，正是因为把社区清单截断到了 200。
-
-## 仿照 dshmarket 的取舍
-
-对照 `dshmarket` 的插件市场（4508 条来自 `dsh-plugin-catalog` npm 包，由 awesome-dsh-plugin.com 每日构建），逐项评估后**搬了这些**：
-
-| 机制 | dshmarket | 本插件 |
-|---|---|---|
-| 废弃标记 | 目录提供 `deprecated` + `replacement` | ✅ 采用，但只认上游真实发布的信号；缺省时显示"未提供"而非"正常" |
-| 流行度口径 | 下载量带统计区间 + 核对时间，放 Tooltip | ✅ 采用：每个数字带自己的单位和窗口（见上） |
-| 能力标记分组 | 按"触及什么"分组，明确拒绝打分 | ⚠️ 见下 |
-| 双语描述 | 上游提供 | ❌ 不可搬：除官方 Registry 有 title 外无上游双语数据 |
-
-**能力标记没有照搬**，原因是适配性：dshmarket 的 `capabilities` 来自对 DSH 插件产物的静态扫描（一个 npm 包、可下载、可分析）；而 MCP 侧的六个源里，官方 Registry 只给元数据、两个 Awesome 清单只给一行 markdown，**没有可扫描的产物**。要对 MCP 做等价扫描，得先下载安装包再分析，那会把市场浏览变成一次安装前的深度审计——成本和风险都不对等。因此本插件选择在**安装前**展示完整的启动命令与来源（`index.js` 的 `doInstall`），把判断留给用户，而不是伪造一个未扫描的"安全"结论。
-
-**「包内快照」这条明确不搬。** dshmarket 自己把它删掉了：旧设计有实时 / 1 小时内存缓存 / 包内快照三条路，后两条被移除，注释里留着实测——包内快照 839 条 vs 当时实时 1367 条，老版本一发版快照就冻结，而那份目录的存活时长中位数只有 7 周、同时活跃目录以约 250 条/天在长；结论是「为了省一次请求而留一份陈旧缓存是笔坏交易，对目录来说陈旧是错的，不只是差」。所以本插件的市场数据**一条都不随包分发**，六个来源全部运行时取。
-
-**搬过来的是它的两条纪律，第 17 批补齐了第三条：**
-
-| 纪律 | dshmarket | 本插件（第 17 批后） |
-|---|---|---|
-| 陈旧必须可分辨 | 删掉缓存，因为它「自称新鲜却从未挣得这份新鲜」 | 每个来源自带 `cached`/`stale`/`at`，面板按来源显示 `旧 / 缓存 / 不可用` + 时间；失败但仍有上一轮结果时写「旧数据」，与「不可用」区分 |
-| 失败逐源报出 | 列出每个来源的失败（含更早的） | 每个来源一行状态；失败行现在带**原因**与**恢复时间**——此前只列来源名，`403` 和拼错的 URL 看起来一模一样 |
-| 请求分两层记账 | 无 TTL，只留验证器（只有一份 CDN 目录，也没有配额问题） | TTL 管「多久干一次活」（60 秒），ETag 管「每次下载多少」，两层互不替代；GitHub 来源的 0 请求闸门不是缓存而是**配额**（10 次/分钟），必须留 |
-
-**刻意不搬的一条**：dshmarket 的规矩是「失败绝不用缓存回答」，本插件失败时会用上一轮结果，但标成 `旧 / 缓存`。它反对的是**不可分辨的**陈旧，不是陈旧本身——六个来源里 GitHub 那一路时通时断（见上节镜像链），一刀切会让整屏空白。只要陈旧在屏幕上是可读的，这个差异就是取舍而不是欠债。
-
-## 发布包内容（第十七轮起）
-
-`package.json` 增加了 `files` 白名单，进包的只有这 **26 个**（`npm pack --dry-run` 实测，含 npm 强制带上的 `package.json` 与 `LICENSE`）：`index.js`、`lib/`（**17 个** `.js`）、`client/client.js`、`cordis.patch.yml`、`registry.json`、`README.md`、`README.zh-CN.md`、`CHANGELOG.md`。第十七轮刚收窄时是 **76 个文件 / 1.25 MB → 23 个文件 / 0.65 MB**（tarball 410 KB → 229 KB）；现在 **26 个文件 / tarball 280.1 kB / 解包 796.2 kB**（`README.md` 与 `CHANGELOG.md` 是第二十一轮进白名单的，`lib/` 从 16 个涨到 17 个不需要动白名单——`lib` 是整目录）。
+`package.json` 增加了 `files` 白名单，进包的只有这 **26 个**（`npm pack --dry-run` 实测，含 npm 强制带上的 `package.json` 与 `LICENSE`）：`index.js`、`lib/`（**17 个** `.js`）、`client/client.js`、`cordis.patch.yml`、`registry.json`、`README.md`、`README.zh-CN.md`、`CHANGELOG.md`。刚收窄时是 **76 个文件 / 1.25 MB → 23 个文件 / 0.65 MB**（tarball 410 KB → 229 KB）；现在 **26 个文件 / tarball 280.1 kB / 解包 796.2 kB**（`README.md` 与 `CHANGELOG.md` 是后来进白名单的，`lib/` 从 16 个涨到 17 个不需要动白名单——`lib` 是整目录）。
 
 被排除的是开发期资产，没有任何一个是运行时读取的：`tools/`（33 个文件，含渲染探针产出的截图）、`test/`（22 个）、`prototype/`（2 个）、`INTEGRATION-TODO.md`、`.github/`（4 个）、`.gitattributes`。已核对：`index.js` 读的是数据目录下的 `registry.json`（`$DSH_HOME/overall-mcp/`），不是仓库根这一份；`tools/registry-submission.mjs` 只由 CI 在 checkout 上运行；`tools/verify-detail-links.mjs` 等探针只在开发与 CI 里跑。新增 `test/`、`tools/` 下的文件不影响发布体积。
 
@@ -650,7 +478,7 @@ node tools/fixture-bad-schema-mcp.mjs                     # 故意带 `^[^\0]*$`
 
 **点了分组总开关，为什么要等好几秒**
 
-因为在那个来源下面，每一行都要真的起一个 `dsh-mcp-client` 子进程并完成握手，这不是改一个布尔值。第二十轮之前这一步是串行的，最坏 `成员数 × 8 秒`（实测五个成员 40 秒）；现在一次最多 4 条同时在飞（`CONNECT_CONCURRENCY = 4`），所以 5 个成员约两批、10 个成员约三批。等待期间按钮上写着「正在切换…」就是这段真实工作的进度，不是卡住。
+因为在那个来源下面，每一行都要真的起一个 `dsh-mcp-client` 子进程并完成握手，这不是改一个布尔值。这一步此前是串行的，最坏 `成员数 × 8 秒`（实测五个成员 40 秒）；现在一次最多 4 条同时在飞（`CONNECT_CONCURRENCY = 4`），所以 5 个成员约两批、10 个成员约三批。等待期间按钮上写着「正在切换…」就是这段真实工作的进度，不是卡住。
 
 同一轮还保证**同一个名字只挂一次**：注册表里如果因为历史原因存在同名多行（见「注册表里的重复行」），此前它们会各自去挂一次，败者被记成「另一个 mcp-client 已提供」——那是并发自己造出来的假象。现在同名兄弟共享第一行的裁决。
 
@@ -661,11 +489,11 @@ node tools/fixture-bad-schema-mcp.mjs                     # 故意带 `^[^\0]*$`
 - 它读的是本机普查索引，**一次请求都不发**；索引过期也不会顺手去走一遍——想让它刷新，是那张卡上的「开始普查」的事。
 - 它**不是一个新来源**：条数仍算在 GitHub 那一个里（一个上游一个数字），只有数字行的名字按你选的那个写（`本地普查（索引） 1.8k`），筛选器和数字行因此不会各说一套。
 - 索引还是空的时它直接说「本机还没有普查索引」，并指向 GitHub 访问卡里的「开始普查」；视图只读，不会替你开始任何东西。
-- 命令行等价物：`POST /api/overall-mcp/catalog {"source":"census"}`（第二十四轮）。
+- 命令行等价物：`POST /api/overall-mcp/catalog {"source":"census"}`。
 
 **我想现在就跑一次普查，或者让它停下来**
 
-第二十二轮起这两个动作都在「已注册」页的 GitHub 访问卡里：那一行写着普查状态（索引多少行、上次读到什么时候、上次是谁停的），右边按状态给「开始普查」或「停止普查」——没在跑时是前者，在跑时是后者并显示进度。
+这两个动作都在「已注册」页的 GitHub 访问卡里：那一行写着普查状态（索引多少行、上次读到什么时候、上次是谁停的），右边按状态给「开始普查」或「停止普查」——没在跑时是前者，在跑时是后者并显示进度。
 
 - 「开始普查」不等缓存过期，现在就把缺的仓库补上；搜索额度还没恢复时它会明确回一句「额度未恢复（还需 N 秒）」而不是干等，也不会花一次请求去换一个 403。
 - 「停止普查」是立刻生效的：走到一半收到索引里的那些行不会丢（它们本来就在走的过程中落盘），下一次开始会从缺的仓库接着走；被停掉的那次不会再顺带去抓安装证据——按了停止就不该在别处继续花额度。
@@ -674,7 +502,7 @@ node tools/fixture-bad-schema-mcp.mjs                     # 故意带 `^[^\0]*$`
 
 **我想现在就跑一遍「恢复安装命令」，或者让它停下来**
 
-第二十三轮起这两个动作也在同一张 GitHub 访问卡里，就在普查那一行的下面：那一行写着 `查过 N 个仓库 · 恢复出 M 条安装命令`，右边按状态给「接着恢复」或「停止恢复」。
+这两个动作也在同一张 GitHub 访问卡里，就在普查那一行的下面：那一行写着 `查过 N 个仓库 · 恢复出 M 条安装命令`，右边按状态给「接着恢复」或「停止恢复」。
 
 - 这趟走查读的是仓库里的 `package.json` / `pyproject.toml` / `server.json` / README，走 `raw.githubusercontent.com`（不吃 API 配额），自己限速 150ms/请求、上限 6000 个请求 / 25 分钟；
 - 「停止恢复」在两个请求之间生效：当前那条读完后收手，已经恢复的命令照旧写进 `github-install.json`，行上会写「已手动停止（已试 N 个仓库，下次接着走）」；
@@ -682,17 +510,15 @@ node tools/fixture-bad-schema-mcp.mjs                     # 故意带 `^[^\0]*$`
 - 停止之后那一行会写「上次是手动停止的」；`dispose`（插件被卸载）会写成另一个理由，因为「我按的」和「宿主被卸了」不是同一件事。
 
 
-
 那是 GitHub 侧的配额或网络抖动，不是插件坏了。匿名额度是搜索 10 次/分钟、核心 API 60 次/小时；一次完整普查要读几千个仓库的文件，匿名基本跑不完。
 
 - 在「已注册」页顶部的 GitHub 访问卡里填一个 token（或点「换成我的 GitHub 登录」，机器上登录过 `gh` 就不用填），额度变成 5000 次/小时；
-- **不填也能继续**：再点一次「开始普查」是从断点继续——已经有证据的行会被跳过（`needsInstallEvidence`），所以每次点都会往前推一点；第二十二轮起这个动词就在同一张卡上，不必等缓存过期；下面那行恢复走查同理，第二十三轮起「接着恢复」也在同一张卡上；
-- 走到哪了看 `GET /status` 或 `/events` 的普查那一行：`planned / attempted / remaining / retries` 四个数把「计划多少、走到多少、还剩多少、重试了几次」分开说（第十九轮起；此前只有一句「失败」）。
+- **不填也能继续**：再点一次「开始普查」是从断点继续——已经有证据的行会被跳过（`needsInstallEvidence`），所以每次点都会往前推一点；这个动词就在同一张卡上，不必等缓存过期；下面那行恢复走查同理，「接着恢复」也在同一张卡上；
+- 走到哪了看 `GET /status` 或 `/events` 的普查那一行：`planned / attempted / remaining / retries` 四个数把「计划多少、走到多少、还剩多少、重试了几次」分开说。
 
 **填了 token，面板还是显示「匿名访问」**
 
 只有**校验通过**的 token 才会成为活跃凭据（用 `GET /user` 验一次），打错的 token 立刻退回匿名，这样至少不会把每个请求变成 401。看那张卡的状态行：`error` 会写明是「401（token 无效或已过期）」还是网络不通。另外宿主代码在启动时载入一次，新填的 token 不需要重启（路由是同一个进程），但**本轮新加的 `/auth` 路由**要重启 DSH 之后才存在。
-
 
 
 该来源只提供仓库地址（社区 Awesome 清单即如此），无法安全推断启动命令。点「仓库」按该项目的 README 自行配置；官方 Registry 与 Smithery 的条目通常可直接「安装」。
@@ -700,6 +526,5 @@ node tools/fixture-bad-schema-mcp.mjs                     # 故意带 `^[^\0]*$`
 ## License
 
 MIT
-
 
 
