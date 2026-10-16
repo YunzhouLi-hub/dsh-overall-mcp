@@ -4,6 +4,22 @@
 
 [English](README.md) · 简体中文
 
+## 界面预览
+
+下面是面板的真实截图：由 `tools/readme-shots.mjs` 用**真实客户端代码**（同一份 `client/client.js`）加一份固定数据渲染，不是手绘示意图，所以图和代码不会各说各话；`npm test` 会核对本页引用的每张图都确实存在。
+
+### 「已注册」：来源分组，以及 GitHub 访问卡里的两次走查
+
+![已注册标签页：按来源分组的服务器列表，顶部 GitHub 访问卡写着普查索引、上次停止原因与「接着恢复」](https://raw.githubusercontent.com/YunzhouLi-hub/dsh-overall-mcp/main/docs/images/registered.png)
+
+### 「MCP 市场」：六个来源聚合成一面墙
+
+![MCP 市场标签页：搜索框、分类与来源筛选、每源计数行、卡片墙，卡片上有星标、许可、标签与媒体条](https://raw.githubusercontent.com/YunzhouLi-hub/dsh-overall-mcp/main/docs/images/market.png)
+
+### 详情：一张卡片背后的全部事实
+
+![详情面板：仓库统计（Star/Fork/许可/语言/最近推送）、来源与作者、将执行的命令与复制按钮](https://raw.githubusercontent.com/YunzhouLi-hub/dsh-overall-mcp/main/docs/images/detail.png)
+
 ## 核心特性
 
 | | 能力 | 说明 |

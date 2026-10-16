@@ -4,6 +4,22 @@
 
 [简体中文](README.zh-CN.md) · this file is the English entry point; `README.zh-CN.md` is the full engineering record (per-round rationale, measurements, and the reasoning behind each decision).
 
+## What it looks like
+
+These are screenshots of the real panel: `tools/readme-shots.mjs` renders them from the **real client code** (the same `client/client.js`) over a fixed fixture, so the pictures cannot drift from what the code draws. `npm test` checks that every image referenced here exists.
+
+### Registered: source groups, and the two walks on the GitHub card
+
+![The Registered tab: servers grouped by where they came from, above a GitHub access card that names the census index, why the last walk stopped, and offers "继续恢复"](https://raw.githubusercontent.com/YunzhouLi-hub/dsh-overall-mcp/main/docs/images/registered.png)
+
+### Market: six catalogues behind one search box
+
+![The MCP market tab: search, category and source filters, the per-source count line, and the card wall with stars, licence, tags and a media strip](https://raw.githubusercontent.com/YunzhouLi-hub/dsh-overall-mcp/main/docs/images/market.png)
+
+### Detail: everything behind one card
+
+![The detail panel: repository stats (stars, forks, licence, language, last push), source and author, and the command that will be run with its copy button](https://raw.githubusercontent.com/YunzhouLi-hub/dsh-overall-mcp/main/docs/images/detail.png)
+
 ## Features
 
 | | Capability | What it does |

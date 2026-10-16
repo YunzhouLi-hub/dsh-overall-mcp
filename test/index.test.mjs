@@ -705,6 +705,10 @@ test('a stale census is served immediately, and the walk behind it starts withou
       assert.equal(after.rows.length, 2, 'the rows we already had survive a failed walk');
       assert.match(after.partial, /请求失败/);
       assert.equal(after.complete, false);
+      // This walk failed, which is not a reason the host skips the follow-up:
+      // a finished census starts the evidence walk whatever its own outcome, so
+      // this test has to end that one before it hands the stub to someone else.
+      await quietEvidence(call);
     }, { files });
   });
 });
@@ -1414,4 +1418,33 @@ async function waitFor(check, { timeoutMs = 3000, everyMs = 20 } = {}) {
     if (Date.now() > deadline) throw new Error(`waitFor timed out; last=${JSON.stringify(last)}`);
     await new Promise((resolve) => setTimeout(resolve, everyMs));
   }
+}
+
+/**
+ * Leave no walk running for whichever test runs next.
+ *
+ * A census walk that *finishes* deliberately starts the evidence walk — the
+ * host's own comment says why ("a census that just grew is the cheapest moment
+ * to ask the repositories themselves how they are run"), and the two walks
+ * share no quota. That second walk reads raw.githubusercontent.com at 150ms per
+ * repository, so a test which returns while it is still going lends its
+ * requests to the next test, where a counter reports a read this test never
+ * made. This is the same class of cross-test leak the census itself had in
+ * round 22: the fix belongs in the test that finishes the walk, not in the
+ * counter of the test that follows it.
+ */
+async function quietEvidence(call, { polls = 60, everyMs = 5 } = {}) {
+  let seen = false;
+  for (let i = 0; i < polls; i += 1) {
+    const state = await call('/api/overall-mcp/install-evidence', { method: 'GET' });
+    const body = state.body ?? {};
+    if (body.walking) {
+      seen = true;
+      await call('/api/overall-mcp/install-evidence', { body: { action: 'stop' } });
+    } else if (seen) {
+      return body;
+    }
+    await new Promise((resolve) => setTimeout(resolve, everyMs));
+  }
+  return null;
 }
