@@ -1209,6 +1209,15 @@ export async function apply(ctx) {
   let githubCrawl = null;
   /** Progress of the walk in flight, for the panel's "building" sentence. */
   let githubWalkProgress = null;
+  /**
+   * The handle that can end the walk in flight. A census paces itself at one
+   * search request per 6.5s and can run for minutes (48 requests worst case), so
+   * "stop" has to be something a reader can do mid-walk — and the reason has to
+   * be recorded here, because the walk itself only knows it was aborted.
+   */
+  let githubCrawlStop = null;
+  /** How the last walk ended early, or null if it ran to its own stop. */
+  let githubCrawlEnded = null;
 
   /** Read the census once per process; the crawl below keeps it current. */
   async function readGithubIndex() {
@@ -1249,6 +1258,12 @@ export async function apply(ctx) {
       emit({ kind: 'census', action: 'skipped', waitMs: quota.waitMs });
       return null;
     }
+    // The handle a reader stops this walk with. `reason` stays null until
+    // something asks it to end, so "why did it stop" is answered by the one
+    // place that knows, not inferred from the walk's own flat "已中止".
+    const stop = { controller: new AbortController(), reason: null };
+    githubCrawlStop = stop;
+    githubCrawlEnded = null;
     githubCrawl = (async () => {
       log?.info?.('overall-mcp: walking the GitHub index');
       githubWalkProgress = { requests: 0, rows: 0 };
@@ -1256,6 +1271,21 @@ export async function apply(ctx) {
       let lastWrite = 0;
       const walk = await crawlGithubRepos({
         search: searchGithubRepos,
+        signal: stop.controller.signal,
+        // The walk paces itself with 6.5s waits, so a sleep that cannot be
+        // interrupted would make "停止" mean "stop after up to 6.5 more
+        // seconds". Unref'd for the same reason as the evidence walk: a pacing
+        // timer must never be the thing keeping `node --test` alive.
+        sleep: (ms) => new Promise((resolve) => {
+          const done = () => {
+            stop.controller.signal.removeEventListener('abort', done);
+            clearTimeout(timer);
+            resolve();
+          };
+          const timer = setTimeout(done, ms);
+          timer.unref?.();
+          stop.controller.signal.addEventListener('abort', done, { once: true });
+        }),
         onProgress: ({ requests, rows, items }) => {
           githubWalkProgress = { requests, rows };
           // Minutes-long walk, desktop process: what has been collected is
@@ -1277,13 +1307,21 @@ export async function apply(ctx) {
         },
       });
       const rows = mergeIndexRows(held?.rows ?? [], walk.rows, { at: walk.at });
+      // `crawlGithubRepos` reports an abort as a flat "已中止", which is true but
+      // useless in the panel: the reader wants to know whether *they* stopped it
+      // or the host went away. The reason is ours, so it is stated here.
+      const partial = stop.reason === 'user'
+        ? `已手动停止（已收 ${rows.length} 行，下次接着走）`
+        : stop.reason === 'dispose'
+          ? `插件被卸载，已停止（已收 ${rows.length} 行）`
+          : (walk.partial || (walk.truncations.length ? walk.truncations.map((t) => t.reason).join('；') : null));
       const doc = indexDocumentOf({
         at: walk.at,
         rows,
         queries: [...BASE_QUERIES],
         requests: walk.requests,
         complete: walk.complete,
-        partial: walk.partial || (walk.truncations.length ? walk.truncations.map((t) => t.reason).join('；') : null),
+        partial,
       });
       await writeJson(githubIndexFile, doc);
       githubIndexDoc = doc;
@@ -1294,7 +1332,8 @@ export async function apply(ctx) {
       // the walk actually kept, and whether it finished.
       emit({
         kind: 'census',
-        action: 'stop',
+        action: stop.reason ? 'stopped' : 'stop',
+        ...(stop.reason ? { reason: stop.reason } : {}),
         requests: walk.requests,
         rows: doc.rows.length,
         complete: walk.complete === true,
@@ -1303,7 +1342,10 @@ export async function apply(ctx) {
       // A census that just grew is the cheapest moment to ask the repositories
       // themselves how they are run: the two walks share no quota (search API
       // vs raw.githubusercontent), and this one is deliberately not awaited.
-      maybeCrawlInstallEvidence({ force });
+      // A walk the reader stopped is the one exception: they stopped paying for
+      // discovery, so it would be perverse to answer by spending on something
+      // else.
+      if (!stop.reason) maybeCrawlInstallEvidence({ force });
       return doc;
     })()
       .catch((err) => {
@@ -1312,10 +1354,93 @@ export async function apply(ctx) {
         return null;
       })
       .finally(() => {
+        githubCrawlEnded = stop.reason ? { reason: stop.reason, at: new Date().toISOString() } : null;
         githubCrawl = null;
         githubWalkProgress = null;
+        if (githubCrawlStop === stop) githubCrawlStop = null;
       });
     return githubCrawl;
+  }
+
+  /**
+   * End the census in flight, if one is walking.
+   *
+   * @param reason - 'user' (panel button or route) or 'dispose' (host unload).
+   * @returns true when a walk was actually asked to stop.
+   */
+  function stopCensus(reason = 'user') {
+    const stop = githubCrawlStop;
+    if (!stop) return false;
+    // First reason wins: a reader's stop must not be rewritten as "unloaded"
+    // when the plugin disposes a moment later (that is what the disposal path
+    // does, and the panel would then report a stop the reader never asked for).
+    if (!stop.reason) stop.reason = reason;
+    emit({ kind: 'census', action: 'stopping', reason: stop.reason, ...(githubWalkProgress ?? {}) });
+    stop.controller.abort();
+    return true;
+  }
+
+  /**
+   * The census in one shape, for `/status` and the census route: what the file
+   * holds, whether a walk is running, how far it has got, and how the last one
+   * ended when it ended early. The file alone cannot say the last two — it says
+   * "正在抓取" while a walk runs and "已手动停止" after a stop, and never says
+   * which request the walk is on.
+   */
+  async function censusState() {
+    const census = await githubIndexPayload();
+    return {
+      rows: census?.rows?.length ?? 0,
+      at: census?.at ?? null,
+      complete: census?.complete === true,
+      partial: census?.partial ?? null,
+      requests: census?.requests ?? null,
+      walking: githubCrawl !== null,
+      progress: githubWalkProgress,
+      ended: githubCrawlEnded,
+      loaded: githubIndexLoaded,
+      damaged: githubIndexDamaged ?? null,
+    };
+  }
+
+  /**
+   * The census verbs, in one place so the route and any future caller agree.
+   *
+   * @param action - 'start' (walk now, fresh or not) | 'stop' | null (read).
+   */
+  async function doCensus({ action = null } = {}) {
+    // Read the file before anything starts: `maybeCrawlGithubIndex` merges the
+    // walk into `githubIndexDoc`, so starting one while that is still null would
+    // write a census built from an empty past — the rows collected yesterday
+    // would be replaced by the ones collected in the next six minutes.
+    await readGithubIndex();
+    if (action === 'stop') {
+      const stopping = stopCensus('user');
+      const state = await censusState();
+      return { ...state, stopping };
+    }
+    if (action === 'start') {
+      const before = githubCrawl;
+      // `force` because "start" is a reader asking for a walk now; refusing
+      // because the one we hold is fresh would make the button do nothing.
+      const walk = maybeCrawlGithubIndex({ force: true });
+      const state = await censusState();
+      const quota = githubSearchQuota();
+      return {
+        ...state,
+        // "Did *this* call start a walk?" — not "is one running now?", which is
+        // what `walking` already answers. A second click while the first walk is
+        // in flight used to be reported as `started: true` (the existing walk
+        // was returned), so the panel said "已开始" about something it had not
+        // started.
+        started: walk !== null && walk !== before,
+        // A start that did not start has to say why. There is exactly one such
+        // reason: the search budget is empty, and the walk would spend its first
+        // request on a 403.
+        ...(walk === null && !before && quota.waitMs > 0 ? { skipped: 'quota', waitMs: quota.waitMs } : {}),
+      };
+    }
+    return censusState();
   }
 
   // ---------------------------------------------------------------------------
@@ -1662,17 +1787,7 @@ export async function apply(ctx) {
         arch: process.arch,
       },
       data: { dir, files: dataFiles },
-      census: census
-        ? {
-          rows: census.rows?.length ?? 0,
-          at: census.at ?? null,
-          complete: census.complete === true,
-          partial: census.partial ?? null,
-          walking: githubCrawl !== null,
-          loaded: githubIndexLoaded,
-          damaged: githubIndexDamaged ?? null,
-        }
-        : { rows: 0, at: null, complete: false, partial: null, walking: githubCrawl !== null, loaded: githubIndexLoaded, damaged: githubIndexDamaged ?? null },
+      census: await censusState(),
       evidence: {
         ...(await evidenceSummary()),
         requests: evidenceDoc?.requests ?? 0,
@@ -2213,6 +2328,25 @@ export async function apply(ctx) {
         const refresh = body.refresh === true || url.searchParams.get('refresh') === '1';
         return json(await doBrowse({ query, source, limit, refresh }));
       })],
+      // The census, and the two verbs a reader owns: `start` (a walk now, fresh
+      // or not) and `stop` (end the one in flight). Before this route the walk
+      // was only ever started as a side effect of browsing, which meant nobody
+      // could ask for one — and, worse, nobody could end one: a census paces
+      // itself at 6.5s per request for up to 48 requests, so "I did not want
+      // this" had no answer. GET reads; only POST acts.
+      ['/api/overall-mcp/census', ['GET', 'POST'], guard(async (req) => {
+        const body = req.method === 'POST' ? await readBody(req) : {};
+        const url = new URL(req.url);
+        const actionRaw = body.action ?? url.searchParams.get('action');
+        const action = typeof actionRaw === 'string' ? actionRaw.trim().toLowerCase() : '';
+        if (action && action !== 'start' && action !== 'stop') {
+          // A verb we do not know is a caller error, not a no-op: answering
+          // "here is the state" to a mistyped `action: "stop "` would read as
+          // success (the same reason `on` must be a boolean elsewhere).
+          throw new Error(`unknown census action: ${actionRaw}`);
+        }
+        return json(await doCensus({ action: action || null }));
+      })],
       // The install evidence behind the GitHub rows: what has been recovered,
       // and a POST to start (or force) a walk. The panel asks for a walk when it
       // opens the market, so a reader who never opens it never pays for it.
@@ -2381,6 +2515,9 @@ export async function apply(ctx) {
   ctx.effect(() => () => {
     // A walk in flight reads the network; it stops with the plugin rather than
     // outliving it (it writes what it found, so nothing is lost by stopping).
+    // Both walks get the same treatment now — before this, the census outlived
+    // the plugin and kept spending a search budget nobody was reading.
+    stopCensus('dispose');
     evidenceAbort.abort();
     for (const dispose of disposers) dispose();
     for (const fiber of fibers.values()) {

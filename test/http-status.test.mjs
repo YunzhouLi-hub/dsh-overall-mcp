@@ -23,6 +23,11 @@ test('httpStatusFor maps caller-side payload problems to 400', () => {
   // A value that is present but unusable is the same class of mistake as a
   // missing one: nothing was acted on, so 500 would be a false alarm.
   assert.equal(httpStatusFor(new Error('on must be a boolean when given')), 400);
+  // An enum-valued parameter outside its set (`action: "stpo"`). The mirror of
+  // the 404 lookup rule: the route is right and the value is wrong, so the blame
+  // is the caller's — and a refusal is not a silent "no action taken".
+  assert.equal(httpStatusFor(new Error('unknown census action: stpo')), 400);
+  assert.equal(httpStatusFor(new Error('unknown sort action: stars')), 400);
 });
 
 test('httpStatusFor maps an upstream registry failure to 502', () => {

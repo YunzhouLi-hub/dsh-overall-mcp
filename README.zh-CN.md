@@ -18,6 +18,7 @@
 | 🪪 | 身份行 | 页头第二行写清**这个面板此刻在跑哪份代码**：插件版本、`pid`、已运行时长、能读到的数据文件数、日志条数；磁盘上的代码比进程新时另挂一颗「⚠ 代码已更新，重启 DSH 后生效」——「还是坏的」和「还没载入」从此不是同一句话（`GET /status`） |
 | 🧾 | 动作日志 | 宿主把自己的动作写进 `events.ndjson`（浏览/各源成败/配额/扫描/普查/证据/安装是否挂上/更新/挂载/注册表修复），页头「运行日志」一键展开；只记元数据，不记密钥，最多留最近 400 行 |
 | 🔑 | GitHub 凭据与普查续跑 | 面板上可填 token（或一键取 `gh auth token`），校验通过才生效、只发给 GitHub 主机；**匿名照样能普查**，只是配额从 5000 次/小时降到 60 次/小时。一次网络失败不再终结整场普查（按仓库重试 + 退避 + 连续被拒才收工），并且下一次普查从断点继续（`GET\|POST\|DELETE /auth`） |
+| ⏯️ | 普查手动启停 | 「已注册」页的 GitHub 访问卡里直接写普查状态（索引多少行、上次读到什么时候、谁停的），并按状态给动词：没在跑是「开始普查」（不等缓存过期），在跑是「停止普查」并显示进度。停止是安全的——已收到的行边收边落盘，下次从缺的仓库接着走，且不会再顺带花额度去抓安装证据（`GET\|POST /census`，第二十二轮） |
 | 🧮 | 数字与时间都写明口径 | 每源条数与「共 N 条」用同一把尺子（去重后计入本页，`deduped` 单列）；「列表读取于」是本地读目录的时间、「上游更新于」是仓库最近一次 push，两者不再共用一个「更新于」；按使用量排序时没有使用量数据的卡片直接写「无使用量数据」而不是静默按质量分排；推断出来的分类在卡片、详情与分类下拉里都带「（推断）」（第二十轮） |
 
 ## 快速开始
@@ -96,7 +97,7 @@ dsh plugin --profile web add ./dsh-overall-mcp
 - **收藏**：卡片页脚与详情面板都可收藏；宿主持久化到 `registry.favorites`，界面只本地改自己那份列表（为了一颗星重新拉 ~3MB 市场列表不值当下次浏览/安装/开会话会与宿主对齐）。市场筛选行有**仅看收藏 (N)**：对已加载列表做视图过滤，并在 `GET /api/overall-mcp/favorites` 报告的宿主总数大于可见数时说明差了多少（见「收藏」一节）
 - **往清单里投稿**：如果这份清单住在 GitHub 仓库里（`raw.githubusercontent.com/owner/repo/...`、`cdn.jsdelivr.net/gh/owner/repo@...`，或直接一个仓库地址），那一行右侧会出现「投稿 ↗」——它打开的是**已经预填好字段**的 `issues/new` 页面（`?title=&body=`，零令牌、零后端），提交后由仓库里的工作流校验并写回 `registry.json`。托管在别处的清单不显示这个链接（没有可投稿的地方），面板不会画一个点了没用的按钮。详见「投稿到社区清单（GitHub 上行）」
 - **页面头**（按 v4 原型，两行）：第一行 = 星座图标（一个品牌蓝中枢 + 五个 `currentColor` 卫星，深色主题自动反色）+「全局 MCP」+ 版本号（与 `package.json` 一致，`tools/client-smoke.mjs` 断言两者相等——会撒谎的版本号比不显示更糟）｜右侧主操作；第二行 = 副标题「宿主机扫描 · 市场发现 · 一键接入」｜右侧「⤓ 导出日志」。主按钮是**墨色**（`T.text` 铺底 + `T.cardBg` 作字色，深浅色主题自动翻转）而不是品牌蓝：品牌蓝留给链接、页签下划线、徽标和 gh 仓库名
-- **每个标签页最多一个主操作**：注册表页主按钮是「重新扫描宿主机」；市场页**没有主按钮**——重拉目录是「分类」那一行里 `刷新` 的活，一个常驻的填充按钮会和小按钮重复。另一页的主操作以无边框文字按钮留在同一行（「打开 MCP 市场」/「重新扫描宿主机」），两个主按钮等于没有主按钮。**本插件自己的更新不属于任何一个页签**：它跟着版本号走（页头 `全局 MCP v0.2.0` 右侧），「检查更新」报出新版时才出现，点了走 `POST /self-update`（宿主执行 `dsh plugin --profile <p> add dsh-overall-mcp@<v>`，装完提示重启 DSH 生效）——插件自身的版本判定见 `lib/self-update.js`：`link:`/本地检出（正是本仓库的开发形态）**不提供**自更新，因为那份代码就是版本来源，`npm` 上的新版本与它无关
+- **每个标签页最多一个主操作**：注册表页主按钮是「重新扫描宿主机」；市场页**没有主按钮**——重拉目录是「分类」那一行里 `刷新` 的活，一个常驻的填充按钮会和小按钮重复。另一页的主操作以无边框文字按钮留在同一行（「打开 MCP 市场」/「重新扫描宿主机」），两个主按钮等于没有主按钮。**本插件自己的更新不属于任何一个页签**：它跟着版本号走（页头 `全局 MCP v0.3.0` 右侧），「检查更新」报出新版时才出现，点了走 `POST /self-update`（宿主执行 `dsh plugin --profile <p> add dsh-overall-mcp@<v>`，装完提示重启 DSH 生效）——插件自身的版本判定见 `lib/self-update.js`：`link:`/本地检出（正是本仓库的开发形态）**不提供**自更新，因为那份代码就是版本来源，`npm` 上的新版本与它无关
 - **⤓ 导出日志**：把这一页知道的东西写成 JSON 文件（插件版本、注册表全量、市场各源条数/**每个来源各自的时间/是否命中缓存/是否 stale/是否 304/返回条数**/未变更来源数/返回条数、当前筛选与页码、两处错误）——排查问题时缺的正是这些。客户端本地拼装并下载，不新增宿主路由：宿主自己的日志不归这个插件导出
 - **只有卡片区滚动**：这一页是**固定外壳**（`height:100%` + `overflow:hidden`，自己不滚），滚动属于内部两个盒子——「已注册」的标签页主体整段可滚；「MCP 市场」里只有**卡片区**（`data-omkt="scroller"`，`flex:1 1 auto` + `min-height:0` + `overflow-y:auto`）可滚，搜索框、分类下拉、筛选行与 meta 行都是钉住的 chrome，翻页条留在滚动区下方。`tools/shot.mjs` 的框架探针把这条契约量出来：把卡片区往下拖 240px 后，页签行与搜索框的 `top` 位移必须为 0，页面外壳的 `scrollTop` 必须为 0（四种窗口宽度下实测 0/0/0）。注意 flex 的自动最小尺寸在**滚动容器**里会失效（这正是当初页签行被压成 1px 的原因），所以 chrome 行统一 `.omkt-page > *,.omkt-tabbody > *{flex-shrink:0}`，而「该让出高度」的两个盒子用内联 `flex:1 1 auto` 明确覆盖
 - **回到顶部**：监听挂在「本页内部第一个 `[data-omkt="scroller"]`，否则本页或它之上的第一个可滚动元素」（退化为 window），只在滚动超过 400px 后才出现，短页面不留一个死按钮。市场页签的滚动盒是卡片墙本身，**已注册页签的滚动盒是它的页体**（两者都带该 hook）——早先只有卡片墙带 hook，而页体是它的祖先，向上查找找不到，于是已注册页签上这个按钮从不出现。重新绑定的时机是「页签、市场列表、服务器列表任一变化」，因为卡片墙要等列表到达才存在（首次打开时若只按页签绑定，会绑到 window 且之后不再重绑）
@@ -214,11 +215,11 @@ MCP 生态目前**没有对等物**——没有站点把上千个 MCP 收录成�
 
 **「来源已删除」的行是同一个身份问题的第三面。** 那四条 `rea-cursor` 里，只有一条被 `connect()` 真正挂载（`serverName` 有值，就是 `mcp__rea-cursor__*` 这套工具背后的那份），另外三条是旧扫描器 `name-<source>` 重命名留下的惰性记录——重命名本身已在 `820641c` 里删掉，但它当年写进注册表的三条记录留了下来，而全机任何配置文件都不再包含这个名字（都固定着 6.1.0，正是报告里那三条）。它们既不会被重新导入，也不提供任何工具（fiber 按**名字**存放，`connect()` 见到已有名字就短路），却照样被算作服务器、响应行操作（按名字找第一条，正是「点最后一行、删掉第一行」的由来）。现在扫描器把这次的**证据**写进注册表（`registry.scanned`，`lib/scanner.js` 的 `scannedSources` / `findOrphans`）：读了哪些来源、各自定义了哪些名字；面板据此把这些行标成 `来源已删除`（琥珀色胶囊，不显示更新徽标——没有人会重新导入它），并把整个集合收成一条提示 + 一个动作「清理 N 条」（`POST /api/overall-mcp/forget-orphans`，一次请求处理全部）。判定**只在扫描确实读到过该来源时**才做：`not-found` 不算「空配置」，其余读取错误进 `unreadable` 也不参与——一份读不到的配置不能当成「这个服务器不存在」的证据；`source: manual` 的手工条目永不动。**正在持有挂载的行（`serverName` 非空）永远不在清理范围内**：那一行此刻就在供工具，配置文件没有它并不能成为把它拿走的理由。这个标记现在由 `connect()` / `disconnect()` 经 `setMountHolder` / `clearMountHolder` 维护，同名条目里**只有真正挂载成功的那一行**带 `serverName`——`fibers` 是按名字存放的，早先每点一次「更新」都会重挂一次，于是标记被留在刚刚重挂过的那一行上，四条同名记录里会有三条同时自称「持有挂载」，清理反倒漏掉它们。因为持有者不在清理范围内，清理既不需要断开也不需要重连任何 fiber（`syncFiber` 的循环已随之删掉），返回体只有 `{name, source, version}`。`停用` / `移除` 也带 `slot`，不再是按名字找第一条。
 
-同一个按钮还回答第二个问题：**本插件自己**（`dsh-overall-mcp`）在 npm 上有没有更新。有新版时，**版本号旁边**（页头 `全局 MCP v0.2.0` 的右侧）出现 `更新到 v<新版>` 按钮，两个标签页都在同一位置——这是唯一一件关于本页自身而不是本页内容的事，所以它属于版本号。两种安装形态给出的答案不同（`lib/self-update.js`，`test/self-update.test.mjs` 断言）：
+同一个按钮还回答第二个问题：**本插件自己**（`dsh-overall-mcp`）在 npm 上有没有更新。有新版时，**版本号旁边**（页头 `全局 MCP v0.3.0` 的右侧）出现 `更新到 v<新版>` 按钮，两个标签页都在同一位置——这是唯一一件关于本页自身而不是本页内容的事，所以它属于版本号。两种安装形态给出的答案不同（`lib/self-update.js`，`test/self-update.test.mjs` 断言）：
 
 | 安装形态 | 判定 | 面板行为 |
 | --- | --- | --- |
-| profile 的 `node_modules/dsh-overall-mcp` | 版本由 pnpm 拥有，可查 npm `dist-tags.latest` 并比较 | 有新版时页头版本号旁出现「更新到 v0.2.0」，点了执行 `dsh plugin --profile <p> add <pkg>@<v>`，随后提示重启 DSH |
+| profile 的 `node_modules/dsh-overall-mcp` | 版本由 pnpm 拥有，可查 npm `dist-tags.latest` 并比较 | 有新版时页头版本号旁出现「更新到 v0.3.0」，点了执行 `dsh plugin --profile <p> add <pkg>@<v>`，随后提示重启 DSH |
 | `link:` / 本地检出（本仓库的开发形态） | 加载的就是源码目录，npm 上的版本与它无关 | **不出现**更新按钮，检查结果里注明「插件为 link 安装，跳过自身更新」 |
 | npm 查询失败（未发布 / 404 / 超时） | 无法判定 | 不出现按钮，检查结果里原样给出原因 |
 
@@ -275,6 +276,7 @@ Invalid schema for function 'mcp__rea-om__analyze_javascript_application':
 `GET /api/overall-mcp/servers`、`GET /api/overall-mcp/tools`（schema 取证）、
 `GET /api/overall-mcp/status`（这个进程在跑哪份代码、它在做什么，见下）、
 `GET /api/overall-mcp/events?limit=`（动作日志，见下）、
+`GET|POST /api/overall-mcp/census`（普查：读状态 / `{action:'start'|'stop'}`，见下）、
 `GET|POST|DELETE /api/overall-mcp/auth`（GitHub 凭据：读状态 / 存一个 token / 清除，见下）、
 `GET|POST /api/overall-mcp/updates`（版本检查）、`POST /api/overall-mcp/update`（更新并重连）、
 `GET|POST /api/overall-mcp/catalog?query=&source=&limit=&refresh=`、
@@ -286,7 +288,7 @@ Invalid schema for function 'mcp__rea-om__analyze_javascript_application':
 `POST /api/overall-mcp/favorite`（收藏，见下）、`GET /api/overall-mcp/favorites`（列出收藏）、
 `GET /api/overall-mcp/repo-stats?repos=owner/name,...`
 
-错误码分层（`lib/http-status.js`，单测 `test/http-status.test.mjs`）：`unknown server`/`unknown source` → **404**；缺参数（`item/key/name/source/enabled ... required`）、`no installable transport`、`is not launched through a package runner` → **400**；`ambiguous server name`（同名多条目，没带 `slot`/`from`）、`stale entry`（你读到的那一行已经不在原位）、`manual entry`（这个名字属于手工添加的记录，安装不覆盖它）→ **409**；上游版本查询失败（`version lookup failed`）→ **502**；其余一律 **500** 并由宿主 `log.warn` 记一行（含方法、URL 与消息）——500 的含义就是「这条路径我们没预料到」，早先它和「你参数写错了」共用 400，真正的事故看起来像用户的错。
+错误码分层（`lib/http-status.js`，单测 `test/http-status.test.mjs`）：`unknown server`/`unknown source` → **404**；缺参数（`item/key/name/source/enabled ... required`）、`no installable transport`、`is not launched through a package runner`、给了值但不可用（`on must be a boolean`）、枚举里的非法动词（`unknown census action`）→ **400**；`ambiguous server name`（同名多条目，没带 `slot`/`from`）、`stale entry`（你读到的那一行已经不在原位）、`manual entry`（这个名字属于手工添加的记录，安装不覆盖它）→ **409**；上游版本查询失败（`version lookup failed`）→ **502**；其余一律 **500** 并由宿主 `log.warn` 记一行（含方法、URL 与消息）——500 的含义就是「这条路径我们没预料到」，早先它和「你参数写错了」共用 400，真正的事故看起来像用户的错。
 
 `POST /api/overall-mcp/install` 的 body 是 `{ item, overwrite? }`；`/update`、`/remove`、`/set-enabled` 是 `{ name, slot?, from? }`（同名多条目时不带 `slot`/`from` 返回 409）；`POST /api/overall-mcp/sources` 是 `{ url, label? }`（`label` 省略时由地址推断）；`POST /api/overall-mcp/sources/remove` 是 `{ id }`。
 
@@ -318,7 +320,7 @@ key 就是市场卡片的 React key，因为官方 Registry 的 id 随版本变�
 
 宿主插件的代码在 DSH 启动时只载入一次（见「常见问题」）。这带来一个用版本号答不上来的问题：**这个面板此刻到底在跑哪份代码？** 页头原来的第二行是一句写死的标语，现在它改读 `GET /api/overall-mcp/status`：
 
-`插件 v0.2.0 · pid 4242 · 已运行 3 小时 12 分 · 5 个数据文件 · 日志 2 条`
+`插件 v0.3.0 · pid 4242 · 已运行 3 小时 12 分 · 5 个数据文件 · 日志 2 条`
 
 `/status` 把三组事实分开报，因为它们的失效方式不同：
 
@@ -414,6 +416,19 @@ key 就是市场卡片的 React key，因为官方 Registry 的 id 随版本变�
 6. **英文入口 `README.md`**。两份文档分工不同：英文那份是入口与实际用法（快速开始、三个标签页、模型工具、API、数据、安全、常见问题），中文这份是完整工程记录——每一轮的理由、实测数字和取舍都在这里。
 
 验证：`npm test` **285/285**（新增收藏往返契约；`lib/http-status.js` 的布尔规则断言加在既有用例里，故只 +1），`npm run lint` exit 0，`npm pack --dry-run` **26 个文件** / tarball **280.1 kB** / 解包 **796.2 kB**（第二十轮时 23 个 / 229 kB；`README.md` 与 `CHANGELOG.md` 是这一轮进 `files` 的）。
+
+## 普查可以手动启停（第二十二轮）
+
+这一轮没有新数据，加的是两个此前**只有后果、没有按钮**的动词：开始普查、停止普查。
+
+1. **为什么需要**。普查（`github-index.json`）此前只在一件事发生时开始：缓存过期后有人浏览 GitHub 来源。想要一份更新的索引，只能去点浏览；**想让它停下来则完全没有办法**——中止它的 handle 一直存在（插件卸载用它），却没有调用方，所以「停下来」的实际含义是重启 DSH。而一次普查是 6.5 秒一个请求、最多 48 个请求，也就是最长约五分钟。
+2. **一条路由，两个动词**。`/api/overall-mcp/census`（见 HTTP API 一节）：`GET` 读状态且**不触发任何请求**（索引是磁盘读，这一点和面板里那一行悬停写的一致）；`POST {action:'start'}` 不等缓存过期、现在就把缺的补上；已经有一个在跑时不会再起第二个（`started:false` 但 `walking:true`，这是诚实答案）；搜索额度还没恢复时**不起步**并回 `skipped:'quota'` 与 `waitMs`，而不是花掉一次请求去换一个 403。`POST {action:'stop'}` 中止在飞的那一次，回 `stopping:true`；没有在跑时回 `stopping:false`——那不是错误，是「没有东西可停」。
+3. **状态里有的东西，以及为什么要单列「谁停的」**。`/status` 与这条路由共用同一个 `censusState()`：`rows/at/complete/partial/requests` 来自索引文件，`walking/progress` 只有宿主进程知道（文件在跑的时候只写「正在抓取」，从不写走到第几个请求），`ended:{reason,at}` 记**是谁**停的（`user` 或 `dispose`）。最后这项值得单列，是因为 `crawlGithubRepos` 自己只会报一句「已中止」：读者要区分「我按了停止」与「插件被卸载了」，而理由只有宿主知道，所以由宿主写下来——面板上那句是「上次是手动停止的」，文件里那句是「已手动停止（已收 N 行，下次接着走）」。
+4. **面板**：已注册标签页的 GitHub 访问卡里多了一行普查状态（形如 `普查索引 1.8k 行 · 读完于 09:30`，悬停说明索引是本地文件、读它不花请求），右侧按状态给动词——没在跑给「开始普查」，在跑给「停止普查」并同时显示进度（`正在普查：已收 N 行 · M 次请求 · 每 6.5 秒一次请求，可以随时停止`）。停止之后再看这一行，它会写「上次是手动停止的」：这条行最该回答的问题就是「为什么停了」。
+5. **停止是安全的**。已收到的行在走的过程中就会落盘（写作 `正在抓取（已收 N 行）`、`complete:false`），所以停止不会丢掉它们，下一次 `start` 从缺的仓库接着走；另外，**被停止的普查不会顺带去抓安装证据**（`maybeCrawlInstallEvidence` 只在自然结束时触发）——读者既然按了停止，就不该在别处继续花额度。
+6. **未知动词是调用方错误**：`{action:'stpo'}` → **400**（`lib/http-status.js` 新增一条 `unknown <x> action` 规则）。若不拒绝，它会读成「没有动作」并回一份状态，对发送者而言和成功无法区分。
+
+验证：`npm test` **286/286**（`test/index.test.mjs` 新增「the census is a GET that starts nothing, and stop really ends the walk」：读不触发请求、未知动词 400、`start` 只起一个、`stop` 中止在飞的那次并写下 `reason:'user'`、停止本身不额外花请求），`tools/render-market-tab.mjs` **15 节**全绿（新增第 6e 节：状态行与动词随状态互换）。整条 `npm run verify` exit 0。
 
 ## 市场数据来源（2026-10 实测）
 
@@ -584,12 +599,21 @@ node tools/fixture-bad-schema-mcp.mjs                     # 故意带 `^[^\0]*$`
 
 同一轮还保证**同一个名字只挂一次**：注册表里如果因为历史原因存在同名多行（见「注册表里的重复行」），此前它们会各自去挂一次，败者被记成「另一个 mcp-client 已提供」——那是并发自己造出来的假象。现在同名兄弟共享第一行的裁决。
 
+**我想现在就跑一次普查，或者让它停下来**
+
+第二十二轮起这两个动作都在「已注册」页的 GitHub 访问卡里：那一行写着普查状态（索引多少行、上次读到什么时候、上次是谁停的），右边按状态给「开始普查」或「停止普查」——没在跑时是前者，在跑时是后者并显示进度。
+
+- 「开始普查」不等缓存过期，现在就把缺的仓库补上；搜索额度还没恢复时它会明确回一句「额度未恢复（还需 N 秒）」而不是干等，也不会花一次请求去换一个 403。
+- 「停止普查」是立刻生效的：走到一半收到索引里的那些行不会丢（它们本来就在走的过程中落盘），下一次开始会从缺的仓库接着走；被停掉的那次不会再顺带去抓安装证据——按了停止就不该在别处继续花额度。
+- 停止之后那一行会写「上次是手动停止的」。这不是多余的话：`crawlGithubRepos` 自己只会说「已中止」，而「我按的」和「插件被卸载」需要分开。
+- 命令行等价物是 `POST /api/overall-mcp/census` 带 `{"action":"start"|"stop"}`，`GET` 同一条路由只读状态、不触发任何请求。
+
 **普查跑到一半停了（日志里写着「第 N 次请求失败」）**
 
 那是 GitHub 侧的配额或网络抖动，不是插件坏了。匿名额度是搜索 10 次/分钟、核心 API 60 次/小时；一次完整普查要读几千个仓库的文件，匿名基本跑不完。
 
 - 在「已注册」页顶部的 GitHub 访问卡里填一个 token（或点「换成我的 GitHub 登录」，机器上登录过 `gh` 就不用填），额度变成 5000 次/小时；
-- **不填也能继续**：再点一次「重新普查」是从断点继续——已经有证据的行会被跳过（`needsInstallEvidence`），所以每次点都会往前推一点；
+- **不填也能继续**：再点一次「开始普查」是从断点继续——已经有证据的行会被跳过（`needsInstallEvidence`），所以每次点都会往前推一点；第二十二轮起这个动词就在同一张卡上，不必等缓存过期；
 - 走到哪了看 `GET /status` 或 `/events` 的普查那一行：`planned / attempted / remaining / retries` 四个数把「计划多少、走到多少、还剩多少、重试了几次」分开说（第十九轮起；此前只有一句「失败」）。
 
 **填了 token，面板还是显示「匿名访问」**

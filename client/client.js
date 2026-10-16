@@ -59,7 +59,7 @@ window.__ModuleLoader__.load({
 		// probe also checks CHANGELOG.md's newest section is this version, since
 		// a release note that stops at an older build tells a reader what
 		// changed in code they are not running.
-		const CLIENT_VERSION = "0.2.0";
+		const CLIENT_VERSION = "0.3.0";
 		// The bundle's npm package name — what the profile lists in its
 		// `dsh.profile.bundles` and what its bundle page is keyed by. The
 		// bundle cannot read package.json at runtime, so `tools/client-smoke.mjs`
@@ -2668,6 +2668,39 @@ window.__ModuleLoader__.load({
 			}
 
 			/**
+			 * Ask for a census now, or end the one running.
+			 *
+			 * Both verbs existed in the host as side effects and neither was
+			 * reachable: a walk only ever started because someone happened to
+			 * browse the GitHub source, and once started it paced itself at 6.5s
+			 * per request for up to 48 requests with no way to say stop. The
+			 * button is the whole feature — the host already knew how to end one
+			 * (this file's `dispose` did it), it just had no caller.
+			 */
+			async function censusAction(action) {
+				if (authBusy) return;
+				setAuthBusy(true);
+				try {
+					const state = await api("/census", { method: "POST", body: JSON.stringify({ action }), timeoutMs: 15000 });
+					if (action === "stop") {
+						setAuthNote(state?.stopping ? "正在停止普查…" : "没有在跑的普查");
+					} else if (state?.started) {
+						setAuthNote("普查已开始，每 6.5 秒读一个仓库");
+					} else if (state?.skipped === "quota") {
+						setAuthNote(`搜索额度还没恢复，约 ${Math.ceil((state.waitMs ?? 0) / 1000)} 秒后再试`);
+					} else {
+						setAuthNote("普查已经在跑了");
+					}
+					await loadStatus();
+					if (logOpen) loadEvents();
+				} catch (err) {
+					setAuthNote(`普查操作失败：${String(err.message || err)}`);
+				} finally {
+					setAuthBusy(false);
+				}
+			}
+
+			/**
 			 * Carry the census on from where it stopped.
 			 *
 			 * A walk that hit the anonymous rate limit leaves the rest of its
@@ -3566,6 +3599,27 @@ window.__ModuleLoader__.load({
 			const censusPartial = typeof hostStatus?.evidence?.partial === "string"
 				? hostStatus.evidence.partial
 				: "";
+			// The census itself: how many rows the local index holds, whether a
+			// walk is running right now (and how far it has got), and how the last
+			// one ended. `/status` is the only place that can say the last two —
+			// the index file says "正在抓取" while a walk runs and "已手动停止"
+			// after a stop, and never says which request the walk is on.
+			const census = hostStatus?.census ?? null;
+			const censusWalk = census?.progress ?? null;
+			const censusLine = !census
+				? "宿主插件还是旧版本，读不到普查状态"
+				: census.walking
+					? [
+						`正在普查：已收 ${compactCount(censusWalk?.rows ?? census.rows ?? 0)} 行`,
+						censusWalk?.requests ? `${censusWalk.requests} 次请求` : null,
+						"每 6.5 秒一次请求，可以随时停止",
+					].filter(Boolean).join(" · ")
+					: [
+						census.rows ? `普查索引 ${compactCount(census.rows)} 行` : "还没有普查索引",
+						census.at ? `${census.complete ? "读完于" : "上次读到"} ${sourceClock(census.at)}` : null,
+						census.ended?.reason === "user" ? "上次是手动停止的" : null,
+						census.damaged ? `文件损坏：${census.damaged}` : null,
+					].filter(Boolean).join(" · ");
 
 			// The one outlined control that belongs beside the sub-line rather
 			// than in the run of text buttons on the first row.
@@ -3885,6 +3939,36 @@ window.__ModuleLoader__.load({
 							? createElement("div", { key: "autherr", style: styles.error }, `⚠ ${auth.error}`)
 							: null,
 						authNote ? createElement("div", { key: "note", style: styles.hint }, authNote) : null,
+						// The census, with the two verbs a reader owns. It used to
+						// be reachable only as a side effect of browsing the GitHub
+						// source and stoppable only by restarting DSH; the line is
+						// always here because "is one running?" is a question the
+						// answer to which changes what the buttons do.
+						census
+							? createElement("div", { key: "censusline", style: styles.sourceRow }, [
+								createElement("span", {
+									key: "m", style: styles.jobMsg,
+									title: census.walking
+										? "普查按 6.5 秒一个请求走，最长 48 个请求；索引每收一批就落盘，停止不会丢掉已收到的"
+										: "普查结果存在本机数据目录的 github-index.json，读它不花网络请求",
+								}, censusLine),
+								createElement("span", { key: "spacer", style: styles.spacer }),
+								census.walking
+									? createElement("button", {
+										key: "stop", type: "button", className: "omkt-btn omkt-btn-outline",
+										style: { ...styles.sourceMiniBtn, ...styles.sourceMiniBtnDanger },
+										disabled: authBusy,
+										title: "停止当前普查；已收到的行会保留，下次「开始普查」从剩下的仓库接着走",
+										onClick: () => censusAction("stop"),
+									}, "停止普查")
+									: createElement("button", {
+										key: "start", type: "button", className: "omkt-btn omkt-btn-outline",
+										style: styles.sourceMiniBtn, disabled: authBusy,
+										title: "现在就走一遍普查（不等缓存过期）；已收到的不重读，只补缺的",
+										onClick: () => censusAction("start"),
+									}, "开始普查"),
+							])
+							: null,
 						// A walk that stopped because the upstream pushed back is
 						// the only stop a credential would have helped — so the
 						// reason and the way to carry on sit together.

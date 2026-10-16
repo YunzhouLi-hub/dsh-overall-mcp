@@ -667,6 +667,123 @@ test('a stale census is served immediately, and the walk behind it starts withou
 });
 
 // ---------------------------------------------------------------------------
+// The census verbs the reader owns. Before `/census` a walk only ever started
+// because someone happened to browse the GitHub source, and once started it
+// could only be ended by unloading the plugin — a walk paces itself at 6.5s per
+// request for up to 48 requests, so "I did not want this" had no answer. These
+// cases pin the three things that makes it a contract: reading starts nothing,
+// an unknown verb is refused instead of read as "just read", and stop really
+// ends the walk rather than asking it to end eventually.
+// ---------------------------------------------------------------------------
+
+test('the census is a GET that starts nothing, and stop really ends the walk', async () => {
+  const at = new Date(Date.now() - 40 * 3600_000).toISOString();
+  const files = { 'github-index.json': censusDocument([censusRow('acme/calendar-mcp', { stars: 90 })], { at }) };
+  let requests = 0;
+  const held = [];
+  // The first request is answered — an empty window, which is the cheapest
+  // honest answer and lets the walk move on to plan its next one. Every later
+  // request is held open until the signal aborts it: exactly what real fetch
+  // does, and what makes "stop" a promise the host can keep rather than a hope.
+  // Nothing here needs a network, and nothing waits 6.5 seconds: after the first
+  // answer the walk is asleep between requests, which is where a reader stops it.
+  const emptySearch = () => ({
+    ok: true,
+    status: 200,
+    headers: { get: (name) => (String(name).toLowerCase() === 'x-ratelimit-remaining' ? '29' : null) },
+    json: async () => ({ total_count: 0, incomplete_results: false, items: [] }),
+  });
+  const stub = (url, options = {}) => {
+    requests += 1;
+    held.push(String(url));
+    if (requests === 1) return Promise.resolve(emptySearch());
+    return new Promise((resolve, reject) => {
+      const signal = options.signal;
+      const fail = () => {
+        const err = new Error('the operation was aborted');
+        err.name = 'AbortError';
+        reject(err);
+      };
+      if (signal?.aborted) return fail();
+      signal?.addEventListener('abort', fail, { once: true });
+      return undefined;
+    });
+  };
+
+  await withFetchStub(stub, async () => {
+    await withHost(FIXTURE, async ({ call }) => {
+      // Reading is a GET, and it is a disk read: a stale census does not make a
+      // reader who only looked pay for a walk.
+      const before = await call('/api/overall-mcp/census', { method: 'GET' });
+      assert.equal(before.status, 200);
+      assert.equal(before.body.walking, false);
+      assert.equal(before.body.rows, 1);
+      assert.equal(before.body.complete, true);
+      assert.equal(requests, 0, 'reading the census starts nothing');
+
+      // A verb outside the set is the caller's error. Treated as "no action" it
+      // would answer "here is the state" to a mistyped `stop` — indistinguishable
+      // from success for whoever sent it.
+      const bogus = await call('/api/overall-mcp/census', { body: { action: 'stpo' } });
+      assert.equal(bogus.status, 400);
+      assert.match(String(bogus.body.error), /unknown census action/);
+      assert.equal(requests, 0, 'a refused verb does not walk either');
+
+      // Start: `start` means a walk now, stale or not — that is the whole point
+      // of the button, and the reason it passes `force`.
+      const started = await call('/api/overall-mcp/census', { body: { action: 'start' } });
+      assert.equal(started.status, 200);
+      assert.equal(started.body.started, true);
+      assert.equal(started.body.walking, true);
+      await waitFor(() => (requests >= 1 ? true : null));
+      assert.equal(held.length, 1, 'the walk asked GitHub before pacing');
+      assert.match(held[0], /\/search\/repositories/);
+
+      // While it runs, the state says so and carries progress: /status and this
+      // route are the only places that can — the index file says "正在抓取" and
+      // never says which request the walk is on. A request is counted when it
+      // comes back, so the first one is already on the board here.
+      const during = await waitFor(async () => {
+        const res = await call('/api/overall-mcp/census', { method: 'GET' });
+        return res.body.progress?.requests >= 1 ? res.body : null;
+      });
+      assert.equal(during.walking, true);
+      assert.equal(during.progress.requests, 1);
+
+      // A second start does not stack a second walk: `walking` is the honest
+      // answer, and no new request is made for it.
+      const again = await call('/api/overall-mcp/census', { body: { action: 'start' } });
+      assert.equal(again.body.walking, true);
+      assert.equal(again.body.started, false, 'one walk at a time');
+      assert.equal(requests, 1);
+
+      // Stop: the walk is aborted where it stands — asleep between requests, or
+      // waiting on one. Either way it does not get to the next request.
+      const stopped = await call('/api/overall-mcp/census', { body: { action: 'stop' } });
+      assert.equal(stopped.status, 200);
+      assert.equal(stopped.body.stopping, true);
+      const after = await waitFor(async () => {
+        const res = await call('/api/overall-mcp/census', { method: 'GET' });
+        return res.body.walking ? null : res.body;
+      });
+      assert.equal(after.ended?.reason, 'user', 'it says a reader ended it, not that it was unloaded');
+      assert.equal(after.rows, 1, 'the census that was on disk survives a stopped walk');
+      // …and the stop is written down as an unfinished census, so the next
+      // start resumes instead of believing the walk that stopped had finished.
+      assert.equal(after.complete, false);
+      assert.match(String(after.partial), /已手动停止/);
+      assert.equal(requests, 1, 'stopping cost nothing: no request was made to cancel one');
+
+      // Stopping again is not an error: the second stop reports that there was
+      // nothing left to stop, which is what a double click deserves.
+      const nothing = await call('/api/overall-mcp/census', { body: { action: 'stop' } });
+      assert.equal(nothing.body.stopping, false);
+      assert.equal(nothing.body.walking, false);
+    }, { files });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Install evidence (lib/repo-install.js) as the host uses it: a discovery row
 // whose repository publishes a package gets a real command, attributed to the
 // file it was read from — and the panel never waits for the walk that finds it.
@@ -764,10 +881,22 @@ test('opening the market starts the evidence walk, and what it recovers is on di
 });
 
 test('a spent search budget reads as a wait, and nothing spends from it again', async () => {
+  // Two background walks can be alive during this case, and they spend two
+  // different budgets: the census walk asks the search API (10 requests/minute
+  // anonymously), while the install-evidence walk reads raw repository files
+  // (60 core requests/hour). Only the first one is what "an emptied window"
+  // means, so the stub counts them separately — a single counter mixed them and
+  // the case failed whenever the evidence walk happened to read a file first
+  // (the stub threw on those raw URLs, `readRepoFile` labelled it a network
+  // failure, and the request counter still went up).
   let requests = 0;
+  let rawReads = 0;
   const refused = async (url) => {
+    if (!/api\.github\.com\/search\/repositories/.test(String(url))) {
+      rawReads += 1;
+      throw new Error('offline (this test only answers the search API)');
+    }
     requests += 1;
-    assert.match(String(url), /api\.github\.com\/search\/repositories/, 'only the search API is asked');
     return {
       ok: false,
       status: 403,
@@ -799,11 +928,19 @@ test('a spent search budget reads as a wait, and nothing spends from it again', 
       // handover rather than sleeping a fixed 30ms and hoping. What it asserts
       // is what the *settled* host says: the budget is empty, and the panel's
       // strongest request still spends nothing.
-      const second = await waitFor(async () => {
-        const res = await call('/api/overall-mcp/catalog', {
-          body: { source: 'github-mcp', limit: 100, refresh: true },
-        });
-        return /配额已用完/.test(String(res.body.sources['github-mcp'].note ?? '')) ? res : null;
+      //
+      // The wait must not itself perform the call under test: /status never
+      // asks an upstream (the census is a file read), while re-issuing the
+      // catalog call would spend from exactly the window this case is trying to
+      // prove is unspendable — a poll with real requests measures the poll, and
+      // the request counter below is the assertion.
+      await waitFor(async () => {
+        const status = await call('/api/overall-mcp/status', { method: 'GET' });
+        return status.body?.census?.walking === false ? true : null;
+      });
+      assert.equal(requests, 1, 'the walk itself stopped asking once the window was known to be empty');
+      const second = await call('/api/overall-mcp/catalog', {
+        body: { source: 'github-mcp', limit: 100, refresh: true },
       });
       assert.equal(requests, 1, 'no request is spent from a window known to be empty');
       assert.match(String(second.body.sources['github-mcp'].note ?? ''), /配额已用完/);
