@@ -43,9 +43,16 @@ if (process.argv.includes('--check')) {
   let bad = 0;
   for (const name of READMES) {
     const text = await readFile(path.join(root, name), 'utf8');
-    const urls = [...text.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)].map((m) => m[1]);
+    // Two shapes, because the header icon is HTML (a centred `<img>`) while the
+    // panel pictures are markdown: checking only one would leave the image a
+    // reader sees first unverified.
+    const urls = [
+      ...[...text.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)].map((m) => m[1]),
+      ...[...text.matchAll(/<img\s[^>]*src="([^"]+)"/g)].map((m) => m[1]),
+    ];
     // Only this repo's own pictures are checked: a README may legitimately
-    // point at someone else's badge, and this script cannot see the network.
+    // point at someone else's badge (shields.io), and this script cannot see
+    // the network.
     const mine = urls.filter((u) => u.startsWith(RAW_PREFIX));
     if (!mine.length) { console.error(`${name}: no picture inside ${RAW_PREFIX}`); bad += 1; }
     for (const url of mine) {
@@ -373,6 +380,38 @@ const SHELL = `
   img{max-width:none}
 `;
 
+/**
+ * The plugin's own mark — the constellation hub the sidebar draws next to
+ * 全局 MCP — hand-mirrored from `brandMark` in `client/client.js` (`g` spokes at
+ * 1.6, five satellites, one accent hub at `T.brand`), because a README cannot
+ * import a React component.
+ *
+ * Two deliberate departures from the rail's glyph:
+ *   - the hub keeps the brand blue but the mark sits on a light chip, so a
+ *     near-black constellation still reads on GitHub's dark theme;
+ *   - the canvas is square with padding, so the mark is not cropped by the
+ *     rounded chip.
+ * Written to docs/images/icon.svg (the editable source) and icon.png (what the
+ * READMEs link to: a few renderers still refuse SVG).
+ */
+const ICON_CHIP = '#f1f3f9';
+const ICON_INK = '#1f2430';
+const ICON_BRAND = '#4d6bfe';
+const ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+<rect width="256" height="256" rx="56" fill="${ICON_CHIP}"/>
+<g transform="translate(40 40) scale(5.5)">
+<g fill="none" stroke="${ICON_INK}" stroke-width="1.6" stroke-linecap="round">
+<path d="M16 16 L8 8 M16 16 L24 8 M16 16 L7 20 M16 16 L25 20 M16 16 L16 26"/>
+</g>
+<circle cx="16" cy="16" r="3.2" fill="${ICON_BRAND}"/>
+<circle cx="8" cy="8" r="2.2" fill="${ICON_INK}"/>
+<circle cx="24" cy="8" r="2.2" fill="${ICON_INK}"/>
+<circle cx="7" cy="20" r="2" fill="${ICON_INK}"/>
+<circle cx="25" cy="20" r="2" fill="${ICON_INK}"/>
+<circle cx="16" cy="26" r="2" fill="${ICON_INK}"/>
+</g>
+</svg>`;
+
 await mkdir(outDir, { recursive: true });
 const scratch = path.join(os.tmpdir(), 'dsh-readme-shots');
 await mkdir(scratch, { recursive: true });
@@ -396,11 +435,20 @@ const shot = async (name, html, width, height) => {
   await execFileP(chrome, [
     '--headless=new', '--disable-gpu', '--no-sandbox', '--hide-scrollbars',
     '--force-device-scale-factor=1', `--window-size=${width},${height}`,
-    '--virtual-time-budget=2500', `--screenshot=${png}`,
+    '--virtual-time-budget=2500', '--default-background-color=00000000',
+    `--screenshot=${png}`,
     `file:///${file.replace(/\\/g, '/')}`,
   ], { maxBuffer: 8 * 1024 * 1024, windowsHide: true });
   return png;
 };
+
+// The icon first: it is a picture of the plugin's own mark, and the README
+// shows it above everything else. Both files are written so a reader who wants
+// to edit the mark has the SVG, and the README gets a PNG that any renderer
+// will show.
+await writeFile(path.join(outDir, 'icon.svg'), `${ICON}\n`, 'utf8');
+const iconPng = await shot('icon', `<!doctype html><meta charset="utf-8">
+<style>html,body{margin:0;background:transparent}</style>${ICON}`, 256, 256);
 
 let tree = await render();
 const page = (title, node) => `<!doctype html><meta charset="utf-8"><title>${title}</title>
@@ -423,6 +471,7 @@ tree = await render();
 const detail = page('detail', tree);
 
 const shots = [
+  iconPng,
   await shot('registered', registered, 1180, 760),
   await shot('market', market, 1180, 1560),
   await shot('detail', detail, 1180, 1120),

@@ -130,6 +130,19 @@ if (!newestSection) throw new Error('CHANGELOG.md has no versioned section');
 if (newestSection[1] !== pkg.version) {
   throw new Error(`CHANGELOG.md newest section is ${newestSection[1]}, package.json is ${pkg.version}`);
 }
+// Both READMEs open with a version badge, which is the most-read number in the
+// file and the one nobody re-reads after a release. It is a shields.io *static*
+// badge — the package is not on npm yet, so an npm badge would render "not
+// found" — which means nothing but this check keeps it honest.
+for (const name of ['README.md', 'README.zh-CN.md']) {
+  const readme = await readFile(path.join(here, '..', name), 'utf8').catch(() => null);
+  if (readme === null) throw new Error(`${name} is missing`);
+  const badge = readme.match(/img\.shields\.io\/badge\/version-(v?[0-9]+\.[0-9]+\.[0-9]+)-/);
+  if (!badge) throw new Error(`${name} has no version badge`);
+  if (badge[1] !== pkg.version) {
+    throw new Error(`${name} version badge says ${badge[1]}, package.json is ${pkg.version}`);
+  }
+}
 const bundleName = exportsObj.__test?.bundleName;
 if (!bundleName) throw new Error('client exports no __test.bundleName');
 if (bundleName !== pkg.name) {

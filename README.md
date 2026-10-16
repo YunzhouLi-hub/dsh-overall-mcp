@@ -1,8 +1,18 @@
-# dsh-overall-mcp
+<p align="center">
+  <img src="https://raw.githubusercontent.com/YunzhouLi-hub/dsh-overall-mcp/main/docs/images/icon.png" width="112" height="112" alt="Overall MCP: one blue hub with five satellites">
+</p>
+
+<h1 align="center">dsh-overall-mcp</h1>
+
+<p align="center">English | <a href="README.zh-CN.md">中文</a></p>
+
+<p align="center">
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.5.0-4d6bfe" alt="version 0.5.0"></a>
+</p>
 
 **A DeepSeek Harness plugin that scans every MCP configuration on the machine on first install and registers what it finds; aggregates six open MCP catalogs (5,364 deduplicated entries measured 2026-10) into one browsable, one-click-installable panel; and keeps a local census index of MCP repositories on GitHub (1,758 rows measured), recovering install commands from repository evidence and labelling each recovered command with where it came from.**
 
-[简体中文](README.zh-CN.md) · this file is the English entry point; `README.zh-CN.md` is the full engineering record (per-round rationale, measurements, and the reasoning behind each decision).
+`README.zh-CN.md` is the full engineering record (per-round rationale, measurements, and the reasoning behind each decision).
 
 ## What it looks like
 
