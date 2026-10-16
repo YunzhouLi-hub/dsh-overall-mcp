@@ -109,6 +109,14 @@ const MARKET = {
     },
     'docker-catalog': { error: 'HTTP 403' },
   },
+  // The host reports one entry per failed source, and it already carries the
+  // reason. Two shapes are exercised together: a source with nothing to show,
+  // and one that failed but answered from its last walk (`stale`) — the second
+  // is a rate limit that lifts by itself, and calling it 不可用 would be wrong.
+  errors: [
+    { source: 'docker-catalog', message: 'HTTP 403' },
+    { source: 'github-mcp', message: '搜索配额已用完（约 42 秒后恢复）', stale: true },
+  ],
 };
 
 // The custom catalogue sources the host reports. One is configured, and it is
@@ -406,6 +414,24 @@ assert.ok(sourceText.includes('官方 1'), 'per-source line names the sources');
 // reason itself is spelled out in the manager box below.
 assert.ok(sourceText.includes('GitHub 2（部分'), `a partially-read source is marked (got ${sourceText})`);
 assert.ok(sourceText.includes('其中 1 个已安装'), 'per-source line names the installed count');
+
+// --- 3c-2. a failed source says why, and whether its rows are old ------------
+// The line used to name the failed sources and stop there, which made a rate
+// limit ("HTTP 403") look exactly like a typo'd custom URL — the host had the
+// reason all along. Both facts have to reach the reader, and a source that
+// answered from its last walk is a different fact from one with nothing to
+// show: the first is behind, the second is missing.
+const warnLine = marketOwn.filter((n) => n.props?.key === 'warn');
+assert.equal(warnLine.length, 1, 'the failure line appears when a source failed');
+const warnText = textOf(warnLine[0]);
+assert.ok(warnText.includes('部分来源不可用：'), `failure line names its subject (got ${warnText})`);
+assert.ok(warnText.includes('Docker（不可用：HTTP 403）'), `a failure carries its reason (got ${warnText})`);
+assert.ok(warnText.includes('GitHub（旧数据：搜索配额已用完（约 42 秒后恢复））'),
+  `a source that answered from its last walk says so (got ${warnText})`);
+// The untruncated text stays on the line: a long upstream message must not cost
+// the reader the part that tells them what to do about it.
+assert.ok(String(warnLine[0].props.title).includes('搜索配额已用完（约 42 秒后恢复）'),
+  'the full reason stays available even when the line shortens it');
 
 // --- 3d. the user's own catalogue sources -----------------------------------
 // A source the user pointed at is a first-class source: it must be reachable

@@ -1805,6 +1805,20 @@ window.__ModuleLoader__.load({
 		 * not say. Sources age independently (each has its own TTL and validator),
 		 * so this is printed per source rather than once for the whole listing.
 		 */
+		/**
+		 * A failure's own words, short enough to sit inside the source line.
+		 *
+		 * The host reports one entry per failed source, and its `message` already
+		 * carries what the reader needs — "HTTP 403" is useless, "搜索配额已用完
+		 * （约 42 秒后恢复）" is actionable. Listing only the source *names* was the
+		 * old behaviour, which left a rate limit indistinguishable from a typo'd
+		 * custom URL. The untruncated text stays available as the line's title.
+		 */
+		function clipReason(message, max = 48) {
+			const text = String(message ?? "").replace(/\s+/g, " ").trim();
+			return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+		}
+
 		function sourceClock(at) {
 			if (typeof at !== "string" || !at) return "";
 			const t = new Date(at);
@@ -3746,8 +3760,19 @@ window.__ModuleLoader__.load({
 					marketBusy ? createElement("div", { key: "loading", style: styles.message }, "正在从市场拉取…") : null,
 					marketError ? createElement("div", { key: "err", style: styles.error }, marketError) : null,
 					market && market.errors && market.errors.length
-						? createElement("div", { key: "warn", style: styles.hint },
-							`部分来源不可用：${market.errors.map((e) => e.source).join("、")}`)
+						? createElement("div", { key: "warn", style: styles.hint,
+							title: market.errors
+								.map((e) => `${shortSourceName(e.source)}：${String(e.message ?? "")}`)
+								.join("\n") },
+							`部分来源不可用：${market.errors.map((e) => {
+								const label = shortSourceName(e.source);
+								const reason = clipReason(e.message);
+								// A source that failed but still answered from its last
+								// walk is behind; one that answered nothing is missing.
+								// Those are different facts and the words say which.
+								const kind = e.stale ? "旧数据" : "不可用";
+								return reason ? `${label}（${kind}：${reason}）` : `${label}（${kind}）`;
+							}).join("、")}`)
 						: null,
 					starNote ? createElement("div", { key: "star", style: styles.hint }, starNote) : null,
 					// The host reports which repo lookups failed; those repos have an
