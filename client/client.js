@@ -1209,9 +1209,15 @@ window.__ModuleLoader__.load({
 			const ref = rowRef(server);
 			const originNote = server.config?.origin === "official"
 				? "这些字段来自官方注册表为这个包声明的环境变量（必填/密钥也是它说的）。"
-				: server.config?.origin === "args"
-					? "这个来源没有声明配置项；下面是从它的启动命令里识别出的变量名。"
-					: "这个来源没有声明配置项：留空即可，只有服务需要令牌时才要填。";
+				: server.config?.origin === "smithery"
+					// A Smithery row does declare fields, and they are not
+					// environment variables: the CLI takes one JSON argument.
+					// Saying 「这个来源没有声明配置项」 over a filled-in form was
+					// the sheet denying what it was showing.
+					? "这些字段来自 Smithery 为这台服务器声明的配置；保存后以 --config 的 JSON 交给 CLI。"
+					: server.config?.origin === "args"
+						? "这个来源没有声明配置项；下面是从它的启动命令里识别出的变量名。"
+						: "这个来源没有声明配置项：留空即可，只有服务需要令牌时才要填。";
 			const missing = result?.missing ?? server.config?.missing ?? [];
 
 			useEffect(() => {
@@ -2366,6 +2372,25 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, onI
 		}
 
 		/**
+		 * The address every row action sends: the row's `slot` (its position in
+		 * the list the host just rendered) alongside the name. Names repeat in
+		 * this registry — four rows named `rea-cursor` at one point — and a
+		 * name-keyed action then hit the first match: 移除 on the last row
+		 * removed the first one.
+		 *
+		 * Module scope on purpose. This used to live inside `Section`, which put
+		 * it out of reach of `ConfigDialog` — a sibling at this level — so every
+		 * 配置 click threw `ReferenceError: rowRef is not defined` before the
+		 * sheet could paint. The page had no boundary then, so the whole panel
+		 * went blank; the button looked like it did nothing at all.
+		 */
+		const rowRef = (server) => ({
+			name: server.name,
+			slot: Number.isInteger(server.slot) ? server.slot : null,
+			from: server.update?.current ?? null,
+		});
+
+		/**
 		 * The one control on this page that asks for nothing and gives nothing
 		 * back: a star. It sits in the identity row because it is about the
 		 * plugin itself, not about the roster — and because a star bar at the
@@ -3447,15 +3472,6 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, onI
 			// `note` wins when the host has one: it is the honest wording for an
 			// entry another mcp-client mount provides, where「已停用」/「已移除」
 			// would claim an effect this plugin cannot have.
-			// Row actions send the row's `slot` (its position in the list the host
-			// just rendered) alongside the name. Names repeat in this registry —
-			// four rows named `rea-cursor` at one point — and a name-keyed action
-			// then hit the first match: 移除 on the last row removed the first one.
-			const rowRef = (server) => ({
-				name: server.name,
-				slot: Number.isInteger(server.slot) ? server.slot : null,
-				from: server.update?.current ?? null,
-			});
 			const doToggle = (server, enabled) => run(
 				() => api("/set-enabled", { method: "POST", body: JSON.stringify({ ...rowRef(server), enabled }) }),
 				(r) => r.note ?? `${r.name} ${r.enabled ? "已启用并连接" : "已停用"}`,
@@ -5185,6 +5201,10 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, onI
 		// the first two, and none that renders once can catch the third.
 		exports.__test = {
 			MarketDetail, MarketCard, DetailRow, LinkChip, PanelGlyph, subLineText,
+			// The config sheet leaves the page only through a click, so no probe
+			// that renders the section can reach it; rendering it directly is the
+			// only way to catch a throw that happens before the first paint.
+			ConfigDialog,
 			version: CLIENT_VERSION, bundleName: BUNDLE_NAME, panelId: PANEL_ID,
 		};
 		// Section is exported for tools/render-market-tab.mjs: the market tab's
