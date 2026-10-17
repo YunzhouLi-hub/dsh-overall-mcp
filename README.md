@@ -7,7 +7,7 @@
 <p align="center">English | <a href="README.zh-CN.md">中文</a></p>
 
 <p align="center">
- <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.5.0-4d6bfe" alt="version 0.5.0"></a>
+ <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.6.0-4d6bfe" alt="version 0.6.0"></a>
 </p>
 
 **A DeepSeek Harness plugin that scans every MCP configuration on the machine on first install and registers what it finds; aggregates six open MCP catalogs (5,364 deduplicated entries measured 2026-10) into one browsable, one-click-installable panel; and keeps a local census index of MCP repositories on GitHub (1,758 rows measured), recovering install commands from repository evidence and labelling each recovered command with where it came from.**
@@ -37,6 +37,7 @@ These are screenshots of the real panel: `tools/readme-shots.mjs` renders them f
 | 🔍 | Scan on first install | Discovers and registers every MCP server configured in Claude Desktop, Claude Code, Cursor, VS Code (Copilot), Windsurf, Codex CLI and Gemini CLI |
 | 🌐 | MCP market | Six sources aggregated in parallel — official Registry, Smithery, Docker MCP Catalog, GitHub MCP, Awesome remote, Awesome list — **5,364 entries measured**. Browse with no keyword, filter by source, search. (The GitHub source reads the local census index and makes **zero requests** when an index exists; rows without install data get a command recovered from repository evidence, with the source named.) |
 | ⚡ | One-click connect | npm package → `npx -y <pkg>`, Python package → `uvx`, hosted endpoint → streamable-http, Docker image → `docker run -i --rm mcp/<name>`; listing-only entries offer their repository link |
+| 🧩 | Settings before it can work | A server that installs can still be unusable — a missing API key makes every tool call answer `401`. The declaration is read from the official Registry (or from the entry's own launcher), stored with the row, and shown as a **待配置** badge plus a one-line page banner; **配置** opens a masked form, saving remounts only a row that was already enabled, and the install reply opens the form for what it just wrote (`GET /servers`, `POST /configure`, `overall_mcp_configure`, round 25) |
 | 🛠️ | Native tool bridge | Each enabled server is mounted as one `dsh-mcp-client` instance; its tools register as native DSH tools named `mcp__<name>__<tool>` |
 | 🖥️ | Sidebar panel | **Global MCP**, directly under *Plugins*: a **Registered** tab (grouped by source, collapsible, per-group switch, status filters) and an **MCP Market** tab |
 | 🎛️ | Per-group switches | One switch per source group enables/disables every server from that source (also available as `overall_mcp_set_source_enabled`) |
@@ -64,7 +65,7 @@ The page is a **global panel** in the sidebar (not a setting, not a plugin confi
 - Header counts: `N servers · M enabled · K disabled · C connected · X connection errors`
 - Filters: source, status (enabled/disabled/connected/error), name search
 - Groups by import source, each with its count and enabled count, a group switch, and a clickable header to collapse
-- Each row: status dot, name, **purpose line**, facts line (transport · status · tool count · tool prefix `mcp__<serverName>__` · package version), enable/disable, remove
+- Each row: status dot, name, **purpose line**, facts line (transport · status · tool count · tool prefix `mcp__<serverName>__` · package version), enable/disable, remove, and **配置** when the row declares settings
 - **One writer at a time, atomic writes, and tools that tell the truth.** Every "read registry → await (scan / spawn npx / query npm) → write back" action is queued on one promise chain, because two interleaved read-modify-writes lose the earlier change. The registry is written through a temporary file plus `rename` (it is the one file whose loss unmounts every server). A registry that fails to parse is no longer treated as a first run: the original is copied to `registry.json.corrupt-<timestamp>`, the panel shows a red line with the reason, and the file is never overwritten with an empty registry. A scan no longer clears favourites (the merge preserves the top-level keys it does not own), installing over a hand-written `source: manual` entry returns **409** unless `overwrite: true`, a failed mount reports `counted: false` instead of looking like success, and the group switch disconnects by name so it cannot take another source's same-named row with it.
 - **Purpose lines.** The host picks one human sentence by **strength of evidence** (`lib/about.js`, clamped to 150 characters and two lines): the server's own `instructions` from the MCP `initialize` result (`source: 'server'`), else the tools it registered (`source: 'tools'`), else its launch command (`source: 'command'`). The origin is labelled in the line's `title`, and if all three are missing the line is omitted rather than invented. Because dsh-mcp-client publishes `instructions` only while the server is connected, "not found" is not cached as final: the host remembers the liveness at last read and re-assembles only when it flips.
 - **Orphan rows.** The registry records the evidence of each scan (`registry.scanned`); rows no longer defined by any configuration file are marked `source deleted` with one "Clean up N" action (`POST /forget-orphans`). A row that currently holds a mount is never cleaned up, and a configuration that could not be read is not evidence of absence.
@@ -94,6 +95,17 @@ The page is a **global panel** in the sidebar (not a setting, not a plugin confi
 - **Hard constraints in the system prompt**: at most three lines (cause / next step / a third only if the error alone is insufficient), never invent a URL, argument, version or config key, never claim to have run a command, never suggest disabling a sandbox or skipping a safety check.
 - **Every "no explanation" says why**: `diagnosisSkipped: "no-llm"` or `"no-route"` (no request is made in either case), `diagnosisError` when the call fails — and a `200` response with `connect.ok === false` renders a failure block (raw error, then the diagnosis) instead of claiming success.
 - Identical `(entry, error)` pairs are answered from a ten-minute memo (32 entries), and hosts **without** a model are unaffected: `llm` is injected optionally.
+
+### Settings a server needs before it can work
+
+A server can install, mount, read `已连接` — and still answer every `tools/call` with `401`, because the token was never filled in. Until round 25 the first hint was the broken tool call. The declaration is now read at install time, stored with the row, and shown before anything is clicked.
+
+- **Where the declaration comes from** (`lib/server-config.js`): the official Registry's `packages[].environmentVariables[]` (name, description, `isRequired`, `isSecret`) and `remotes[].headers[]`; for every other source, what the entry's own launcher implies — `-e NAME` / `--env NAME`, `$NAME` / `${NAME}` / `{NAME}` placeholders in the command, an argument or the URL, and a bare credential-shaped token such as `GITHUB_PERSONAL_ACCESS_TOKEN` (exactly how the official GitHub image is launched). A `streamable-http`/`sse` entry always gets one **optional** `Authorization` header: most remote endpoints are anonymous, and a required field nobody can fill would make every one of them look broken. Sources are unioned, `origin` records the strongest evidence (`official` > `args` > `manual`), and a row that declares nothing carries no `config` at all.
+- **Stored, not re-derived**: the spec is written into the registry entry (`config: { origin, fields }`), so a badge survives a restart and a hand-edited config file is not second-guessed. Only a missing **required** value counts — an empty optional field is a hint, not a problem.
+- **Masked on the way out**: `GET /servers` carries `config: { origin, fields: [{key, kind, label, help, required, secret, hasValue, value}], missing, pending }` and `needConfig: true` per row, plus the count of *enabled* rows that need it. A secret echoes `••••` when set and `''` when not; a non-secret (a base URL) echoes back so the reader can see which environment it points at. `env` and `headers` themselves never leave the host.
+- **The form**: a row with a declaration gets **配置**; a row missing a required value also gets a `待配置` chip and the primary button style, and the page says it once above the filters (`有 N 台服务器装好了但还差配置`, with a `去配置` shortcut). The sheet lists the declared fields as masked inputs marked `必填`, adds one key/value row for anything the declaration missed, and saves with `POST /configure`. Saving writes the values and **remounts only a row that was already enabled** — a stopped row stays stopped. An empty string deletes the key (`清除`), and a save that changes nothing says so instead of claiming success.
+- **Install opens the form**: a catalogue item whose declaration has a required value installs as 「待配置」, the reply carries `needConfig` and `config.missing`, and the panel opens the sheet on the row it just wrote. The model diagnosis is **skipped** for this case (`diagnosisSkipped: 'needs-config'`) and for credential-shaped mount errors: the catalogue already said which key is missing, so asking a model to re-derive it from `401` would be slower and worse.
+- **For the model**: `overall_mcp_list` marks rows with `needConfig` and lists `config.missing`; `overall_mcp_configure` writes values keyed by field name (`{"env": {...}}` / `{"headers": {...}}`) and echoes secrets as `••••`.
 
 ### Submitting to a community listing
 
@@ -141,6 +153,7 @@ Popularity is a weak signal in sorting (400 maximum against 1000 for "installabl
 - `overall_mcp_catalog [query] [source] [limit] [refresh]` — browse the market; entries carry `installable` / `installed` / `author` / `tags` / `installs`
 - `overall_mcp_search <query>` — keyword search over the same aggregation (server-side capped at 50)
 - `overall_mcp_install <item> [overwrite]` — install and connect; refuses (409) to replace a **manual** entry without `overwrite: true`; a failed mount is not counted (`counted: false`)
+- `overall_mcp_configure <name> [env] [headers] [slot] [from]` — write the settings a server declared (secrets come back as `••••`); saving remounts an enabled row and leaves a stopped row stopped
 - `overall_mcp_set_enabled <name> <bool> [slot] [from]` — enable/disable one server
 - `overall_mcp_set_source_enabled <source> <bool>` — the group switch
 - `overall_mcp_check_updates` / `overall_mcp_update <name> [slot] [from]` — npm/PyPI checks and update-with-reconnect
@@ -190,7 +203,7 @@ The same `npx -y rea-agents@6.5.0 mcp` command once appeared as **five rows** (f
 `GET|POST /updates`, `POST /update`,
 `GET|POST /catalog?query=&source=&limit=&refresh=` (`source=census` is the view over the local census index, see round 24),
 `GET|POST /sources`, `POST /sources/remove`, `POST /scan`,
-`POST /install`, `POST /set-enabled`, `POST /set-source-enabled`, `POST /remove`,
+`POST /install`, `POST /configure`, `POST /set-enabled`, `POST /set-source-enabled`, `POST /remove`,
 `POST /forget-orphans`, `POST /favorite`, `GET /favorites`,
 `GET /repo-stats?repos=owner/name,...` — all under `/api/overall-mcp/`.
 

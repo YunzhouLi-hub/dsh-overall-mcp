@@ -371,6 +371,119 @@ test('an install whose mount fails is kept but not counted', async () => {
   });
 });
 
+/** Registry used by the config cases: one declared-required key per row, same name twice. */
+const CONFIG_FIXTURE = {
+  version: 1,
+  servers: [
+    {
+      name: 'gh', source: 'official', enabled: true, transport: 'stdio', command: 'npx', args: ['-y', 'gh-mcp'],
+      config: { origin: 'official', fields: [{ key: 'GITHUB_PERSONAL_ACCESS_TOKEN', kind: 'env', label: 'GitHub 个人访问令牌', required: true, secret: true }] },
+    },
+    {
+      name: 'gh', source: 'manual', enabled: true, transport: 'stdio', command: 'other-mcp', args: [],
+      config: { origin: 'manual', fields: [{ key: 'API_KEY', kind: 'env', label: 'API Key', required: true, secret: true }] },
+    },
+  ],
+};
+
+test('an item that declares a required setting installs as 「待配置」, not as connection trouble', async () => {
+  const seen = [];
+  const item = {
+    id: 'catalog:github', source: 'official', title: 'github-mcp',
+    install: { transport: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-github'] },
+    raw: { packages: [{ environmentVariables: [
+      { name: 'GITHUB_PERSONAL_ACCESS_TOKEN', description: 'GitHub PAT', isRequired: true, isSecret: true },
+    ] }] },
+  };
+  await withHost(FIXTURE, async ({ call, readRegistry }) => {
+    const result = await call('/api/overall-mcp/install', { body: { item } });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.needConfig, true);
+    assert.deepEqual(result.body.config.missing, ['GITHUB_PERSONAL_ACCESS_TOKEN']);
+    assert.match(result.body.note, /GITHUB_PERSONAL_ACCESS_TOKEN/, 'the reply names the field the form will ask for');
+    // The declaration is stored with the row, so the badge survives a restart.
+    const row = (await readRegistry()).servers.find((s) => s.name === 'github-mcp');
+    assert.equal(row.config.origin, 'official');
+    assert.equal(row.config.fields[0].required, true);
+    // A declared-but-unfilled field is not a mystery to re-derive from `401`.
+    assert.equal(result.body.diagnosisSkipped, 'needs-config');
+    assert.equal(seen.length, 0, 'the model is not asked about a form the user can fill');
+    // …and the list the page re-renders carries the flag, with the value masked.
+    const servers = await call('/api/overall-mcp/servers');
+    assert.equal(servers.body.needConfig, 1);
+    const listed = servers.body.servers.find((s) => s.name === 'github-mcp');
+    assert.equal(listed.needConfig, true);
+    assert.equal(listed.config.fields[0].value, '');
+  }, { llm: { stream: () => { seen.push(1); throw new Error('must not be called'); } } });
+});
+
+test('a configure writes the value, masks it on the way back, and clears by deleting', async () => {
+  await withHost(CONFIG_FIXTURE, async ({ call, readRegistry, mounts }) => {
+    const listed = await call('/api/overall-mcp/servers');
+    assert.equal(listed.body.needConfig, 2, 'both rows are missing their required key');
+
+    const mountsBefore = mounts.length;
+    const saved = await call('/api/overall-mcp/configure', {
+      body: { name: 'gh', slot: 0, env: { GITHUB_PERSONAL_ACCESS_TOKEN: 'ghp_test_value' } },
+    });
+    assert.equal(saved.status, 200, JSON.stringify(saved.body));
+    assert.equal(saved.body.saved, true);
+    assert.deepEqual(saved.body.changed, [{ key: 'GITHUB_PERSONAL_ACCESS_TOKEN', kind: 'env', action: 'set' }]);
+    assert.equal(saved.body.needConfig, false);
+    // The row is enabled, so saving remounts it — a mount that fails here does
+    // not undo the write, and the reply says which of the two happened.
+    assert.equal(mounts.length, mountsBefore + 1);
+    assert.equal(saved.body.connect.ok, false);
+    // The secret goes in, and only the mask comes back.
+    assert.equal((await readRegistry()).servers[0].env.GITHUB_PERSONAL_ACCESS_TOKEN, 'ghp_test_value');
+    assert.equal(saved.body.config.fields[0].value, '••••');
+
+    // Clearing is deletion, not an empty string that reads like a value.
+    const cleared = await call('/api/overall-mcp/configure', {
+      body: { name: 'gh', slot: 0, env: { GITHUB_PERSONAL_ACCESS_TOKEN: '' } },
+    });
+    assert.equal(cleared.body.needConfig, true);
+    assert.equal('GITHUB_PERSONAL_ACCESS_TOKEN' in (await readRegistry()).servers[0].env, false);
+
+    // A save that changes nothing says so instead of claiming success.
+    const noop = await call('/api/overall-mcp/configure', { body: { name: 'gh', slot: 0 } });
+    assert.equal(noop.body.saved, false);
+    assert.match(noop.body.note, /没有需要写入的值/);
+  });
+});
+
+test('a configure on a stopped row writes the value but starts nothing', async () => {
+  const stopped = {
+    version: 1,
+    servers: [{
+      name: 'gh', source: 'official', enabled: false, transport: 'stdio', command: 'npx', args: ['-y', 'gh-mcp'],
+      config: { origin: 'official', fields: [{ key: 'TOKEN', kind: 'env', label: 'TOKEN', required: true, secret: true }] },
+    }],
+  };
+  await withHost(stopped, async ({ call, readRegistry, mounts }) => {
+    const saved = await call('/api/overall-mcp/configure', { body: { name: 'gh', env: { TOKEN: 'v' } } });
+    assert.equal(saved.body.saved, true);
+    assert.equal('connect' in saved.body, false, 'stopped stays stopped');
+    assert.equal(mounts.length, 0, 'and nothing is mounted for it');
+    assert.equal((await readRegistry()).servers[0].env.TOKEN, 'v');
+  });
+});
+
+test('a configure on a duplicated name is refused, and slot picks the row', async () => {
+  await withHost(CONFIG_FIXTURE, async ({ call, readRegistry }) => {
+    const refused = await call('/api/overall-mcp/configure', { body: { name: 'gh', env: { API_KEY: 'x' } } });
+    assert.equal(refused.status, 409);
+    assert.match(refused.body.error, /^ambiguous server name: gh/);
+    assert.equal((await readRegistry()).servers[1].env, undefined, 'nothing was written to either row');
+
+    const picked = await call('/api/overall-mcp/configure', { body: { name: 'gh', slot: 1, env: { API_KEY: 'second-row' } } });
+    assert.equal(picked.status, 200);
+    const after = (await readRegistry()).servers;
+    assert.equal(after[0].env, undefined, 'the first row was untouched');
+    assert.equal(after[1].env.API_KEY, 'second-row');
+  });
+});
+
 /** The chunk sequence a model stream yields for a plain text answer. */
 function textStream(text) {
   return [

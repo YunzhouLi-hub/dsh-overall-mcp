@@ -39,6 +39,9 @@ import {
 import {
   DIAGNOSIS_SYSTEM, buildDiagnosisPrompt, capText, diagnosisFactsOf, diagnosisTextOf,
 } from './lib/install-diagnosis.js';
+import {
+  applyValues, configSpecFor, configState, looksLikeCredentialFailure, maskedFields, specOf,
+} from './lib/server-config.js';
 import { collectRepoMedia } from './lib/media.js';
 import { httpStatusFor } from './lib/http-status.js';
 import { sanitizeToolDefinition } from './lib/schema-guard.js';
@@ -502,6 +505,12 @@ export async function apply(ctx) {
       // checkDescribesEntry().
       const stored = s.updateCheck ?? null;
       const describesThisEntry = checkDescribesEntry(s, stored);
+      // 「这个 MCP 还差配置」: what an installed server needs before its tools
+      // work, masked. `needs` is true only for a missing *required* value — see
+      // lib/server-config.js on why an empty optional field is not a problem.
+      const spec = specOf(s);
+      const config = maskedFields(spec, s);
+      const configNeeds = configState(spec, s)?.needs === true;
       return {
         name: s.name,
         // Position in the registry. Two rows can share a name (one client config
@@ -531,6 +540,12 @@ export async function apply(ctx) {
         about: s.about ?? null,
         aboutAt: s.aboutAt,
         aboutLabel: s.about ? aboutSourceLabel(s.about.source) : '',
+        // The masked config projection. Only present when the entry declares
+        // fields, so every existing consumer of this payload is unchanged.
+        config,
+        // A required value is absent, so the server cannot work yet. This is the
+        // fact the panel badges and the model is told about in `overall_mcp_list`.
+        needConfig: configNeeds,
       };
     });
   }
@@ -688,7 +703,10 @@ export async function apply(ctx) {
   async function serversPayload() {
     await refreshAbout();
     const servers = publicList();
-    return { servers, ...(registryLoadError ? { registryError: registryLoadError } : {}) };
+    // One number the panel can show without walking the rows: how many enabled
+    // servers are mounted-but-unusable because a required value is missing.
+    const needConfig = servers.filter((s) => s.needConfig && s.enabled).length;
+    return { servers, needConfig, ...(registryLoadError ? { registryError: registryLoadError } : {}) };
   }
 
   // First install: scan well-known host MCP configs and import them.
@@ -841,6 +859,10 @@ export async function apply(ctx) {
   async function doInstallImpl(item, { overwrite = false } = {}) {
     const entry = catalogItemToEntry(item);
     if (!entry) throw new Error('item has no installable transport (stdio command or http url)');
+    // Whether this row is missing a required setting, read before mounting: a
+    // declared-but-unfilled field predicts the auth failure, and the same fields
+    // must be named by the badge, the reply and the config form.
+    const configBefore = configState(specOf(entry), entry);
     const i = registry.servers.findIndex((s) => s.name === entry.name);
     if (i >= 0) {
       const existing = registry.servers[i];
@@ -875,13 +897,21 @@ export async function apply(ctx) {
     let diagnosisSkipped = null;
     let diagnosisError = null;
     if (conn.ok === false) {
-      try {
-        const outcome = await diagnoseFailure(entry, item, String(conn.error ?? 'mount failed'));
-        if (outcome.ok) diagnosis = { text: outcome.text, route: outcome.route, ...(outcome.cached ? { cached: true } : {}) };
-        else diagnosisSkipped = outcome.reason;
-      } catch (err) {
-        diagnosisError = capText(String(err?.message ?? err), 200);
-        log?.warn?.(`overall-mcp: could not explain the failed install of ${entry.name}: ${diagnosisError}`);
+      // Two failures, two answers. A missing credential is *declared*: the
+      // catalogue said which field is required and the config form fills it, so
+      // asking a model to re-derive it from `401` would be slower and worse.
+      // Everything else still gets the diagnosis.
+      if (configBefore?.needs === true || looksLikeCredentialFailure(conn.error)) {
+        diagnosisSkipped = 'needs-config';
+      } else {
+        try {
+          const outcome = await diagnoseFailure(entry, item, String(conn.error ?? 'mount failed'));
+          if (outcome.ok) diagnosis = { text: outcome.text, route: outcome.route, ...(outcome.cached ? { cached: true } : {}) };
+          else diagnosisSkipped = outcome.reason;
+        } catch (err) {
+          diagnosisError = capText(String(err?.message ?? err), 200);
+          log?.warn?.(`overall-mcp: could not explain the failed install of ${entry.name}: ${diagnosisError}`);
+        }
       }
     }
     // The install is the action a user most often needs to reconstruct ("it said
@@ -910,11 +940,20 @@ export async function apply(ctx) {
       connect: conn,
       ...(conn.ok === false ? {
         counted: false,
-        note: `${entry.name} 已写入注册表，但挂载没有成功，因此没有计入本市场安装数；修好后可用「更新」或重新启用来重试。`,
+        // A missing required setting is the most likely reason the mount failed,
+        // and it is the one the user can act on right here, so it wins the line.
+        note: configBefore?.needs === true
+          ? `${entry.name} 已写入注册表，但还缺 ${configBefore.missing.join('、')}，填好之前它的工具调用不通。`
+          : `${entry.name} 已写入注册表，但挂载没有成功，因此没有计入本市场安装数；修好后可用「更新」或重新启用来重试。`,
       } : {}),
       ...(diagnosis ? { diagnosis } : {}),
       ...(diagnosisSkipped ? { diagnosisSkipped } : {}),
       ...(diagnosisError ? { diagnosisError } : {}),
+      // What this row still needs, masked (the value never comes back), plus the
+      // one-line flag the panel badges. Both are also on the fresh `servers` list
+      // just above; repeating them here saves the client a lookup after install.
+      config: maskedFields(specOf(entry), entry),
+      needConfig: configBefore?.needs === true,
     };
   }
   // ---- mutations ------------------------------------------------------------
@@ -990,6 +1029,73 @@ export async function apply(ctx) {
         stillProvided: true,
         note: `${name} 的工具由另一个 mcp-client 挂载提供，本插件从未挂载它：停用只记录本插件的意图，那些工具不会消失。`,
       } : {}),
+    };
+  }
+
+  /**
+   * Save configuration values for one row, then remount it.
+   *
+   * The remount is the point. `env` and `headers` are read when an mcp-client
+   * fiber starts, so a value written under a live fiber changes nothing until
+   * the fiber is replaced — the same sequence 停用→启用 performs. A row the user
+   * had stopped stays stopped: saving its values must not start it.
+   *
+   * @param name - the row's name.
+   * @param values - `{ env?, headers? }`; an empty string clears a key.
+   * @param options - `{ slot, from }` to address one of several same-named rows.
+   * @returns the masked config, the mount verdict, and what is still missing.
+   */
+  async function doConfigureImpl(name, values, { slot = null, from = null } = {}) {
+    const entry = resolveEntry(name, { slot, from });
+    const before = configState(specOf(entry), entry);
+    const { changed, rejected } = applyValues(entry, values ?? {});
+    if (changed.length === 0) {
+      // Nothing was written, so nothing is saved and nothing is remounted. A
+      // reply saying 「已保存」 here would be the lie that makes the badge stay on
+      // with no explanation.
+      return {
+        name,
+        changed: [],
+        rejected,
+        saved: false,
+        config: maskedFields(specOf(entry), entry),
+        needConfig: before?.needs === true,
+        ...(rejected.length === 0 ? { note: '没有需要写入的值（空值等于清除，未填写任何内容）。' } : {}),
+      };
+    }
+    await save();
+    // mount, not connect: a local named connect would shadow the mount
+    // helper and turn this line into a call on a null variable.
+    let mount = null;
+    if (entry.enabled !== false && !externallyProvided(entry)) {
+      await disconnect(entry.name);
+      mount = await connect(entry);
+    }
+    const after = configState(specOf(entry), entry);
+    emit({
+      kind: 'configure',
+      server: entry.name,
+      changed: changed.length,
+      rejected: rejected.length,
+      mounted: mount ? mount.ok !== false : null,
+      ...(after?.needs ? { stillMissing: after.missing.length } : {}),
+    });
+    const notes = [];
+    if (externallyProvided(entry)) {
+      notes.push(`${name} 的工具由另一个 mcp-client 挂载提供：值已写入本插件的注册表，但那一份挂载读的是它自己的配置，改动要等它重新加载才生效。`);
+    }
+    if (after?.needs) notes.push(`还缺 ${after.missing.join('、')}，填好并重新挂载后工具才会通。`);
+    return {
+      name,
+      changed,
+      rejected,
+      saved: true,
+      ...(mount ? { connect: mount } : {}),
+      ...(externallyProvided(entry) ? { providedExternally: true } : {}),
+      config: maskedFields(specOf(entry), entry),
+      needConfig: after?.needs === true,
+      ...(after?.needs ? { missing: after.missing } : {}),
+      ...(notes.length ? { note: notes.join(' ') } : {}),
     };
   }
 
@@ -2243,6 +2349,7 @@ export async function apply(ctx) {
   const doScan = serialized(doScanImpl);
   const doInstall = serialized(doInstallImpl);
   const doSetEnabled = serialized(doSetEnabledImpl);
+  const doConfigure = serialized(doConfigureImpl);
   const doSetSourceEnabled = serialized(doSetSourceEnabledImpl);
   const doRemove = serialized(doRemoveImpl);
   const doForgetOrphans = serialized(doForgetOrphansImpl);
@@ -2315,6 +2422,24 @@ export async function apply(ctx) {
       output: jsonOut,
       async execute({ name, enabled, slot, from }) {
         return await doSetEnabled(name, enabled, {
+          slot: Number.isInteger(slot) ? slot : null,
+          from: typeof from === 'string' && from !== '' ? from : null,
+        });
+      },
+    }),
+    defineTool({
+      name: 'overall_mcp_configure',
+      description: 'Save the settings one installed MCP server needs before its tools work (API keys, tokens, base URLs, auth headers) and remount it so they take effect. overall_mcp_list marks those rows with needConfig: true and lists the required keys in config.missing; each row\'s config.fields says which of them are secrets and which env/header they belong to. Pass values keyed by those field names — {"env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "…"}} or {"headers": {"Authorization": "Bearer …"}}. An empty string clears a key. Values are write-only: the reply echoes secrets as •••• and never returns them.',
+      parameters: {
+        name: { type: 'string', required: true },
+        env: { type: 'json', description: 'Environment values keyed by variable name, e.g. {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_…"}.' },
+        headers: { type: 'json', description: 'HTTP header values for a remote (streamable-http) entry, e.g. {"Authorization": "Bearer …"}.' },
+        slot: { type: 'integer', description: 'Position of the row in the overall_mcp_list answer, to pick one of several same-named entries.' },
+        from: { type: 'string', description: 'Version the row displayed (fallback for a client that rendered before slots existed).' },
+      },
+      output: jsonOut,
+      async execute({ name, env, headers, slot, from }) {
+        return await doConfigure(name, { env, headers }, {
           slot: Number.isInteger(slot) ? slot : null,
           from: typeof from === 'string' && from !== '' ? from : null,
         });
@@ -2609,6 +2734,14 @@ export async function apply(ctx) {
           ...(result?.error ? { error: String(result.error) } : {}),
         });
         return json(result);
+      })],
+      ['/api/overall-mcp/configure', ['POST'], guard(async (req) => {
+        const { name, env, headers, slot, from } = await readBody(req);
+        if (typeof name !== 'string' || name === '') return json({ error: 'name (string) required' }, 400);
+        return json(await doConfigure(name, { env, headers }, {
+          slot: Number.isInteger(slot) ? slot : null,
+          from: typeof from === 'string' && from !== '' ? from : null,
+        }));
       })],
       ['/api/overall-mcp/set-source-enabled', ['POST'], guard(async (req) => {
         const { source, enabled } = await readBody(req);

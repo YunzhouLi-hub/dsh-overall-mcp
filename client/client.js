@@ -59,7 +59,7 @@ window.__ModuleLoader__.load({
 		// probe also checks CHANGELOG.md's newest section is this version, since
 		// a release note that stops at an older build tells a reader what
 		// changed in code they are not running.
-		const CLIENT_VERSION = "0.5.0";
+		const CLIENT_VERSION = "0.6.0";
 		// The bundle's npm package name — what the profile lists in its
 		// `dsh.profile.bundles` and what its bundle page is keyed by. The
 		// bundle cannot read package.json at runtime, so `tools/client-smoke.mjs`
@@ -635,6 +635,45 @@ window.__ModuleLoader__.load({
 				padding: "1px 7px", borderRadius: 999, fontSize: 11.5, fontWeight: 600,
 				color: T.red, background: T.soft2, whiteSpace: "nowrap", flexShrink: 0,
 			},
+			// 「待配置」: a required setting this server declared is still empty, so
+			// its tool calls will fail until someone fills the form. Amber, like
+			// the orphan chip — nothing is broken, something is missing.
+			configBadge: {
+				padding: "1px 7px", borderRadius: 999, fontSize: 11.5, fontWeight: 600,
+				color: T.amber, background: T.soft2, whiteSpace: "nowrap", flexShrink: 0,
+			},
+			configBanner: {
+				display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
+				padding: "9px 12px", borderRadius: 10, border: `1px solid ${T.line}`,
+				background: T.soft, color: T.text2, fontSize: 12.5, lineHeight: 1.6,
+			},
+			// The config sheet is narrower than the detail sheet: a form is read
+			// top to bottom, and a 680px-wide input invites pasting the wrong thing.
+			configPanel: {
+				width: "min(560px, 100%)", maxHeight: "100%", overflow: "auto",
+				display: "grid", gap: 12, padding: 20,
+				borderRadius: 16, border: `1px solid ${T.line}`,
+				background: T.cardBg, color: T.text,
+				boxShadow: "0 24px 64px rgba(0,0,0,0.14)",
+			},
+			fieldRow: { display: "grid", gap: 4 },
+			fieldLabel: { fontSize: 12.5, fontWeight: 600, display: "flex", gap: 6, alignItems: "baseline", flexWrap: "wrap" },
+			fieldReq: { fontSize: 11, color: T.amber, fontWeight: 600 },
+			fieldOpt: { fontSize: 11, color: T.text3, fontWeight: 400 },
+			fieldHelp: { fontSize: 11.5, color: T.text3, lineHeight: 1.6 },
+			fieldInput: {
+				width: "100%", boxSizing: "border-box", padding: "6px 9px", borderRadius: 8,
+				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text,
+				fontSize: 12.5, fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+			},
+			fieldSaved: { fontSize: 11, color: T.green },
+			kvHead: { display: "flex", alignItems: "center", gap: 8, marginTop: 4 },
+			kvRow: { display: "flex", gap: 6, alignItems: "center" },
+			kvKey: {
+				flex: "1 1 120px", minWidth: 0, padding: "5px 8px", borderRadius: 7,
+				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text,
+				fontSize: 12, fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+			},
 			// The host carries `registryError` when registry.json could not be
 			// parsed. Without it the tab would render an empty list that looks
 			// exactly like "you never added a server".
@@ -963,7 +1002,7 @@ window.__ModuleLoader__.load({
 			}));
 		}
 
-		function ServerRow({ server, busy, job, onToggle, onRemove, onUpdate }) {
+		function ServerRow({ server, busy, job, onToggle, onRemove, onUpdate, onConfigure }) {
 			const enabled = server.enabled !== false;
 			const provided = server.providedExternally === true;
 			const state = provided ? "external" : enabled ? (server.connected ? "on" : "idle") : "off";
@@ -978,6 +1017,12 @@ window.__ModuleLoader__.load({
 			// re-import it, and offering to update a ghost is exactly the confusing
 			// badge the first report was about.
 			const orphan = server.orphan === true;
+			// 「待配置」: a required setting the server declared is still empty. The
+			// row says so before anything is clicked — this is the failure mode
+			// where the install succeeded, the row read 已连接, and every tool call
+			// then answered `401`.
+			const needsConfig = server.needConfig === true;
+			const configMissing = server.config?.missing ?? [];
 			const newVersion = !orphan && update?.updateAvailable ? update.latest : null;
 			// The last lookup for this row errored, so its version state is
 			// unknown — not current. `latest` is null and `error` says why (see
@@ -1020,6 +1065,12 @@ window.__ModuleLoader__.load({
 							[server.transport, status, toolCount, prefix, pkg].filter(Boolean).join(" · ")),
 					]),
 				]),
+				needsConfig
+					? createElement("span", {
+						key: "needcfg", style: styles.configBadge,
+						title: `还缺 ${configMissing.join("、") || "必填项"}：这台服务器的工具调用在填好并重新挂载前不会通。`,
+					}, "待配置")
+					: null,
 				badge
 					? createElement("span", { key: "newv", style: styles.updateBadge }, `可更新 → ${badge}`)
 					: orphan
@@ -1038,6 +1089,19 @@ window.__ModuleLoader__.load({
 							? createElement("span", { key: "newv", style: styles.jobOutcome }, `✓ 已更新到 ${didUpdate}`)
 							: null,
 				createElement("span", { key: "actions", style: { display: "flex", gap: 6, alignItems: "center", ...styles.spacer } }, [
+					server.config
+						? createElement("button", {
+							key: "cfg", type: "button",
+							// A row that cannot work yet gets the primary style: the
+							// action that unbreaks it is the one to click.
+							style: needsConfig ? { ...styles.button, ...styles.primary } : styles.button,
+							disabled: busy,
+							title: needsConfig
+								? `填写 ${configMissing.join("、") || "必填项"}`
+								: "查看或修改这台服务器的配置",
+							onClick: () => onConfigure(server),
+						}, "配置")
+						: null,
 					newVersion && !settled
 						? createElement("button", {
 								key: "update", type: "button",
@@ -1069,7 +1133,210 @@ window.__ModuleLoader__.load({
 			]);
 		}
 
-		function SourceGroup({ source, servers, busy, jobOf, collapsed, onToggleCollapsed, onToggleSource, onToggleServer, onRemove, onUpdate }) {
+		/**
+		 * 「配置这台服务器」— the form a mounted-but-unusable server needs.
+		 *
+		 * The host declares the fields (`server.config.fields`): env or header,
+		 * required or optional, secret or not, and — for the official registry —
+		 * the sentence saying what the value is for (`help`). Two rules the form
+		 * keeps, both about not lying to the reader:
+		 *
+		 *   - Only touched fields are sent. An untouched secret renders as
+		 *     「已保存」 and the host never echoes it back, so a form that
+		 *     submitted every input would send `••••` as the token itself.
+		 *   - Cross-check with what the host owes us.
+		 */
+		function ConfigDialog({ server, onClose, onSaved }) {
+			const fields = server.config?.fields ?? [];
+			const [values, setValues] = useState({});
+			const [custom, setCustom] = useState([{ key: "", kind: "env", value: "" }]);
+			const [busy, setBusy] = useState(false);
+			const [error, setError] = useState("");
+			const [result, setResult] = useState(null);
+			const idOf = (field) => `${field.kind}:${field.key}`;
+			const dirty = (field) => Object.prototype.hasOwnProperty.call(values, idOf(field));
+			const setValue = (field, next) => setValues((prev) => ({ ...prev, [idOf(field)]: next }));
+			const clearValue = (field) => setValues((prev) => ({ ...prev, [idOf(field)]: "" }));
+			const ref = rowRef(server);
+			const originNote = server.config?.origin === "official"
+				? "这些字段来自官方注册表为这个包声明的环境变量（必填/密钥也是它说的）。"
+				: server.config?.origin === "args"
+					? "这个来源没有声明配置项；下面是从它的启动命令里识别出的变量名。"
+					: "这个来源没有声明配置项：留空即可，只有服务需要令牌时才要填。";
+			const missing = result?.missing ?? server.config?.missing ?? [];
+
+			const save = async () => {
+				setBusy(true); setError(""); setResult(null);
+				try {
+					const env = {}; const headers = {};
+					for (const field of fields) {
+						if (!dirty(field)) continue;
+						(field.kind === "header" ? headers : env)[field.key] = values[idOf(field)];
+					}
+					for (const row of custom) {
+						const key = row.key.trim();
+						if (key === "" || row.value === "") continue;
+						(row.kind === "header" ? headers : env)[key] = row.value;
+					}
+					const payload = { ...ref };
+					if (Object.keys(env).length) payload.env = env;
+					if (Object.keys(headers).length) payload.headers = headers;
+					const reply = await api("/configure", { method: "POST", body: JSON.stringify(payload) });
+					setResult(reply);
+					setValues({});
+					if (reply.saved) await onSaved(reply);
+					// Close only when nothing is left to fill: a sheet that vanishes
+					// while the row still says 待配置 would hide its own answer.
+					if (reply.needConfig !== true) onClose();
+				} catch (err) {
+					setError(String(err.message || err));
+				} finally {
+					setBusy(false);
+				}
+			};
+
+			return createElement("div", {
+				style: styles.overlay,
+				onClick: (e) => { if (e.target === e.currentTarget) onClose(); },
+			}, [
+				createElement("div", { key: "panel", className: "omkt-panel", style: styles.configPanel }, [
+					createElement("div", { key: "head", style: styles.detailHead }, [
+						createElement("div", { key: "row", style: styles.detailTitleRow }, [
+							createElement("div", { key: "t", style: { minWidth: 0 } }, [
+								createElement("div", { key: "n", style: styles.detailTitle }, `配置 ${server.name}`),
+								createElement("div", { key: "s", style: styles.detailSub },
+									[server.transport, server.serverName ? `mcp__${server.serverName}__` : null].filter(Boolean).join(" · ")),
+							]),
+							createElement("button", {
+								key: "x", type: "button", className: "omkt-btn omkt-btn-outline",
+								style: { ...styles.outlineBtn, marginLeft: "auto" },
+								onClick: onClose, title: "关闭",
+							}, "关闭"),
+						]),
+						createElement("div", { key: "why", style: styles.fieldHelp }, originNote),
+						missing.length
+							? createElement("div", { key: "miss", style: styles.warnLine },
+								`还缺 ${missing.join("、")}：填好并保存后会自动重新挂载，工具才会通。`)
+							: null,
+					]),
+
+					createElement("div", { key: "body", style: { display: "grid", gap: 12 } }, [
+						...fields.map((field) => createElement("div", {
+							key: `f:${idOf(field)}`, style: styles.fieldRow,
+						}, [
+							createElement("div", { key: "l", style: styles.fieldLabel }, [
+								createElement("span", { key: "k" }, field.label ?? field.key),
+								field.label && field.label !== field.key
+									? createElement("span", { key: "raw", style: styles.fieldOpt }, field.key)
+									: null,
+								field.required
+									? createElement("span", { key: "r", style: styles.fieldReq }, "必填")
+									: createElement("span", { key: "o", style: styles.fieldOpt }, "可选"),
+								field.secret
+									? createElement("span", { key: "sec", style: styles.fieldOpt }, "· 密钥")
+									: null,
+								field.kind === "header"
+									? createElement("span", { key: "h", style: styles.fieldOpt }, "· 请求头")
+									: null,
+							]),
+							field.help
+								? createElement("div", { key: "h", style: styles.fieldHelp }, field.help)
+								: null,
+							createElement("div", { key: "i", style: { display: "flex", gap: 6, alignItems: "center" } }, [
+								createElement("input", {
+									key: "in", className: "omkt-input",
+									style: styles.fieldInput,
+									type: field.secret ? "password" : "text",
+									value: dirty(field) ? values[idOf(field)] : "",
+									placeholder: field.hasValue
+										? (field.secret ? "已保存（不显示明文；留空＝不改）" : "已保存")
+										: (field.required ? "必填" : "可选"),
+									autoComplete: "off", spellCheck: false,
+									onChange: (e) => setValue(field, e.target.value),
+								}),
+								field.hasValue
+									? createElement("button", {
+										key: "clr", type: "button", className: "omkt-btn omkt-btn-outline",
+										style: styles.sourceMiniBtn, disabled: busy,
+										title: "保存时清除这个值",
+										onClick: () => clearValue(field),
+									}, "清除")
+									: null,
+								field.hasValue
+									? createElement("span", { key: "sv", style: styles.fieldSaved }, "已保存")
+									: null,
+							]),
+						])),
+						// A declaration can miss something (a provider that documents
+						// its variable nowhere). The form accepts the user's own keys:
+						// refusing them would mean this host knows better than the
+						// person holding the token.
+						createElement("div", { key: "kv", style: styles.kvHead }, [
+							createElement("span", { key: "t", style: styles.fieldLabel }, "其他键值"),
+							createElement("span", { key: "h", style: styles.fieldOpt }, "没有列出来的变量可以自己加"),
+							createElement("span", { key: "sp", style: styles.spacer }),
+							createElement("button", {
+								key: "add", type: "button", className: "omkt-btn omkt-btn-outline",
+								style: styles.sourceMiniBtn, disabled: busy,
+								onClick: () => setCustom((prev) => [...prev, { key: "", kind: "env", value: "" }]),
+							}, "+ 加一行"),
+						]),
+						...custom.map((row, index) => createElement("div", {
+							key: `kv:${index}`, style: styles.kvRow,
+						}, [
+							createElement("select", {
+								key: "k", className: "omkt-select", style: { ...styles.select, flexShrink: 0 },
+								value: row.kind,
+								onChange: (e) => setCustom((prev) => prev.map((r, i) => (i === index ? { ...r, kind: e.target.value } : r))),
+							}, [
+								createElement("option", { key: "e", value: "env" }, "环境变量"),
+								createElement("option", { key: "h", value: "header" }, "请求头"),
+							]),
+							createElement("input", {
+								key: "key", className: "omkt-input", style: styles.kvKey,
+								value: row.key, placeholder: row.kind === "header" ? "Authorization" : "MY_VAR",
+								onChange: (e) => setCustom((prev) => prev.map((r, i) => (i === index ? { ...r, key: e.target.value } : r))),
+							}),
+							createElement("input", {
+								key: "v", className: "omkt-input", style: styles.kvKey, type: "password",
+								value: row.value, placeholder: "值",
+								onChange: (e) => setCustom((prev) => prev.map((r, i) => (i === index ? { ...r, value: e.target.value } : r))),
+							}),
+							createElement("button", {
+								key: "rm", type: "button", className: "omkt-btn omkt-btn-outline",
+								style: styles.sourceMiniBtn, disabled: busy,
+								title: "移除这一行",
+								onClick: () => setCustom((prev) => prev.filter((_, i) => i !== index)),
+							}, "移除"),
+						])),
+					]),
+
+					result?.note
+						? createElement("div", { key: "note", style: styles.installFailure }, result.note)
+						: null,
+					error
+						? createElement("div", { key: "err", style: styles.registryWarn }, error)
+						: null,
+
+					createElement("div", { key: "actions", style: styles.detailActions }, [
+						createElement("button", {
+							key: "save", type: "button", className: "omkt-btn omkt-btn-primary",
+							style: { ...styles.button, ...styles.primary }, disabled: busy,
+							onClick: save,
+						}, busy ? "保存中…" : "保存并重新挂载"),
+						createElement("button", {
+							key: "cancel", type: "button", className: "omkt-btn omkt-btn-outline",
+							style: styles.outlineBtn, disabled: busy, onClick: onClose,
+						}, "关闭"),
+						createElement("span", { key: "sp", style: styles.spacer }),
+						createElement("span", { key: "hint", style: styles.hint },
+							"值只写进本机注册表；密钥保存后不再回显。"),
+					]),
+				]),
+			]);
+		}
+
+		function SourceGroup({ source, servers, busy, jobOf, collapsed, onToggleCollapsed, onToggleSource, onToggleServer, onRemove, onUpdate, onConfigure }) {
 			const enabledCount = servers.filter((s) => s.enabled !== false).length;
 			const allOn = enabledCount === servers.length && servers.length > 0;
 			return createElement("div", { style: styles.group }, [
@@ -1094,7 +1361,7 @@ window.__ModuleLoader__.load({
 					servers.map((server) => createElement(ServerRow, {
 						key: rowKey(server), server, busy,
 						job: jobOf(server),
-						onToggle: onToggleServer, onRemove, onUpdate,
+						onToggle: onToggleServer, onRemove, onUpdate, onConfigure,
 					}))),
 			]);
 		}
@@ -2402,6 +2669,10 @@ window.__ModuleLoader__.load({
 			const [stateFilter, setStateFilter] = useState("");
 			const [nameFilter, setNameFilter] = useState("");
 			const [collapsed, setCollapsed] = useState(() => new Set());
+			// The row whose config sheet is open, if any. A row object rather than
+			// a name: two rows can share a name, and the sheet must edit the one
+			// that was clicked.
+			const [configTarget, setConfigTarget] = useState(null);
 
 			// ---- market tab state ----
 			const [market, setMarket] = useState(null);
@@ -3051,6 +3322,15 @@ window.__ModuleLoader__.load({
 				() => api("/remove", { method: "POST", body: JSON.stringify(rowRef(server)) }),
 				(r) => r.note ?? `${r.removed} 已移除`,
 			);
+			// Opening the sheet is the whole click; the save is the sheet's own
+			// POST, because only it holds the values (and only it knows which of
+			// them was actually touched).
+			const doConfigure = (server) => setConfigTarget(server);
+			const afterConfigure = async () => {
+				// The reply already carries the fresh row list; refetch anyway so
+				// badges and counts on the page agree with the registry file.
+				await refresh();
+			};
 			// One action for the whole set of rows the last scan proved are gone:
 			// they are all the same kind of leftover, and removing them one by one
 			// is exactly what a name-keyed 移除 got wrong.
@@ -3398,7 +3678,18 @@ window.__ModuleLoader__.load({
 					// A 200 with `connect.ok === false` means the row was written and
 					// nothing mounted. Reporting 「已安装并连接」 for it was the one
 					// lie this panel told about its own work.
-					if (result?.connect?.ok === false) setInstallFailure(installFailureText(result, item));
+					// A row that installed but declared a required setting opens its
+					// config sheet straight away: it mounted nothing usable, and the
+					// next thing the user needs is the form, not a toast.
+					if (result?.needConfig === true) {
+						// Prefer the row that is itself pending: two rows can share a
+						// name (a client config plus a registry entry), and opening the
+						// form on the one that does not need it would show no fields.
+						const same = (result.servers ?? []).filter((s) => s.name === result.server);
+						const row = same.find((s) => s.needConfig === true) ?? same[0];
+						if (row) setConfigTarget(row);
+						setMessage(`${result.server ?? "这个条目"} 已安装，还需要填写配置才能使用。`);
+					} else if (result?.connect?.ok === false) setInstallFailure(installFailureText(result, item));
 					else setMessage(`${result.server ?? "这个条目"} 已安装并连接`);
 				} catch (err) {
 					setError(String(err.message || err));
@@ -3415,6 +3706,9 @@ window.__ModuleLoader__.load({
 				connected: all.filter((s) => s.connected).length,
 				failed: all.filter((s) => s.error).length,
 			};
+			// Mounted and enabled, but a required setting is empty — the rows whose
+			// tool calls will fail. A stopped row is not 「还差配置」, it is stopped.
+			const needConfigCount = all.filter((s) => s.needConfig === true && s.enabled !== false).length;
 
 			// ---- the update queue, derived for render ----
 			// The bar reports two facts and no more: how many items the host has
@@ -4069,6 +4363,27 @@ window.__ModuleLoader__.load({
 							])
 							: null,
 					]),
+					// 「N 台还差配置」: the one line that turns a per-row badge into
+					// something a reader notices without scanning the list. It sits
+					// above the filters because it is about the whole page, not a
+					// filtered view of it.
+					needConfigCount > 0
+						? createElement("div", {
+							key: "needconfig", style: styles.configBanner,
+						}, [
+							createElement("span", { key: "t" },
+								`有 ${needConfigCount} 台服务器装好了但还差配置：工具调用在填好之前不会通。`),
+							createElement("span", { key: "sp", style: styles.spacer }),
+							createElement("button", {
+								key: "go", type: "button", className: "omkt-btn omkt-btn-primary",
+								style: { ...styles.button, ...styles.primary, padding: "4px 12px", fontSize: 12.5 },
+								onClick: () => {
+									const first = all.find((s) => s.needConfig === true && s.enabled !== false);
+									if (first) setConfigTarget(first);
+								},
+							}, "去配置"),
+						])
+						: null,
 					servers ? createElement("div", { key: "filters", style: styles.filters }, [
 						createElement("select", {
 							key: "source", className: `omkt-select${sourceFilter ? " omkt-select-on" : ""}`,
@@ -4115,6 +4430,7 @@ window.__ModuleLoader__.load({
 						onToggleServer: doToggle,
 						onRemove: doRemove,
 						onUpdate: doUpdate,
+						onConfigure: doConfigure,
 					})),
 				]) : null,
 
@@ -4570,6 +4886,17 @@ window.__ModuleLoader__.load({
 							onInstall: doInstall,
 							onToggleFavorite: doToggleFavorite,
 						})
+					: null,
+
+				// The config sheet is a sibling for the same reason the detail
+				// panel is: it must outlive a tab switch and close on its own.
+				configTarget
+					? createElement(ConfigDialog, {
+						key: `config:${rowKey(configTarget)}`,
+						server: configTarget,
+						onClose: () => setConfigTarget(null),
+						onSaved: afterConfigure,
+					})
 					: null,
 
 				// Fixed, and only while there is something to scroll back from.

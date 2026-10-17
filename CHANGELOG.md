@@ -14,6 +14,55 @@
   由 `tools/client-smoke.mjs` 断言相等，并断言本文件的最新小节就是该版本——一份停在旧版本的
   更新日志，和一枚说谎的版本徽章是同一类问题。
 
+## 0.6.0 — 2026-10-17
+
+这一轮回答一个具体的事故：服务器装上了、挂上了、面板写「已连接」，然后每一次工具调用都回
+`401`——因为它的 API key 从没填过，而插件从来没问过。目录里其实多数条目**已经声明**了自己
+需要什么（官方 Registry 的 `environmentVariables` 带 `isRequired`/`isSecret`），这些字段此前
+在安装时被丢掉了。
+
+### 配置声明：读出来、存下来、只出掩码
+
+- 新增 `lib/server-config.js`：`configSpecFor` 从三处收声明取并集——官方 Registry 的
+  `packages[].environmentVariables[]` 与 `remotes[].headers[]`；条目自己的启动方式（`-e NAME`、
+  `--env NAME`、命令/参数/地址里的 `$NAME`/`${NAME}`/`{NAME}` 占位符、裸凭据形状的名字如
+  `GITHUB_PERSONAL_ACCESS_TOKEN`）；`streamable-http`/`sse` 条目固定给一个**可选**的
+  `Authorization` 头。`origin` 记最强证据（`official` > `args` > `manual`）。声明为空的行不带
+  `config`，既有消费者看到的响应不变。
+- 声明写进注册表条目（`config: { origin, fields }`），不是每次列表重算：徽标重启后还在，手改
+  过的文件也不会被二次判断。`maskedFields` 是唯一出口：密钥有值 `••••`、无值 `''`，非密钥
+  （base URL）原样回显；`env`/`headers` 本身永不出现在任何响应里。
+- `GET /servers` 每行多 `config` 与 `needConfig`（只有**必填**项为空才为真），整体多一个
+  「已启用且还差配置」的计数。`lib/catalog.js` 的 `catalogItemToEntry` 在安装时把声明随行写入。
+
+### 写回去：一个动作、一个工具、一条路由
+
+- `POST /api/overall-mcp/configure` 与模型工具 `overall_mcp_configure`：按字段名写
+  `{env, headers}`。空字符串等于删除该键（清除）；非法名、请求头里的换行、会写到
+  `Object.prototype` 的键被拒绝并逐条回报。写入后**只重挂本来就启用的行**——停用行保持停用；
+  确实什么都没改时回 `saved: false` 并说明，不谎报「已保存」。
+- 安装路径提前读声明：必填项还空着时，回复带 `needConfig`、`config.missing` 与「还差 …」的
+  note，且**跳过模型诊断**（`diagnosisSkipped: 'needs-config'`）。凭据形状的挂载错误同样跳过
+  ——目录已经写明缺哪个键，再让模型从 `401` 反推只会更慢更差。
+
+### 界面：在点坏之前就说
+
+- 行上多一颗 **待配置** 徽标（没有它，`已连接` 与「工具全挂」长得一模一样），有配置声明的行
+  多一颗 **配置** 按钮（缺必填值时用主色）；页顶在筛选行之上只写一次「有 N 台服务器装好了但
+  还差配置」并给「去配置」。
+- 配置弹层（`ConfigDialog`）按声明列出字段（掩码输入、`必填`、说明），底部留一行自定义键值；
+  保存走 `/configure`，还缺必填项时不关闭而是继续列出缺什么。安装完成后若 `needConfig` 为真，
+  面板直接为刚写入的那一行打开弹层，而不是只弹一句提示。
+
+### 测试与文档
+
+- `test/server-config.test.mjs`：17 条（声明来源/归一化/上限、掩码、写值与拒绝、缺口与状态、
+  凭据错误分类、`configSpecFor` 的并集与 `origin`）。
+- `test/index.test.mjs` 新增 4 条合同：声明的条目以「待配置」装好且不劳烦模型；保存写入并回
+  掩码、清空即删除、无改动如实回报；停用行保存后仍停用且不产生挂载；同名行拒绝（409）而
+  `slot` 选中目标行。
+- README（中英）、模型工具清单、HTTP API 清单同步；`package.json` 导出 `./lib/server-config.js`。
+
 ## 0.5.0 — 2026-10-16
 
 前两轮把两趟走查的启停交给读者，这一轮补上「看」：本机的普查索引现在可以当成一个来源来读，

@@ -7,7 +7,7 @@
 <p align="center"><a href="README.md">English</a> | 中文</p>
 
 <p align="center">
- <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.5.0-4d6bfe" alt="version 0.5.0"></a>
+ <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.6.0-4d6bfe" alt="version 0.6.0"></a>
 </p>
 
 **DeepSeek Harness 插件：首次安装自动扫描宿主机全部 MCP 配置并注册；实时聚合 6 个网络开放 MCP 目录共 5000+ 条目（官方 Registry / Smithery / Docker MCP Catalog / GitHub MCP / Awesome 远程 / Awesome 本地），外加一份本机的 GitHub 普查索引（实测 1758 行），并把这些仓库里能从证据恢复出来的安装命令带上出处补进行里，以卡片形式浏览与一键接入。**
@@ -37,6 +37,7 @@
 | 🔍 | 首装全盘扫描 | 安装后自动发现 Claude Desktop、Claude Code、Cursor、VS Code (Copilot)、Windsurf、Codex CLI、Gemini CLI 配置中的所有 MCP 服务器并自动注册 |
 | 🌐 | MCP 市场 | 自动发现市面上已有的 MCP：官方 Registry、Smithery、Docker MCP Catalog、GitHub MCP、Awesome 远程、Awesome 本地共 **6 源并行聚合，实测 5364 条**（不含 GitHub 源：它**读本机普查索引，有索引时不发任何请求**，见「GitHub 普查索引」一节；索引里那些仓库没有安装信息，宿主会在后台**从仓库证据恢复命令**并标出处，见「从仓库证据恢复安装命令」一节），无需输入关键词即可浏览，带来源筛选与搜索 |
 | ⚡ | 一键接入 | 市场条目直接安装：npm 包→`npx -y <pkg>`，Python 包→`uvx`，托管端点→streamable-http，Docker 镜像→`docker run -i --rm mcp/<name>`；社区清单条目提供仓库链接 |
+| 🧩 | 装好了还差配置 | 装好、挂上、显示「已连接」的服务器，仍可能每一次 `tools/call` 都回 `401`——因为 token 从没填过。现在安装时就读出它的配置声明（官方 Registry 的 `environmentVariables`/`headers`，或条目自己启动命令里的 `-e NAME`、`${NAME}` 占位、裸凭据名），随行存进注册表：行上多一颗 **待配置** 徽标、页顶多一行「有 N 台服务器装好了但还差配置」，**配置**按钮打开掩码表单，保存只重挂本来就启用的行，安装回复则直接为刚写入的那行打开表单（`GET /servers`、`POST /configure`、`overall_mcp_configure`） |
 | 🛠️ | 原生工具桥接 | 启用的服务器以每服务器一个 `dsh-mcp-client` 实例挂载，工具以 `mcp__<name>__<tool>` 注册为 DSH 原生工具 |
 | 🖥️ | 侧栏页面 | 左侧导航「插件」正下方的 **全局 MCP** 入口：**已注册**（按来源分组、可折叠、分组开关、统计筛选）与 **MCP 市场**（浏览/搜索/安装）两个标签页 |
 | 🎛️ | 分组批量启停 | 每个来源分组一个总开关，一次启用/停用该来源的全部服务器（模型工具 `overall_mcp_set_source_enabled` 同能力） |
@@ -64,7 +65,7 @@ dsh plugin --profile web add ./dsh-overall-mcp
 - 顶部统计：`N 台服务器 · M 已启用 · K 已停用 · C 已连接 · X 连接异常`
 - 筛选：来源下拉、状态下拉（已启用/已停用/已连接/连接异常）、名称搜索
 - 分组：按导入来源聚合（Claude Desktop / Claude Code / Cursor / VS Code / Windsurf / Codex CLI / Gemini CLI / 官方 Registry …），每组显示数量与"已启用"计数，右侧总开关批量启停，点击组头折叠/展开
-- 每行：连接状态点、名称、**用途行**、事实行（传输方式 · 状态 · 工具数 · 工具前缀 `mcp__<serverName>__` · 包名版本）、启用/停用、移除
+- 每行：连接状态点、名称、**用途行**、事实行（传输方式 · 状态 · 工具数 · 工具前缀 `mcp__<serverName>__` · 包名版本）、启用/停用、移除；行声明了配置时另有一颗 **配置** 按钮
 - **写者串行、原子落盘、工具说真话**：这一轮修的是「宿主自己的账本」——审核时发现的都是同一类问题：**文档/工具描述说的和代码做的不一致，而失败的样子和成功长得一样**。
  1. **一次只让一个写者改注册表**：宿主每个「读整份注册表 → await（扫盘 / 起 npx / 查 npm）→ 写回」的动作（扫描、安装、启停、来源总开关、移除、清理来源已删除、检查更新、更新、收藏）现在排在同一条 promise 队列上（`serialized()`，`index.js`）。交错的两次「读-改-写」会让后一次写回它开始时的快照，把前一次的改动丢掉（例如一次早于安装开始的扫描，结束后会把刚装的那条覆盖掉）。读路径（列表、市场）不进队列，仍然并行。
  2. **落盘走临时文件 + rename**（`writeJson`）：原来注册表是就地 `writeFile`，写一半崩掉就留下半截 JSON——而这是唯一一份「丢了就所有服务器都挂不上」的文件（`lib/installs.js` 早就用了临时文件 + rename，注册表反而是漏的那个）。
@@ -125,7 +126,7 @@ dsh plugin --profile web add ./dsh-overall-mcp
 - **收藏**：卡片页脚与详情面板都可收藏；宿主持久化到 `registry.favorites`，界面只本地改自己那份列表（为了一颗星重新拉 ~3MB 市场列表不值当下次浏览/安装/开会话会与宿主对齐）。市场筛选行有**仅看收藏 (N)**：对已加载列表做视图过滤，并在 `GET /api/overall-mcp/favorites` 报告的宿主总数大于可见数时说明差了多少（见「收藏」一节）
 - **往清单里投稿**：如果这份清单住在 GitHub 仓库里（`raw.githubusercontent.com/owner/repo/...`、`cdn.jsdelivr.net/gh/owner/repo@...`，或直接一个仓库地址），那一行右侧会出现「投稿 ↗」——它打开的是**已经预填好字段**的 `issues/new` 页面（`?title=&body=`，零令牌、零后端），提交后由仓库里的工作流校验并写回 `registry.json`。托管在别处的清单不显示这个链接（没有可投稿的地方），面板不会画一个点了没用的按钮。详见「投稿到社区清单（GitHub 上行）」
 - **页面头**（按 v4 原型，两行）：第一行 = 星座图标（一个品牌蓝中枢 + 五个 `currentColor` 卫星，深色主题自动反色）+「全局 MCP」+ 版本号（与 `package.json` 一致，`tools/client-smoke.mjs` 断言两者相等——会撒谎的版本号比不显示更糟）｜右侧主操作；第二行 = 副标题「宿主机扫描 · 市场发现 · 一键接入」｜右侧「⤓ 导出日志」。主按钮是**墨色**（`T.text` 铺底 + `T.cardBg` 作字色，深浅色主题自动翻转）而不是品牌蓝：品牌蓝留给链接、页签下划线、徽标和 gh 仓库名
-- **每个标签页最多一个主操作**：注册表页主按钮是「重新扫描宿主机」；市场页**没有主按钮**——重拉目录是「分类」那一行里 `刷新` 的活，一个常驻的填充按钮会和小按钮重复。另一页的主操作以无边框文字按钮留在同一行（「打开 MCP 市场」/「重新扫描宿主机」），两个主按钮等于没有主按钮。**本插件自己的更新不属于任何一个页签**：它跟着版本号走（页头 `全局 MCP v0.5.0` 右侧），「检查更新」报出新版时才出现，点了走 `POST /self-update`（宿主执行 `dsh plugin --profile <p> add dsh-overall-mcp@<v>`，装完提示重启 DSH 生效）——插件自身的版本判定见 `lib/self-update.js`：`link:`/本地检出（正是本仓库的开发形态）**不提供**自更新，因为那份代码就是版本来源，`npm` 上的新版本与它无关
+- **每个标签页最多一个主操作**：注册表页主按钮是「重新扫描宿主机」；市场页**没有主按钮**——重拉目录是「分类」那一行里 `刷新` 的活，一个常驻的填充按钮会和小按钮重复。另一页的主操作以无边框文字按钮留在同一行（「打开 MCP 市场」/「重新扫描宿主机」），两个主按钮等于没有主按钮。**本插件自己的更新不属于任何一个页签**：它跟着版本号走（页头 `全局 MCP v0.6.0` 右侧），「检查更新」报出新版时才出现，点了走 `POST /self-update`（宿主执行 `dsh plugin --profile <p> add dsh-overall-mcp@<v>`，装完提示重启 DSH 生效）——插件自身的版本判定见 `lib/self-update.js`：`link:`/本地检出（正是本仓库的开发形态）**不提供**自更新，因为那份代码就是版本来源，`npm` 上的新版本与它无关
 - **⤓ 导出日志**：把这一页知道的东西写成 JSON 文件（插件版本、注册表全量、市场各源条数/**每个来源各自的时间/是否命中缓存/是否 stale/是否 304/返回条数**/未变更来源数/返回条数、当前筛选与页码、两处错误）——排查问题时缺的正是这些。客户端本地拼装并下载，不新增宿主路由：宿主自己的日志不归这个插件导出
 - **只有卡片区滚动**：这一页是**固定外壳**（`height:100%` + `overflow:hidden`，自己不滚），滚动属于内部两个盒子——「已注册」的标签页主体整段可滚；「MCP 市场」里只有**卡片区**（`data-omkt="scroller"`，`flex:1 1 auto` + `min-height:0` + `overflow-y:auto`）可滚，搜索框、分类下拉、筛选行与 meta 行都是钉住的 chrome，翻页条留在滚动区下方。`tools/shot.mjs` 的框架探针把这条契约量出来：把卡片区往下拖 240px 后，页签行与搜索框的 `top` 位移必须为 0，页面外壳的 `scrollTop` 必须为 0（四种窗口宽度下实测 0/0/0）。注意 flex 的自动最小尺寸在**滚动容器**里会失效（这正是当初页签行被压成 1px 的原因），所以 chrome 行统一 `.omkt-page > *,.omkt-tabbody > *{flex-shrink:0}`，而「该让出高度」的两个盒子用内联 `flex:1 1 auto` 明确覆盖
 - **回到顶部**：监听挂在「本页内部第一个 `[data-omkt="scroller"]`，否则本页或它之上的第一个可滚动元素」（退化为 window），只在滚动超过 400px 后才出现，短页面不留一个死按钮。市场页签的滚动盒是卡片墙本身，**已注册页签的滚动盒是它的页体**（两者都带该 hook）——早先只有卡片墙带 hook，而页体是它的祖先，向上查找找不到，于是已注册页签上这个按钮从不出现。重新绑定的时机是「页签、市场列表、服务器列表任一变化」，因为卡片墙要等列表到达才存在（首次打开时若只按页签绑定，会绑到 window 且之后不再重绑）
@@ -147,6 +148,17 @@ dsh plugin --profile web add ./dsh-overall-mcp
 - **同一处失败只问一次**：`(条目名, 原始错误)` 相同的诊断在内存里复用十分钟（上限 32 条，最快淘汰最旧），免得连点几次重试反复烧 token；复用到的回复带 `cached: true`
 - 没配模型的宿主**完全不受影响**：`llm` 服务是通过可选注入拿到的（写进 `inject` 会让这个插件在没有模型的宿主上整个加载失败），拿不到就只在失败块里多一行「这次没有自动诊断」
 - 代码：`lib/install-diagnosis.js`（纯文本部分——系统提示、事实抽取、遮蔽、读回答；单测 `test/install-diagnosis.test.mjs`）、`index.js` 的 `diagnoseFailure`（服务与路由接线，连同契约测试 `test/index.test.mjs` 的四条用例：问到、问不到、没有路由、没有模型）、`client/client.js` 的 `installFailureText` 与失败块（探针 `tools/render-market-tab.mjs` 的 `failed install` 段）
+
+### 装好之后还差的那几项配置
+
+一个服务器可以「装上了、挂上了、显示已连接」，然后每一次 `tools/call` 都回 `401`——因为 token 从没填过。在这一轮之前，第一条提示就是那次坏掉的工具调用。现在配置声明在安装时读出、随行存储、在点任何东西之前就摆出来。
+
+- **声明从哪来**（`lib/server-config.js`）：官方 Registry 的 `packages[].environmentVariables[]`（名字、说明、`isRequired`、`isSecret`）与 `remotes[].headers[]`；其他所有来源读条目**自己的启动方式**——`-e NAME` / `--env NAME`、命令/参数/地址里的 `$NAME` / `${NAME}` / `{NAME}` 占位符、以及裸的凭据形状名字（例如 `GITHUB_PERSONAL_ACCESS_TOKEN`，官方 GitHub 镜像就是这么启的）。`streamable-http`/`sse` 条目固定给一个**可选**的 `Authorization` 头：多数远程端点匿名可用，一个没人能填的必填项会让每一台都显得坏掉。多路声明取并集，`origin` 记最强证据（`official` > `args` > `manual`）；什么都没声明的行根本不带 `config`。
+- **存下来，不反复猜**：声明写进注册表条目（`config: { origin, fields }`），徽标重启后还在，手改过的配置文件也不会被二次判断。只有**必填**项为空才算「还差配置」；可选为空是提示，不是问题。
+- **只出掩码**：`GET /servers` 带 `config: { origin, fields: [{key, kind, label, help, required, secret, hasValue, value}], missing, pending }` 与逐行 `needConfig`，另加「已启用且还差配置」的行数。密钥有值回 `••••`、没有回 `''`；非密钥（例如 base URL）原样回显，读的人才能看出这行指着哪个环境。`env`/`headers` 本身永不出现在任何响应里。
+- **表单**：有配置声明的行多一颗 **配置**；缺必填值的行再加 **待配置** 徽标，按钮用主色，页顶只写一次「有 N 台服务器装好了但还差配置」并给「去配置」快捷入口。弹层按声明列出字段（掩码输入、标「必填」），底部留一行自定义键值，保存走 `POST /configure`：写入后**只重挂本来就启用的行**（停用行保持停用）；空字符串等于删除该键（清除）；什么都没改动时如实回「没有需要写入的值」，不谎报已保存。
+- **安装即打开表单**：声明的必填项还空着时，条目以「待配置」装好，回复带 `needConfig` 与 `config.missing`，面板为刚写入的那一行直接打开弹层。这种失败**不问模型**（`diagnosisSkipped: 'needs-config'`），凭据形状的挂载错误同样不问：目录已经写明缺哪个键，再让模型从 `401` 反推只会更慢更差。
+- **给模型用**：`overall_mcp_list` 用 `needConfig` 标出还差配置的行并列出 `config.missing`；`overall_mcp_configure` 按字段名写值（`{"env": {...}}` / `{"headers": {...}}`），密钥一律回 `••••`。
 
 ### 投稿到社区清单（GitHub 上行）
 
@@ -213,6 +225,7 @@ npm run test:registry # 上面那条，进 verify
 - `overall_mcp_catalog [query] [source] [limit] [refresh]` — 浏览 MCP 市场（可不带关键词），返回条目含 `installable` / `installed` / `author` / `tags` / `installs`
 - `overall_mcp_search <query>` — 按关键词搜索市场（与市场标签页同源）
 - `overall_mcp_install <item> [overwrite]` — 安装市场条目并连接（`npx -y <pkg>` / `uvx <pkg>` / streamable-http）。同名条目是**手工添加**的记录时拒绝安装（409），要带 `overwrite: true` 才替换它；挂载失败的安装不计数（返回值带 `counted: false`）
+- `overall_mcp_configure <name> [env] [headers] [slot] [from]` — 写入服务器声明过的配置（密钥回显只有 `••••`）；保存会重挂启用的行，停用的行保持停用
 - `overall_mcp_set_enabled <name> <bool> [slot] [from]` — 启用/停用单台（停用即断开并卸载本插件挂载的那份工具；启用即重连）
 - `overall_mcp_set_source_enabled <source> <bool>` — 按来源批量启用/停用（等同界面上的分组开关）
 - `overall_mcp_check_updates` — 检查所有启用服务器的可用更新（npm / PyPI）
@@ -237,11 +250,11 @@ npm run test:registry # 上面那条，进 verify
 
 **「来源已删除」的行是同一个身份问题的第三面。** 那四条 `rea-cursor` 里，只有一条被 `connect()` 真正挂载（`serverName` 有值，就是 `mcp__rea-cursor__*` 这套工具背后的那份），另外三条是旧扫描器 `name-<source>` 重命名留下的惰性记录——重命名本身已在 `820641c` 里删掉，但它当年写进注册表的三条记录留了下来，而全机任何配置文件都不再包含这个名字（都固定着 6.1.0，正是报告里那三条）。它们既不会被重新导入，也不提供任何工具（fiber 按**名字**存放，`connect()` 见到已有名字就短路），却照样被算作服务器、响应行操作（按名字找第一条，正是「点最后一行、删掉第一行」的由来）。现在扫描器把这次的**证据**写进注册表（`registry.scanned`，`lib/scanner.js` 的 `scannedSources` / `findOrphans`）：读了哪些来源、各自定义了哪些名字；面板据此把这些行标成 `来源已删除`（琥珀色胶囊，不显示更新徽标——没有人会重新导入它），并把整个集合收成一条提示 + 一个动作「清理 N 条」（`POST /api/overall-mcp/forget-orphans`，一次请求处理全部）。判定**只在扫描确实读到过该来源时**才做：`not-found` 不算「空配置」，其余读取错误进 `unreadable` 也不参与——一份读不到的配置不能当成「这个服务器不存在」的证据；`source: manual` 的手工条目永不动。**正在持有挂载的行（`serverName` 非空）永远不在清理范围内**：那一行此刻就在供工具，配置文件没有它并不能成为把它拿走的理由。这个标记现在由 `connect()` / `disconnect()` 经 `setMountHolder` / `clearMountHolder` 维护，同名条目里**只有真正挂载成功的那一行**带 `serverName`——`fibers` 是按名字存放的，早先每点一次「更新」都会重挂一次，于是标记被留在刚刚重挂过的那一行上，四条同名记录里会有三条同时自称「持有挂载」，清理反倒漏掉它们。因为持有者不在清理范围内，清理既不需要断开也不需要重连任何 fiber（`syncFiber` 的循环已随之删掉），返回体只有 `{name, source, version}`。`停用` / `移除` 也带 `slot`，不再是按名字找第一条。
 
-同一个按钮还回答第二个问题：**本插件自己**（`dsh-overall-mcp`）在 npm 上有没有更新。有新版时，**版本号旁边**（页头 `全局 MCP v0.5.0` 的右侧）出现 `更新到 v<新版>` 按钮，两个标签页都在同一位置——这是唯一一件关于本页自身而不是本页内容的事，所以它属于版本号。两种安装形态给出的答案不同（`lib/self-update.js`，`test/self-update.test.mjs` 断言）：
+同一个按钮还回答第二个问题：**本插件自己**（`dsh-overall-mcp`）在 npm 上有没有更新。有新版时，**版本号旁边**（页头 `全局 MCP v0.6.0` 的右侧）出现 `更新到 v<新版>` 按钮，两个标签页都在同一位置——这是唯一一件关于本页自身而不是本页内容的事，所以它属于版本号。两种安装形态给出的答案不同（`lib/self-update.js`，`test/self-update.test.mjs` 断言）：
 
 | 安装形态 | 判定 | 面板行为 |
 | --- | --- | --- |
-| profile 的 `node_modules/dsh-overall-mcp` | 版本由 pnpm 拥有，可查 npm `dist-tags.latest` 并比较 | 有新版时页头版本号旁出现「更新到 v0.5.0」，点了执行 `dsh plugin --profile <p> add <pkg>@<v>`，随后提示重启 DSH |
+| profile 的 `node_modules/dsh-overall-mcp` | 版本由 pnpm 拥有，可查 npm `dist-tags.latest` 并比较 | 有新版时页头版本号旁出现「更新到 v<新版>」，点了执行 `dsh plugin --profile <p> add <pkg>@<v>`，随后提示重启 DSH |
 | `link:` / 本地检出（本仓库的开发形态） | 加载的就是源码目录，npm 上的版本与它无关 | **不出现**更新按钮，检查结果里注明「插件为 link 安装，跳过自身更新」 |
 | npm 查询失败（未发布 / 404 / 超时） | 无法判定 | 不出现按钮，检查结果里原样给出原因 |
 
@@ -305,7 +318,7 @@ Invalid schema for function 'mcp__rea-om__analyze_javascript_application':
 `GET|POST /api/overall-mcp/catalog?query=&source=&limit=&refresh=`（`source=census` 是本机普查索引的视图）、
 `GET|POST /api/overall-mcp/sources`（自定义目录源：列出 / 添加）、`POST /api/overall-mcp/sources/remove`（移除一个，见下）、
 `POST /api/overall-mcp/scan`、
-`POST /api/overall-mcp/install`、`POST /api/overall-mcp/set-enabled`、
+`POST /api/overall-mcp/install`、`POST /api/overall-mcp/configure`、`POST /api/overall-mcp/set-enabled`、
 `POST /api/overall-mcp/set-source-enabled`、`POST /api/overall-mcp/remove`、
 `POST /api/overall-mcp/forget-orphans`（清理「来源已删除」的记录，见上）、
 `POST /api/overall-mcp/favorite`（收藏，见下）、`GET /api/overall-mcp/favorites`（列出收藏）、
