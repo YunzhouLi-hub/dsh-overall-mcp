@@ -21,6 +21,16 @@ const bundlePath = path.join(here, '..', 'client', 'client.js');
 // rendered by the real shell, and this test validates the registration contract.
 const reactStub = {
   createElement: (type, props, ...children) => ({ type, props, children }),
+  // Error boundaries have no hook equivalent: the panel's guard is a class, so
+  // the shim has to expose React's class surface or the factory throws while
+  // loading the bundle (`extends undefined is not a constructor`).
+  Component: class {
+    constructor(props) { this.props = props; this.state = {}; }
+    setState(next) {
+      const patch = typeof next === 'function' ? next(this.state) : next;
+      this.state = { ...this.state, ...patch };
+    }
+  },
   useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
   useEffect: () => {},
   useRef: () => ({ current: null }),

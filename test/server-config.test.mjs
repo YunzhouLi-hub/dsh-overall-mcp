@@ -354,3 +354,60 @@ test('normalizeField defaults secret: true when isSecret is omitted for credenti
   const headlessField = normalizeField({ key: 'HEADLESS' });
   assert.equal(headlessField.secret, false);
 });
+
+/**
+ * A stored **empty** field list must not outvote the entry's own schema.
+ *
+ * This is the state a Smithery install left behind in the wild: `config.fields`
+ * written as `[]` (the derivation ran before the schema arrived) plus a
+ * `config.schema.required` naming `braveApiKey`. `[]` is truthy, so every
+ * `if (!entry.config?.fields)` repair path skipped the row, and the panel
+ * offered a 配置 button that opened a form with no fields in it — 「安装了但没有
+ * 配置界面」. The row must derive from the schema instead of answering "nothing
+ * to configure".
+ */
+test('specOf re-derives from the schema when the stored field list is empty', () => {
+  const schema = {
+    type: 'object',
+    required: ['braveApiKey'],
+    properties: {
+      braveApiKey: { type: 'string', title: 'Brave API Key', description: 'Your Brave Search subscription token.' },
+    },
+  };
+  const entry = {
+    name: 'brave-search',
+    transport: 'stdio',
+    command: 'npx',
+    args: ['-y', '@smithery/cli', 'run', 'brave'],
+    env: {},
+    config: { fields: [], origin: 'smithery', via: 'cli-json', flag: '--config', schema },
+  };
+
+  const spec = specOf(entry);
+  assert.ok(spec, 'a Smithery row with a required key is not 「needs nothing」');
+  assert.equal(spec.fields.length, 1);
+  assert.equal(spec.fields[0].key, 'braveApiKey');
+  assert.equal(spec.fields[0].kind, 'config');
+  assert.equal(spec.fields[0].required, true);
+  assert.equal(spec.fields[0].secret, true);
+  assert.equal(spec.via, 'cli-json');
+  assert.equal(spec.flag, '--config');
+
+  // The badge follows from the same spec: the value is required and absent.
+  const state = configState(spec, entry);
+  assert.equal(state.needs, true);
+  assert.deepEqual(state.missing, ['braveApiKey']);
+  // And the value itself is never echoed — only its name is. An absent value
+  // comes back as the empty string, not as `undefined`, so the form can bind it.
+  const masked = maskedFields(spec, entry);
+  assert.equal(masked.fields[0].key, 'braveApiKey');
+  assert.equal(masked.fields[0].value, '');
+});
+
+/** A row with no schema, no args and no remote URL really does need nothing. */
+test('specOf still answers null for a row nothing declares', () => {
+  const entry = { name: 'fs', transport: 'stdio', command: 'my-own-fs', args: ['--root', '.'], env: {} };
+  assert.equal(specOf(entry), null);
+  // An empty stored list on such a row is honest, not a derivation failure.
+  assert.equal(specOf({ ...entry, config: { fields: [] } }), null);
+});

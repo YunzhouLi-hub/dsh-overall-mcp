@@ -175,6 +175,56 @@ test('the plugin registers the documented route and tool surface', async () => {
 });
 
 /**
+ * A tool result must be **lossless JSON**.
+ *
+ * The host compares the value a tool returned against its own
+ * `JSON.parse(JSON.stringify(value))` and answers
+ * `tool "X" returned invalid output: value is not lossless JSON` when the two
+ * differ — the call fails even though the tool itself worked. `publicList()`
+ * omits `error` / `updatedAt` / `aboutAt` when there is nothing to say, and the
+ * resulting `{ error: undefined }` drops a key on the round-trip: that is why
+ * `overall_mcp_list` (and `_search`, `_catalog`, `_check_updates`, all built on
+ * it) could never answer, no matter the arguments. The fixture registry has no
+ * connect errors and no timestamps, so it is exactly the shape that used to
+ * break.
+ */
+test('management tools answer with lossless JSON', async () => {
+  await withHost(FIXTURE, async ({ tools }) => {
+    const assertLossless = (label, value) => {
+      let round;
+      try {
+        round = JSON.parse(JSON.stringify(value));
+      } catch (err) {
+        assert.fail(`${label}: not JSON-serialisable (${err.message})`);
+      }
+      assert.deepEqual(round, value, `${label}: JSON round-trip changed the value`);
+      const walk = (node, at) => {
+        if (node === null || typeof node !== 'object') return;
+        for (const [key, item] of Object.entries(node)) {
+          assert.ok(item !== undefined, `${label}: ${at}.${key} is undefined`);
+          walk(item, `${at}.${key}`);
+        }
+      };
+      walk(value, label);
+    };
+
+    const listed = await tools.get('overall_mcp_list').execute({});
+    assertLossless('overall_mcp_list', listed);
+    assert.equal(listed.servers.length, FIXTURE.servers.length);
+    // The row that used to carry `error: undefined`: absent now, not nulled out
+    // by hand. `null` and 「没有这个键」 are different facts for a reader.
+    for (const row of listed.servers) {
+      assert.equal('error' in row, false, `${row.name}: no error key when there is none`);
+      assert.equal(row.status, 'stopped');
+    }
+
+    // The same normalisation covers every other tool, including the ones whose
+    // payload nests registry rows (an install answer carries `servers` too).
+    assertLossless('overall_mcp_forget_orphans', await tools.get('overall_mcp_forget_orphans').execute({}));
+  });
+});
+
+/**
  * The favourite routes are a write/read pair, and the panel's star only ever
  * sends the state it wants (`on`). Both shapes are pinned here because they are
  * easy to get subtly wrong in opposite directions: `on` must be idempotent (a

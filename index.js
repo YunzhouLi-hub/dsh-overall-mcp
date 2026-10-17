@@ -18,7 +18,7 @@ import { BlockAssembler } from '@deepseek-ai/dsh-llm';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { describeAbout, toolNamesFor, aboutSourceLabel, needsInstructionsRead } from './lib/about.js';
 import { scanHost, mergeIntoRegistry, collapseDuplicateRows, scannedSources, findOrphans, setMountHolder, clearMountHolder } from './lib/scanner.js';
-import { browseCatalog, catalogItemToEntry, CENSUS_SOURCE, fetchRepoStats, githubSearchQuota, searchGithubRepos, USER_AGENT } from './lib/catalog.js';
+import { browseCatalog, catalogItemToEntry, CENSUS_SOURCE, fetchRepoStats, fetchSmitheryConfig, githubSearchQuota, searchGithubRepos, USER_AGENT } from './lib/catalog.js';
 import {
   BASE_QUERIES, INDEX_FILE, INDEX_TTL_MS,
   crawlGithubRepos, indexDocumentOf, indexFreshness, mergeIndexRows, needsGithubCrawl, readIndexDocument,
@@ -40,7 +40,7 @@ import {
   DIAGNOSIS_SYSTEM, buildDiagnosisPrompt, capText, diagnosisFactsOf, diagnosisTextOf,
 } from './lib/install-diagnosis.js';
 import {
-  applyValues, configSpecFor, configState, looksLikeCredentialFailure, maskedFields, specOf,
+  applyValues, channelOf, composeMountArgs, configSpecFor, configState, isSmitheryCli, looksLikeCredentialFailure, maskedFields, smitheryFieldsOf, specOf,
 } from './lib/server-config.js';
 import { collectRepoMedia } from './lib/media.js';
 import { httpStatusFor } from './lib/http-status.js';
@@ -149,7 +149,9 @@ function toMcpConfig(entry, serverName) {
     transport: 'stdio',
     serverName,
     command: entry.command,
-    args: entry.args ?? [],
+    // A CLI-channel entry carries its settings as one argv element
+    // (`--config '{"key":"value"}'`); everything else keeps the args it came with.
+    args: [...(entry.args ?? []), ...composeMountArgs(entry)],
     env: entry.env ?? {},
     cwd: entry.cwd ?? '',
   };
@@ -198,7 +200,70 @@ function installSchemaGuard(ctx, log) {
 
 /** Render any JSON result as one text block for the Native projection. */
 function renderJson(args, value) {
-  return [{ type: 'text', text: JSON.stringify(value, null, 2) }];
+  return [{ type: 'text', text: JSON.stringify(toJsonSafe(value), null, 2) }];
+}
+
+/**
+ * A tool result must survive `JSON.parse(JSON.stringify(value))` unchanged.
+ *
+ * The host compares the value a tool returned against its own JSON round-trip
+ * and rejects the call outright — `tool "X" returned invalid output: value is
+ * not lossless JSON` — as soon as they differ. Ordinary JS object shapes differ:
+ *
+ *   - `{ error: undefined }` — stringify drops the key, so the round-trip has no
+ *     `error` property and the comparison fails;
+ *   - a sparse array (a hole) — stringify emits `null`;
+ *   - `NaN` / `Infinity` — stringify emits `null`;
+ *   - `BigInt` and circular references — stringify throws.
+ *
+ * `publicList()` carries about one `undefined` per row **by design** (`error`,
+ * `updatedAt`, `aboutAt`, `serverName` are all "absent when there is nothing to
+ * say"), so every read tool built on it — `overall_mcp_list`, `_search`,
+ * `_catalog`, `_check_updates` — failed systematically, no matter the
+ * arguments. That is a payload bug, not a tool bug, so it is fixed at the
+ * payload: normalise once, here, instead of sprinkling `?? null` over every
+ * return object (which would also have to be re-audited on every edit).
+ */
+function toJsonSafe(value, seen = new WeakSet()) {
+  if (value === null) return null;
+  const type = typeof value;
+  if (type === 'string' || type === 'boolean') return value;
+  if (type === 'number') return Number.isFinite(value) ? value : null;
+  if (type === 'bigint') return value.toString();
+  // Dropped by returning undefined: the caller omits the key entirely, which is
+  // the only representation JSON has for "absent".
+  if (type === 'undefined' || type === 'function' || type === 'symbol') return undefined;
+  if (type !== 'object') return value;
+  if (seen.has(value)) return '[Circular]';
+  seen.add(value);
+  try {
+    if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.toISOString();
+    if (Array.isArray(value)) return Array.from(value, (item) => toJsonSafe(item, seen));
+    if (value instanceof Map) return toJsonSafe(Object.fromEntries(value), seen);
+    if (value instanceof Set) return toJsonSafe([...value], seen);
+    const out = {};
+    for (const [key, item] of Object.entries(value)) {
+      const safe = toJsonSafe(item, seen);
+      if (safe !== undefined) out[key] = safe;
+    }
+    return out;
+  } finally {
+    // `seen` tracks the current path only, so a value referenced twice in
+    // different branches is copied twice instead of becoming `[Circular]`.
+    seen.delete(value);
+  }
+}
+
+/** Normalise one tool definition's return value on the way out. */
+function withJsonSafeOutput(definition) {
+  const execute = definition?.execute;
+  if (typeof execute !== 'function') return definition;
+  return {
+    ...definition,
+    async execute(...callArgs) {
+      return toJsonSafe(await execute.apply(this, callArgs));
+    },
+  };
 }
 
 /** Collect every regex keyword found in one JSON schema, for diagnostics. */
@@ -313,6 +378,16 @@ export async function apply(ctx) {
   }
 
   const fibers = new Map(); // entry.name -> mcp-client Fiber
+  /**
+   * Mounts whose handshake had not finished when `connect()` hit its deadline.
+   *
+   * `fibers.has(name)` only says "a fiber object exists", and a first-run `npx`
+   * download leaves one for minutes. Reading that as 已连接 painted a green dot
+   * on a server that had not answered `initialize` yet — the row the user saw
+   * as 「检查没有通过但仍是绿灯」. A name in here is mounted but *not* known to
+   * work, so the panel shows the pending state (amber) instead of green.
+   */
+  const starting = new Set(); // entry.name, handshake in flight
 
   // Repair provider-hostile regexes in every MCP schema mounted below.
   installSchemaGuard(ctx, log);
@@ -413,9 +488,14 @@ export async function apply(ctx) {
     if (timedOut) {
       // Keep the fiber and let it finish in the background; a later
       // `overall_mcp_list` / page refresh shows the settled state.
+      starting.add(entry.name);
       fiber.await().then(
-        () => log?.info?.(`overall-mcp: ${entry.name} finished connecting in the background`),
+        () => {
+          starting.delete(entry.name);
+          log?.info?.(`overall-mcp: ${entry.name} finished connecting in the background`);
+        },
         async (err) => {
+          starting.delete(entry.name);
           entry.connectError = String(err?.message ?? err);
           // The 8 s deadline only deferred this failure. Leaving the fiber in
           // the map made it permanent: every retry path asks `fibers.has(name)`
@@ -436,6 +516,7 @@ export async function apply(ctx) {
 
   async function disconnect(name) {
     const fiber = fibers.get(name);
+    starting.delete(name);
     if (!fiber) return;
     fibers.delete(name);
     // Nothing is mounted for this name any more, so no row of it may keep
@@ -495,12 +576,18 @@ export async function apply(ctx) {
     const orphans = new Set(orphanEntries());
     return registry.servers.map((s, slot) => {
       const enabled = s.enabled !== false;
-      const connected = fibers.has(s.name);
-      const providedExternally = !connected && s.providedExternally === true;
+      const mounted = fibers.has(s.name);
+      // Mounted but the handshake has not finished (see `starting`): the tools
+      // do not exist yet, so calling this 已连接 is what made a broken server
+      // look healthy.
+      const startingNow = mounted && starting.has(s.name) && !s.connectError;
+      const connected = mounted && !startingNow;
+      const providedExternally = !mounted && s.providedExternally === true;
       const status = s.connectError ? 'error'
         : providedExternally ? 'provided-externally'
-          : connected ? 'connected'
-            : enabled ? 'idle' : 'stopped';
+          : startingNow ? 'starting'
+            : connected ? 'connected'
+              : enabled ? 'idle' : 'stopped';
       // A stored verdict describes the entry as it was written, not as it is now.
       // If this entry's pinned version has moved since (a re-import from the
       // client's config, a hand edit), the badge belongs to a different launch
@@ -514,6 +601,11 @@ export async function apply(ctx) {
       const spec = specOf(s);
       const config = maskedFields(spec, s);
       const configNeeds = configState(spec, s)?.needs === true;
+      // Where a value would go for this row. A row can need configuration without
+      // a fetched schema (a Smithery entry: the channel is readable off its args),
+      // and the panel shows a 配置 button for exactly those rows — with a free-form
+      // form — instead of waiting for a schema nobody has asked for yet.
+      const channel = channelOf(s);
       return {
         name: s.name,
         // Position in the registry. Two rows can share a name (one client config
@@ -527,6 +619,9 @@ export async function apply(ctx) {
         orphan: orphans.has(s),
         enabled,
         connected,
+        // Mounted, handshake still in flight: connected is false and status is
+        // 'starting', so the panel can show 正在连接 instead of a green dot.
+        starting: startingNow,
         status,
         providedExternally,
         serverName: s.serverName ?? toServerName(s.name) ?? undefined,
@@ -549,6 +644,10 @@ export async function apply(ctx) {
         // A required value is absent, so the server cannot work yet. This is the
         // fact the panel badges and the model is told about in `overall_mcp_list`.
         needConfig: configNeeds,
+        // `env` | `headers` | `cli-json`: where the form writes and how the mount
+        // delivers it. Always present, because a row with no declared fields still
+        // has a channel the panel can offer.
+        channel,
       };
     });
   }
@@ -859,9 +958,73 @@ export async function apply(ctx) {
     return { ok: true, ...value };
   }
 
+  /**
+   * Give one Smithery row the schema its listing does not carry.
+   *
+   * The catalogue card says how the entry launches; only the detail endpoint
+   * says which keys that launch needs. Without the schema the row installs
+   * looking done and every tool call then fails with a `401` — the exact
+   * failure the config feature exists to prevent, one layer up.
+   */
+  async function attachSmitherySchema(item, entry) {
+    if (item?.source !== 'smithery' || !entry) return;
+    if (entry.config?.schema) return;
+    const raw = item?.raw ?? {};
+    const qualified = typeof raw.qualifiedName === 'string' ? raw.qualifiedName.trim() : typeof raw.name === 'string' ? raw.name.trim() : '';
+    if (qualified === '') return;
+    const found = await fetchSmitheryConfig(qualified);
+    if (!found?.schema) return;
+    const schema = found.schema;
+    const next = { ...(entry.config ?? {}), origin: 'smithery', via: 'cli-json', flag: '--config', schema };
+    // The schema IS the list of keys this launch needs, so derive the form
+    // fields from it right here. Persisting only the schema left `fields` as the
+    // empty array the first install wrote, and `[]` is truthy — so no later
+    // repair path ever revisited it and the row kept an empty 配置 form.
+    if (!Array.isArray(next.fields) || next.fields.length === 0) {
+      next.fields = smitheryFieldsOf({ ...entry, config: next });
+    }
+    entry.config = next;
+  }
+
+  /**
+   * Fill in schemas for Smithery rows that were installed before one was known.
+   *
+   * Runs on 检查更新 — the one moment the user is already waiting on the network
+   * — and is capped so a slow registry cannot turn that button into a hang. A
+   * row whose qualified name cannot be read off its args is skipped rather than
+   * guessed at.
+   */
+  async function backfillSmitheryConfigs(limit = 8) {
+    const rows = (registry.servers ?? [])
+      .filter((row) => isSmitheryCli(row) && !row?.config?.schema)
+      .slice(0, limit);
+    if (rows.length === 0) return 0;
+    let healed = 0;
+    await Promise.all(rows.map(async (row) => {
+      const at = Array.isArray(row.args) ? row.args.findIndex((arg) => String(arg) === 'run') : -1;
+      const qualified = at >= 0 && typeof row.args[at + 1] === 'string' ? row.args[at + 1].trim() : '';
+      if (qualified === '') return;
+      const found = await fetchSmitheryConfig(qualified);
+      if (!found?.schema) return;
+      const next = { ...(row.config ?? {}), origin: 'smithery', via: 'cli-json', flag: '--config', schema: found.schema };
+      if (!Array.isArray(next.fields) || next.fields.length === 0) {
+        next.fields = smitheryFieldsOf({ ...row, config: next });
+      }
+      row.config = next;
+      healed += 1;
+    }));
+    if (healed > 0) log?.info?.(`overall-mcp: filled in the configuration schema for ${healed} Smithery row(s)`);
+    return healed;
+  }
+
   async function doInstallImpl(item, { overwrite = false } = {}) {
     const entry = catalogItemToEntry(item);
     if (!entry) throw new Error('item has no installable transport (stdio command or http url)');
+    // Smithery states the requirement on the detail endpoint, not on the card
+    // (`connections[].configSchema`); without it the row would install looking
+    // complete and fail on the first tool call. Fetched before the row is
+    // written so the badge and the form are right from the first render.
+    await attachSmitherySchema(item, entry);
     // Whether this row is missing a required setting, read before mounting: a
     // declared-but-unfilled field predicts the auth failure, and the same fields
     // must be named by the badge, the reply and the config form.
@@ -957,6 +1120,9 @@ export async function apply(ctx) {
       // just above; repeating them here saves the client a lookup after install.
       config: maskedFields(specOf(entry), entry),
       needConfig: configBefore?.needs === true,
+      // Where this row's settings go, so the panel can open the right form even
+      // when the schema was never fetched (a Smithery row installed earlier).
+      channel: channelOf(entry),
     };
   }
   // ---- mutations ------------------------------------------------------------
@@ -1251,6 +1417,11 @@ export async function apply(ctx) {
         ? { at: new Date().toISOString(), current: check.current, latest: check.latest, updateAvailable: check.updateAvailable, error: check.error }
         : { at: new Date().toISOString(), detectable: false, reason: check.reason };
     });
+    // The same click also fills in what a Smithery row was installed before
+    // anyone could ask for it: its schema. Bounded, and failures are silent —
+    // the update verdicts above must not become an error because a detail
+    // request for one row timed out.
+    await backfillSmitheryConfigs();
     await save();
     return { ...result, ...(await serversPayload()) };
   }
@@ -1270,9 +1441,14 @@ export async function apply(ctx) {
     // 「无需更新」 about work nobody asked for. The panel always sends the row's
     // slot; an agent can do the same now (`slot`/`from` on overall_mcp_update).
     const entry = resolveEntry(name, { slot, from });
-    if (!entry.config) {
+    // `[]` is truthy: the original `if (!entry.config?.fields)` treated a row
+    // whose fields had been derived as empty as 「already configured」 and left it
+    // that way for good. Ask for the count, not the truthiness.
+    if (!Array.isArray(entry.config?.fields) || entry.config.fields.length === 0) {
       const spec = specOf(entry);
-      if (spec) entry.config = spec;
+      // Merged, not replaced: a Smithery row keeps the schema it was installed
+      // with, so a later backfill or a label fix still has the source to read.
+      if (spec) entry.config = { ...(entry.config ?? {}), ...spec };
     }
     const check = await checkEntryUpdate(entry);
     if (!check.detectable) throw new Error(`${name} is not launched through a package runner; update it manually`);
@@ -2391,7 +2567,7 @@ export async function apply(ctx) {
   // ---- management tools ----------------------------------------------------
   const jsonOut = { schema: { type: 'json' }, render: renderJson };
 
-  const defs = [
+  const rawDefs = [
     defineTool({
       name: 'overall_mcp_scan',
       description: 'Rescan well-known host MCP config files (Claude Desktop/Code, Cursor, VS Code, Windsurf, Codex CLI, Gemini CLI) and import new servers into the overall MCP registry. An entry keeps its name: a server imported before is updated in place when its command/args/url changed, and an entry the user added by hand is never overwritten (it is reported as skipped). The answer also lists `orphans`: registry entries whose source was read by this scan and no longer defines that name (they mount nothing but still count as servers and answer to their name). Remove them with overall_mcp_forget_orphans.',
@@ -2550,6 +2726,11 @@ export async function apply(ctx) {
       execute: () => doForgetOrphans(),
     }),
   ];
+
+  // Every management tool returns a JSON value the host must accept unchanged;
+  // publicList() / catalogue rows carry explicit `undefined` fields, which the
+  // lossless-JSON check rejects (see toJsonSafe).
+  const defs = rawDefs.map(withJsonSafeOutput);
 
   const disposers = defs.map((d) => ctx.tools.register(d));
 

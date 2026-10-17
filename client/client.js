@@ -732,10 +732,15 @@ window.__ModuleLoader__.load({
 			meta: { color: T.text3, fontSize: 12 },
 			dot: (state) => ({
 				width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+				// Amber is 「这一行还没检查通过」: a failed mount and a handshake
+				// still in flight both look like a server that exists but cannot
+				// answer yet. Green must mean 「能用」, otherwise a broken server
+				// sitting next to a working one is indistinguishable from it.
 				background: state === "on" ? T.green
-					: state === "off" ? "#f53f3f"
-						: state === "external" ? T.blue
-							: "rgba(128,128,128,0.6)",
+					: state === "error" || state === "starting" ? "#e0a020"
+						: state === "off" ? "#f53f3f"
+							: state === "external" ? T.blue
+								: "rgba(128,128,128,0.6)",
 			}),
 			// ---- market cards: a row-major grid ----
 			// Column count comes from the injected sheet's container queries; the
@@ -1030,10 +1035,20 @@ window.__ModuleLoader__.load({
 		function ServerRow({ server, busy, job, onToggle, onRemove, onUpdate, onConfigure }) {
 			const enabled = server.enabled !== false;
 			const provided = server.providedExternally === true;
-			const state = provided ? "external" : enabled ? (server.connected ? "on" : "idle") : "off";
-			const status = server.error ? `连接失败：${server.error}`
+			// `connected` alone is 「有一个 fiber」, not 「能用」: a mount whose
+			// handshake has not finished has no tools yet (see index.js publicList
+			// → starting). It must not read as connected, and it must not read as
+			// a plain idle either — idle means 「停用之外什么都没发生」.
+			const starting = server.starting === true && !server.error;
+			const failed = typeof server.error === "string" && server.error !== "";
+			const state = failed ? "error"
+				: provided ? "external"
+					: starting ? "starting"
+						: enabled ? (server.connected ? "on" : "idle") : "off";
+			const status = failed ? `连接失败：${server.error}`
 				: provided ? "已由其他插件提供（跳过重复挂载）"
-					: enabled ? (server.connected ? "已连接" : "未连接") : "已停用";
+					: starting ? "正在连接（握手未完成）· 检查未通过"
+						: enabled ? (server.connected ? "已连接" : "未连接") : "已停用";
 			const prefix = server.serverName ? `工具前缀 mcp__${server.serverName}__` : "";
 			const pkg = server.package ? `${server.package.name}@${server.package.version ?? "latest"}` : "";
 			const update = server.update;
@@ -1119,7 +1134,11 @@ window.__ModuleLoader__.load({
 							? createElement("span", { key: "newv", style: styles.jobOutcome }, `✓ 已更新到 ${didUpdate}`)
 							: null,
 				createElement("span", { key: "actions", style: { display: "flex", gap: 6, alignItems: "center", ...styles.spacer } }, [
-					server.config
+					// Any row with a declared field, plus any row whose launch takes
+					// its settings on the command line (a Smithery row can need a key
+					// before its schema has ever been fetched — the channel is the
+					// promise that there is something to fill in).
+					server.config || server.channel === "cli-json"
 						? createElement("button", {
 							key: "cfg", type: "button",
 							// A row that cannot work yet gets the primary style: the
@@ -1743,7 +1762,13 @@ window.__ModuleLoader__.load({
 		 * inside a button — that nesting is what once made the card's links
 		 * race its click handler and "not go anywhere".
 		 */
-		function MarketCard({ item, stats, media, busy, rank, usageSort, onInstall, onOpen, onToggleFavorite }) {
+		// The identity an install runs under: the same key the market card is keyed by.
+// Two sources can list the same title, so the key carries both.
+function itemKeyOf(item) {
+	return `${item?.source ?? ""}:${item?.id ?? item?.title ?? ""}`;
+}
+
+function MarketCard({ item, stats, media, busy, installing, rank, usageSort, onInstall, onOpen, onToggleFavorite }) {
 			const repo = repoKeyOf(item);
 			const enriched = repo ? (stats ?? {})[repo] : null;
 			const repoMedia = repo ? (media ?? {})[repo] : null;
@@ -1998,9 +2023,9 @@ window.__ModuleLoader__.load({
 								? createElement("button", {
 									key: "install", type: "button", className: "omkt-btn omkt-btn-primary",
 									style: { ...styles.button, ...styles.primary, padding: "6px 14px", fontSize: 13, fontWeight: 600 },
-									disabled: busy,
+									disabled: busy || installing,
 									onClick: (e) => { e.stopPropagation(); onInstall(item); },
-								}, busy ? "处理中…" : item.deprecated ? "仍要安装" : "安装")
+								}, installing ? "处理中…" : item.deprecated ? "仍要安装" : "安装")
 								: createElement("span", { key: "m", style: styles.hint }, "需手动配置"),
 						createElement("button", {
 							key: "detail", type: "button", className: "omkt-btn omkt-btn-text",
@@ -2468,7 +2493,7 @@ window.__ModuleLoader__.load({
 		 * the repository, and the install command — because a market entry is only
 		 * half the story: the user needs the source of truth before deciding.
 		 */
-		function MarketDetail({ item, stats, media, busy, mediaFailed, onRetryMedia, onClose, onInstall, onToggleFavorite }) {
+		function MarketDetail({ item, stats, media, busy, installing, mediaFailed, onRetryMedia, onClose, onInstall, onToggleFavorite }) {
 			// "" | "ok" | "fail" — the copy button states its own result rather
 			// than flashing a message somewhere else; see `copyText`.
 			const [copyState, setCopyState] = useState("");
@@ -2725,9 +2750,9 @@ window.__ModuleLoader__.load({
 							: item.installable
 								? createElement("button", {
 									key: "install", type: "button", className: "omkt-btn omkt-btn-primary",
-									style: { ...styles.button, ...styles.primary }, disabled: busy,
+									style: { ...styles.button, ...styles.primary }, disabled: busy || installing,
 									onClick: () => { onInstall(item); onClose(); },
-								}, busy ? "处理中…" : item.deprecated ? "仍要安装" : "安装")
+								}, installing ? "处理中…" : item.deprecated ? "仍要安装" : "安装")
 								: createElement("span", { key: "m", style: styles.hint },
 									item.repository ? "该来源未提供安装命令，请按仓库说明手动配置" : "无可安装信息"),
 						onToggleFavorite
@@ -2781,6 +2806,12 @@ window.__ModuleLoader__.load({
 			// a name: two rows can share a name, and the sheet must edit the one
 			// that was clicked.
 			const [configTarget, setConfigTarget] = useState(null);
+			// The market card whose install is running, by item id. Deliberately
+			// not the page-level `busy`: an install is one row's work (npx has to
+			// fetch the package), and disabling every other card's button during
+			// it made the whole market look frozen — the user's second install
+			// just waited on a spinner nobody asked for.
+			const [installingKey, setInstallingKey] = useState(null);
 
 			// ---- market tab state ----
 			const [market, setMarket] = useState(null);
@@ -2918,7 +2949,10 @@ window.__ModuleLoader__.load({
 
 			async function refresh() {
 				const body = await api("/servers");
-				setServers(body.servers);
+				// Anything but an array here (an `{ error }` body answered with 200, a
+				// route that changed shape) used to reach `.map()` on the next render
+				// and blank the page. The list is the page's spine: keep it an array.
+				setServers(Array.isArray(body?.servers) ? body.servers : []);
 				setRegistryError(typeof body.registryError === "string" ? body.registryError : "");
 				return body.servers;
 			}
@@ -3285,7 +3319,11 @@ window.__ModuleLoader__.load({
 							refresh: options.refresh === true,
 						}),
 					});
-					setMarket(body);
+					// `items` is rendered with `.map()` in several places and a failure
+					// body (`{ error }`) has no items at all: normalise here so a
+					// listing that failed to build shows an empty market, not a blank
+					// page.
+					setMarket({ ...body, items: Array.isArray(body?.items) ? body.items : [] });
 					setMarketAt(body.fetchedAt ? new Date(body.fetchedAt).toLocaleTimeString() : "");
 					// A new listing invalidates the page you were on.
 					setMarketPage(0);
@@ -3786,7 +3824,7 @@ window.__ModuleLoader__.load({
 
 			const doInstall = async (item) => {
 				setError(""); setMessage(""); setInstallFailure("");
-				setBusy(true);
+				setInstallingKey(itemKeyOf(item));
 				try {
 					const result = await api("/install", { method: "POST", timeoutMs: 300000, body: JSON.stringify({ item }) });
 					await refresh();
@@ -3797,20 +3835,22 @@ window.__ModuleLoader__.load({
 					// A row that installed but declared a required setting opens its
 					// config sheet straight away: it mounted nothing usable, and the
 					// next thing the user needs is the form, not a toast.
-					if (result?.needConfig === true) {
+					if (result?.needConfig === true || result?.channel === "cli-json") {
 						// Prefer the row that is itself pending: two rows can share a
 						// name (a client config plus a registry entry), and opening the
 						// form on the one that does not need it would show no fields.
 						const same = (result.servers ?? []).filter((s) => s.name === result.server);
-						const row = same.find((s) => s.needConfig === true) ?? same[0];
+						const row = same.find((s) => s.needConfig === true) ?? same.find((s) => s.channel === "cli-json") ?? same[0];
 						if (row) setConfigTarget(row);
-						setMessage(`${result.server ?? "这个条目"} 已安装，还需要填写配置才能使用。`);
+						setMessage(result?.needConfig === true
+							? `${result.server ?? "这个条目"} 已安装，还需要填写配置才能使用。`
+							: `${result.server ?? "这个条目"} 已安装；这类服务器通常要填一个密钥才能用，配置在这里填写。`);
 					} else if (result?.connect?.ok === false) setInstallFailure(installFailureText(result, item));
 					else setMessage(`${result.server ?? "这个条目"} 已安装并连接`);
 				} catch (err) {
 					setError(String(err.message || err));
 				} finally {
-					setBusy(false);
+					setInstallingKey(null);
 				}
 			};
 
@@ -4942,6 +4982,9 @@ window.__ModuleLoader__.load({
 									pageItems.map((item, i) => createElement(MarketCard, {
 										key: `${item.source}:${item.id ?? item.title}`,
 										item, stats: repoStats, media: repoMedia, busy,
+										// One card's install at a time, and only that card
+										// says 处理中… — see `installingKey`.
+										installing: installingKey === itemKeyOf(item),
 										// A ranked list has to *show* its ranking.
 										// The wall is CSS multi-column, so a sorted
 										// list reads down each column, not across
@@ -5001,6 +5044,7 @@ window.__ModuleLoader__.load({
 							// second entry opened in the same slot must not inherit it.
 							key: `detail:${detail.source}:${detail.id ?? detail.title}`,
 							item: detail, stats: repoStats, media: repoMedia, busy,
+							installing: installingKey === itemKeyOf(detail),
 							mediaFailed: mediaFailures.some((e) => e.repo === repoKeyOf(detail)),
 							onRetryMedia: () => enrichMedia([detail], true),
 							onClose: () => setDetail(null),
@@ -5042,6 +5086,69 @@ window.__ModuleLoader__.load({
 		 * `dsh-client-ui-layout`): a slot whose owner is not injected cannot be
 		 * addressed, and `slots.inject` would then simply never fire.
 		 */
+		/**
+		 * `react.Component` is always there in the shell, but this bundle is also
+		 * loaded by the repo's headless probes (tools/*.mjs) through a shim that
+		 * carries only the hooks. `class X extends undefined` throws while the
+		 * factory is being evaluated — before any of this file runs — so a partial
+		 * React must degrade to a base class here instead of taking the whole
+		 * bundle down. The guard simply never fires in the app.
+		 */
+		const BoundaryBase = typeof react.Component === "function"
+			? react.Component
+			: class {
+				constructor(props) { this.props = props; this.state = {}; }
+				setState(next) {
+					this.state = { ...this.state, ...(typeof next === "function" ? next(this.state) : next) };
+				}
+				render() { return null; }
+			};
+
+		/**
+		 * The page has no error boundary of its own: one throw inside a row
+		 * renderer unmounts the whole section, and what the user sees is a blank
+		 * page — that is exactly what 「装完就白屏」 was. A single unexpected
+		 * field (an install response whose shape differs from the list shape, a
+		 * catalogue item missing an array) must degrade to an inline message, not
+		 * to nothing at all.
+		 */
+		class Boundary extends BoundaryBase {
+			constructor(props) {
+				super(props);
+				this.state = { error: null };
+			}
+			static getDerivedStateFromError(error) {
+				return { error };
+			}
+			componentDidCatch(error, info) {
+				try { console.error("[overall-mcp] panel crashed", error, info); } catch { /* ignore */ }
+			}
+			render() {
+				if (!this.state.error) return this.props.children ?? null;
+				const retry = () => this.setState({ error: null });
+				const rescan = () => {
+					fetch("/api/overall-mcp/scan", { method: "POST" }).catch(() => {});
+					retry();
+				};
+				return createElement("div", { style: { padding: 20, display: "grid", gap: 10 } }, [
+					createElement("strong", { key: "t" }, "全局 MCP 面板渲染失败"),
+					createElement("div", { key: "e", style: { color: "#c33", fontSize: 13 } },
+						String(this.state.error?.message ?? this.state.error)),
+					createElement("div", { key: "h", style: { fontSize: 12, opacity: 0.7 } },
+						"后端仍然可用：对话里可以直接调用 overall_mcp_list / overall_mcp_scan。"),
+					createElement("div", { key: "a", style: { display: "flex", gap: 8 } }, [
+						createElement("button", { key: "retry", type: "button", onClick: retry }, "重试渲染"),
+						createElement("button", { key: "scan", type: "button", onClick: rescan }, "重新扫描宿主机"),
+					]),
+				]);
+			}
+		}
+
+		/** Registered page component: the guarded section. */
+		function Container(props) {
+			return createElement(Boundary, null, createElement(Section, props));
+		}
+
 		function apply(ctx) {
 			// Kept for link handling only (see `openExternal`): the registration
 			// below needs `ctx.slots`, and a link click much later needs the two
@@ -5063,7 +5170,7 @@ window.__ModuleLoader__.load({
 				return typeof off === "function" ? off : () => {};
 			});
 			ctx.slots.inject("main", () => {
-				const off = ctx.slots.register({ name: "main", key: PANEL_ID }, Section);
+				const off = ctx.slots.register({ name: "main", key: PANEL_ID }, Container);
 				return typeof off === "function" ? off : () => {};
 			});
 		}
