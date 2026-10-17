@@ -987,6 +987,33 @@ export async function apply(ctx) {
   }
 
   /**
+   * Fill in the schema for **one** Smithery row that was installed before
+   * anyone asked the detail endpoint.
+   *
+   * Split out of `backfillSmitheryConfigs` so the 配置 click can heal the one row
+   * it is about to show: a form can only state what the row declares, and a
+   * Smithery row that was written with `fields: []` declares nothing until this
+   * request comes back. Answering 「这个来源没有声明配置项」 while the source
+   * does declare a key is exactly the 「装了却没有配置界面」 complaint.
+   *
+   * @returns true when the row was written (the caller saves).
+   */
+  async function healSmitheryRow(row) {
+    if (!row || !isSmitheryCli(row) || row?.config?.schema) return false;
+    const at = Array.isArray(row.args) ? row.args.findIndex((arg) => String(arg) === 'run') : -1;
+    const qualified = at >= 0 && typeof row.args[at + 1] === 'string' ? row.args[at + 1].trim() : '';
+    if (qualified === '') return false;
+    const found = await fetchSmitheryConfig(qualified);
+    if (!found?.schema) return false;
+    const next = { ...(row.config ?? {}), origin: 'smithery', via: 'cli-json', flag: '--config', schema: found.schema };
+    if (!Array.isArray(next.fields) || next.fields.length === 0) {
+      next.fields = smitheryFieldsOf({ ...row, config: next });
+    }
+    row.config = next;
+    return true;
+  }
+
+  /**
    * Fill in schemas for Smithery rows that were installed before one was known.
    *
    * Runs on 检查更新 — the one moment the user is already waiting on the network
@@ -1001,17 +1028,7 @@ export async function apply(ctx) {
     if (rows.length === 0) return 0;
     let healed = 0;
     await Promise.all(rows.map(async (row) => {
-      const at = Array.isArray(row.args) ? row.args.findIndex((arg) => String(arg) === 'run') : -1;
-      const qualified = at >= 0 && typeof row.args[at + 1] === 'string' ? row.args[at + 1].trim() : '';
-      if (qualified === '') return;
-      const found = await fetchSmitheryConfig(qualified);
-      if (!found?.schema) return;
-      const next = { ...(row.config ?? {}), origin: 'smithery', via: 'cli-json', flag: '--config', schema: found.schema };
-      if (!Array.isArray(next.fields) || next.fields.length === 0) {
-        next.fields = smitheryFieldsOf({ ...row, config: next });
-      }
-      row.config = next;
-      healed += 1;
+      if (await healSmitheryRow(row)) healed += 1;
     }));
     if (healed > 0) log?.info?.(`overall-mcp: filled in the configuration schema for ${healed} Smithery row(s)`);
     return healed;
@@ -2956,6 +2973,39 @@ export async function apply(ctx) {
           from: typeof from === 'string' && from !== '' ? from : null,
           actor: 'user',
         }));
+      })],
+      // 「打开配置」这一步就该把要求问清楚. A row can know it takes configuration
+      // (a Smithery entry: `--config` is visible in its args) without knowing
+      // *what* — installed before the detail endpoint was consulted, or written
+      // by an older build. Showing the user a free-form form in that state is
+      // what they described as 「没有配置界面」: the server does declare a key,
+      // the panel just never asked. So ask here, on the click, and answer with
+      // the row as it is *now*: the form states the server's own requirements.
+      ['/api/overall-mcp/config-hints', ['POST'], guard(async (req) => {
+        const { name, slot } = await readBody(req);
+        if (typeof name !== 'string' || name === '') return json({ error: 'name (string) required' }, 400);
+        const rows = registry.servers ?? [];
+        const row = Number.isInteger(slot) && rows[slot]?.name === name
+          ? rows[slot]
+          : rows.find((s) => s.name === name) ?? null;
+        if (!row) return json({ error: `no such server: ${name}` }, 404);
+        let healed = false;
+        try {
+          healed = await healSmitheryRow(row);
+        } catch (err) {
+          // A registry that cannot be reached is not an error the user needs to
+          // see here: the form still opens, it just has nothing to declare.
+          log?.warn?.(`overall-mcp: could not read the configuration hints for ${name}: ${err?.message ?? err}`);
+        }
+        if (healed) {
+          await save();
+          emit({ kind: 'config', action: 'hints', target: name, healed: true });
+        }
+        const { servers } = await serversPayload();
+        const fresh = (Number.isInteger(slot) ? servers[slot] : null)
+          ?? servers.find((s) => s.name === name)
+          ?? null;
+        return json({ healed, server: fresh });
       })],
       ['/api/overall-mcp/set-source-enabled', ['POST'], guard(async (req) => {
         const { source, enabled } = await readBody(req);

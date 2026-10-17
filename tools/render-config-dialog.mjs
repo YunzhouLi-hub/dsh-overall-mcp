@@ -123,7 +123,12 @@ for (const [label, server] of [['declared', declaredRow], ['bare', bareRow]]) {
 {
   const all = textOf(__test.ConfigDialog({ server: bareRow, onClose: () => {}, onSaved: async () => {} }));
   assert.ok(all.includes('其他键值'), 'bare row: no way to add a key by hand');
-  assert.ok(all.includes('这个来源没有声明配置项'), 'bare row: the sheet overclaims a declaration');
+  // 「不用配置」 is an answer, not a shrug: the sheet says it looked and found
+  // nothing declared, instead of leaving the reader to wonder if it gave up.
+  assert.ok(all.includes('没有声明要填的配置项'), 'bare row: the sheet does not say why it is empty');
+  assert.ok(all.includes('都查过了'), 'bare row: the sheet does not say where it looked');
+  // …and it may not borrow the Smithery line: no Smithery row was asked here.
+  assert.ok(!all.includes('已向 Smithery 确认'), 'bare row: it claims a source that never answered');
   assert.ok(!all.includes('还缺'), 'bare row: nothing is missing, so nothing may be reported missing');
 }
 

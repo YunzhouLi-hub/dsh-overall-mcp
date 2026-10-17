@@ -1654,3 +1654,93 @@ async function quietEvidence(call, { polls = 60, everyMs = 5 } = {}) {
   }
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// 「配置界面该由 MCP 的要求决定」.
+// ---------------------------------------------------------------------------
+// A Smithery row installed before its detail was consulted knows that it takes
+// configuration (`--config` is right there in its args) and nothing about what
+// it takes. The sheet used to open on that row with an empty free-form form and
+// the line 「这个来源没有声明配置项」 — which read as this panel giving up, over a
+// server that does declare a required key. The click now asks the source, so the
+// form is the server's own list of requirements, and 「不用配置」 is only ever
+// said after the source has answered.
+test('opening 配置 asks Smithery for the requirements a row was installed without', async () => {
+  const registry = {
+    version: 1,
+    servers: [{
+      name: 'brave-search',
+      source: 'catalog:smithery',
+      transport: 'stdio',
+      enabled: false,
+      command: 'npx',
+      args: ['-y', '@smithery/cli', 'run', 'brave'],
+      // Written by an older build: the channel is known, the requirements are not.
+      config: { fields: [], origin: 'smithery', via: 'cli-json', flag: '--config' },
+    }],
+  };
+  const asked = [];
+  await withFetchStub(async (url) => {
+    asked.push(String(url));
+    return new Response(JSON.stringify({
+      qualifiedName: 'brave',
+      remote: true,
+      connections: [{
+        type: 'http',
+        deploymentUrl: 'https://brave.run.tools',
+        configSchema: {
+          type: 'object',
+          required: ['braveApiKey'],
+          properties: { braveApiKey: { type: 'string', title: 'Brave API Key' } },
+        },
+      }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }, async () => {
+    await withHost(registry, async ({ call, readRegistry }) => {
+      const reply = await call('/api/overall-mcp/config-hints', { body: { name: 'brave-search', slot: 0 } });
+      assert.equal(reply.status, 200);
+      assert.equal(reply.body.healed, true);
+      assert.deepEqual(asked, ['https://registry.smithery.ai/servers/brave']);
+      const row = reply.body.server;
+      // The sheet is opened on this row: it must name the required key, not offer
+      // a blank line where a key belongs.
+      assert.equal(row.config.origin, 'smithery');
+      assert.equal(row.channel, 'cli-json');
+      assert.deepEqual(row.config.fields.map((f) => f.key), ['braveApiKey']);
+      assert.deepEqual(row.config.missing, ['braveApiKey']);
+      assert.equal(row.config.fields[0].required, true);
+      assert.equal(row.needConfig, true);
+      // Written down, so the next click costs no request — and the row keeps the
+      // channel it needs to deliver the value.
+      const saved = await readRegistry();
+      assert.equal(saved.servers[0].config.via, 'cli-json');
+      assert.equal(saved.servers[0].config.flag, '--config');
+      assert.deepEqual(saved.servers[0].config.schema.required, ['braveApiKey']);
+      const again = await call('/api/overall-mcp/config-hints', { body: { name: 'brave-search', slot: 0 } });
+      assert.equal(again.body.healed, false);
+      assert.equal(asked.length, 1);
+    });
+  });
+});
+
+// A row that names no source at all is not an error: the sheet still opens, it
+// just has nothing to declare. What it must not do is claim to have asked.
+test('a row nothing can be asked about answers with itself, unhealed', async () => {
+  const registry = {
+    version: 1,
+    servers: [{ name: 'fs', source: 'manual', transport: 'stdio', enabled: false, command: 'my-own-fs', args: ['--root', '.'] }],
+  };
+  let requests = 0;
+  await withFetchStub(async () => { requests += 1; throw new Error('no network in this test'); }, async () => {
+    await withHost(registry, async ({ call }) => {
+      const reply = await call('/api/overall-mcp/config-hints', { body: { name: 'fs', slot: 0 } });
+      assert.equal(reply.status, 200);
+      assert.equal(reply.body.healed, false);
+      assert.equal(reply.body.server.name, 'fs');
+      assert.equal(reply.body.server.config, null);
+      assert.equal(requests, 0);
+      const missing = await call('/api/overall-mcp/config-hints', { body: { name: 'nope', slot: 0 } });
+      assert.equal(missing.status, 404);
+    });
+  });
+});

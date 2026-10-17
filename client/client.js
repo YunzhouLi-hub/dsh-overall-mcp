@@ -1217,7 +1217,13 @@ window.__ModuleLoader__.load({
 					? "这些字段来自 Smithery 为这台服务器声明的配置；保存后以 --config 的 JSON 交给 CLI。"
 					: server.config?.origin === "args"
 						? "这个来源没有声明配置项；下面是从它的启动命令里识别出的变量名。"
-						: "这个来源没有声明配置项：留空即可，只有服务需要令牌时才要填。";
+						// Nothing declared is a legitimate answer, and it means the
+						// server works without configuration — not that this sheet
+						// failed to find out. Say which of the two happened, because
+						// 「留空即可」 read as a shrug over a server that does need a key.
+						: server.channel === "cli-json"
+							? "已向 Smithery 确认：这台服务器没有声明要填的配置项，不填也能启动；下面的空行留给你补额外变量。"
+							: "官方注册表、启动命令、来源详情都查过了：这台服务器没有声明要填的配置项，不填也能启动；下面的空行留给你补额外变量。";
 			const missing = result?.missing ?? server.config?.missing ?? [];
 
 			useEffect(() => {
@@ -3487,7 +3493,32 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, onI
 			// Opening the sheet is the whole click; the save is the sheet's own
 			// POST, because only it holds the values (and only it knows which of
 			// them was actually touched).
-			const doConfigure = (server) => setConfigTarget(server);
+			//
+			// One detour first: a row knows it takes configuration without knowing
+			// what it takes (a Smithery entry installed before its schema was
+			// fetched). Opening an empty form there is the 「装了却没有配置界面」
+			// complaint — the server does declare a key, nobody asked. So ask, once,
+			// on the click, and open whatever the row says afterwards.
+			const doConfigure = async (server) => {
+				if (!server.config && server.channel === "cli-json") {
+					try {
+						const reply = await api("/config-hints", {
+							method: "POST",
+							body: JSON.stringify(rowRef(server)),
+							timeoutMs: 8000,
+						});
+						if (reply?.server) {
+							setConfigTarget(reply.server);
+							return;
+						}
+					} catch {
+						// Ask-a-source is best-effort: an unreachable registry must not
+						// stop the sheet from opening, it only means it has nothing to
+						// declare yet.
+					}
+				}
+				setConfigTarget(server);
+			};
 			const afterConfigure = async () => {
 				// The reply already carries the fresh row list; refetch anyway so
 				// badges and counts on the page agree with the registry file.
