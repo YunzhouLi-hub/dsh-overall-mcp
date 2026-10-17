@@ -1111,7 +1111,20 @@ assert.ok(registryNodes.some((n) => n.type === 'button' && textOf(n) === '重新
   // the market tab must not grow a second filled button for the same click.
   assert.equal(findByKey(afterCheck, 'hd-primary').length, 0,
     'the market tab does not duplicate the self-update as a primary button');
-  console.log('page head renders: brand mark, title + version, sub-line, chip self-update ✓');
+  // 「点个 star」 is the one invitation on the page: beside the version it
+  // would be starring, a real link (the renderer's own navigation rules
+  // apply), opening beside the panel rather than replacing it.
+  for (const [tabName, tree] of [['registry', registry], ['market', market]]) {
+    const star = findByKey(tree, 'hd-star')[0];
+    assert.ok(star, `the ${tabName} tab loses 点个 star`);
+    assert.equal(star.type, 'a', 'the star is a link, not a button with a handler');
+    assert.equal(star.props.href, 'https://github.com/YunzhouLi-hub/dsh-overall-mcp',
+      'the star points at this plugin repository');
+    assert.equal(star.props.target, '_blank', 'the star opens beside the panel');
+    assert.equal(star.props.rel, 'noreferrer', 'and does not leak the panel URL to GitHub');
+    assert.equal(textOf(star), '点个 star', 'the label says what the click does');
+  }
+  console.log('page head renders: brand mark, title + version, sub-line, chip self-update, star ✓');
 }
 
 // --- 6c. which build is running, and what it has been doing ----------------

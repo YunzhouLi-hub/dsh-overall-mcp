@@ -59,7 +59,11 @@ window.__ModuleLoader__.load({
 		// probe also checks CHANGELOG.md's newest section is this version, since
 		// a release note that stops at an older build tells a reader what
 		// changed in code they are not running.
-		const CLIENT_VERSION = "0.6.0";
+		const CLIENT_VERSION = "0.7.0";
+		// Where 「点个 star」 points. A constant, not a config: it is this
+		// plugin's own repository, and a panel that could be pointed at another
+		// repository would be asking for a star it does not deserve.
+		const REPO_URL = "https://github.com/YunzhouLi-hub/dsh-overall-mcp";
 		// The bundle's npm package name — what the profile lists in its
 		// `dsh.profile.bundles` and what its bundle page is keyed by. The
 		// bundle cannot read package.json at runtime, so `tools/client-smoke.mjs`
@@ -396,6 +400,23 @@ window.__ModuleLoader__.load({
 			// v4 states the version as plain muted text beside the title, not as
 			// a chip: it is a fact about the page, not a status to decode.
 			versionChip: { fontSize: 12, color: T.text3, fontWeight: 500, whiteSpace: "nowrap" },
+			// 「点个 star」: a capsule in the identity row. The resting look is
+			// inline so a renderer without the injected sheet still shows a
+			// proper pill; the hover motion lives in ensureStyles, because
+			// :hover and keyframes are not things an inline style can say.
+			star: {
+				display: "inline-flex", alignItems: "center", gap: 5, height: 24,
+				padding: "0 10px", borderRadius: 999, overflow: "hidden",
+				border: `1px solid ${T.line}`, background: "rgba(255,125,0,.06)",
+				color: T.text2, fontSize: 12, fontWeight: 500, lineHeight: 1,
+				textDecoration: "none", whiteSpace: "nowrap", position: "relative",
+				transition: "transform .16s ease, border-color .16s ease, background .16s ease, box-shadow .16s ease",
+			},
+			starIcon: {
+				display: "block", color: T.amber, position: "relative", zIndex: 1,
+				transition: "transform .24s cubic-bezier(.2,.9,.3,1.4)",
+			},
+			starLabel: { position: "relative", zIndex: 1 },
 			pageSub: { display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", minWidth: 0 },
 			pageSubText: { margin: 0, fontSize: 12.5, color: T.text3 },
 			headActs: { display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", flexShrink: 0 },
@@ -1534,6 +1555,27 @@ window.__ModuleLoader__.load({
 				".omkt-media-nav:hover{background:rgba(128,128,128,.16)}",
 				"@keyframes omkt-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}",
 				"@keyframes omkt-fade{from{opacity:0}to{opacity:1}}",
+				// 「点个 star」: quiet at rest, alive under the cursor. The star
+				// pops and tips, a warm ring lifts the capsule off the header
+				// line, and one sheen crosses it — three cues for one small
+				// control, none of them running while nothing points at it.
+				".omkt-star:hover{transform:translateY(-1px);border-color:rgba(255,125,0,.55);"
+					+ "background:rgba(255,125,0,.12);box-shadow:0 2px 10px rgba(255,125,0,.18);color:" + T.text + "}",
+				".omkt-star:hover svg{transform:scale(1.18) rotate(-12deg)}",
+				".omkt-star:active{transform:translateY(0) scale(.97)}",
+				`.omkt-star:focus-visible{outline:2px solid ${T.amber};outline-offset:2px}`,
+				// The sheen is a pseudo element so it cannot push the label
+				// around; the label and the star paint above it (z-index 1,
+				// inline) and it is inert to the pointer.
+				".omkt-star::after{content:\"\";position:absolute;inset:0;transform:translateX(-120%);"
+					+ "background:linear-gradient(105deg,transparent 25%,rgba(255,255,255,.45) 50%,transparent 75%);"
+					+ "pointer-events:none}",
+				".omkt-star:hover::after{animation:omkt-star-sheen .6s ease}",
+				"@keyframes omkt-star-sheen{to{transform:translateX(120%)}}",
+				// Motion is decoration: a reader who asked for less still gets
+				// the warm ring, and nothing moves.
+				"@media (prefers-reduced-motion:reduce){"
+					+ ".omkt-star,.omkt-star svg,.omkt-star::after{transition:none;animation:none}}",
 			].join("\n");
 			document.head.appendChild(el);
 		}
@@ -2290,14 +2332,6 @@ window.__ModuleLoader__.load({
 			}, label);
 		}
 
-		/**
-		 * The page's brand mark: a constellation hub — one accent centre with
-		 * five satellites, i.e. "many servers, one registry".
-		 *
-		 * The satellites and spokes are `currentColor` (the prototype hard-codes
-		 * near-black, which vanishes in the dark theme); only the hub keeps the
-		 * brand blue, so the accent stays a single point.
-		 */
 		// One row of the registry, addressed by position. Two rows can carry the
 		// same server name (the same config file can define it twice), and an
 		// answer about one of them is not an answer about the other. Falls back
@@ -2306,6 +2340,42 @@ window.__ModuleLoader__.load({
 			return row?.slot ?? row?.name;
 		}
 
+		/**
+		 * The one control on this page that asks for nothing and gives nothing
+		 * back: a star. It sits in the identity row because it is about the
+		 * plugin itself, not about the roster — and because a star bar at the
+		 * bottom of a scroll container is a control nobody reaches.
+		 *
+		 * A real `<a>` with `rel="noreferrer"`, not a click handler: the
+		 * renderer's own navigation rules apply, and the label says where it
+		 * goes.
+		 */
+		function starPill() {
+			return createElement("a", {
+				key: "hd-star", className: "omkt-star", style: styles.star,
+				href: REPO_URL, target: "_blank", rel: "noreferrer",
+				title: "在 GitHub 上给 dsh-overall-mcp 点个 star",
+				"aria-label": "在 GitHub 上给 dsh-overall-mcp 点个 star",
+			}, [
+				createElement("svg", {
+					key: "s", width: 14, height: 14, viewBox: "0 0 24 24",
+					"aria-hidden": "true", focusable: "false", style: styles.starIcon,
+				}, createElement("path", {
+					d: "M12 2.7l2.86 5.8 6.4.93-4.63 4.51 1.1 6.37L12 17.3l-5.73 3.01 1.1-6.37L2.74 9.43l6.4-.93z",
+					fill: "currentColor",
+				})),
+				createElement("span", { key: "t", style: styles.starLabel }, "点个 star"),
+			]);
+		}
+
+		/**
+		 * The page's brand mark: a constellation hub — one accent centre with
+		 * five satellites, i.e. "many servers, one registry".
+		 *
+		 * The satellites and spokes are `currentColor` (the prototype hard-codes
+		 * near-black, which vanishes in the dark theme); only the hub keeps the
+		 * brand blue, so the accent stays a single point.
+		 */
 		function brandMark(size = 22, decorative = false) {
 			const dot = (cx, cy, r) => createElement("circle", { key: `c${cx}-${cy}`, cx, cy, r, fill: "currentColor" });
 			return createElement("svg", {
@@ -4059,6 +4129,11 @@ window.__ModuleLoader__.load({
 									onClick: doSelfUpdate,
 								}, busy ? "更新中…" : `更新到 v${selfUpdate.latest}`)
 								: null,
+							// 「点个 star」 follows the version it would be starring,
+							// and only when the identity row has room: it is an
+							// invitation, not one of the page's controls, so it is
+							// last in the run and carries no fill.
+							starPill(),
 						]),
 						createElement("div", { key: "hd-acts", style: styles.headActs }, [
 							// The filled button is the *registry* tab's one
