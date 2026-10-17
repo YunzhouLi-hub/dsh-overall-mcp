@@ -18,6 +18,7 @@ import assert from 'node:assert/strict';
 import {
   applyValues, argFields, configSpecFor, configState, fieldGaps, looksLikeCredentialFailure,
   maskedFields, normalizeField, officialFields, remoteFields, specOf, MAX_VALUE_CHARS,
+  RESERVED_HEADERS, CODE_LOADING_ENV_VARS, redactEchoValue,
 } from '../lib/server-config.js';
 
 /** The official registry record for github/github-mcp-server, verified live. */
@@ -152,7 +153,7 @@ test('writing a value updates the right bag, and an empty string clears it', () 
     headers: { Authorization: 'Bearer abc' },
   });
   assert.deepEqual(rejected, []);
-  assert.deepEqual(entry.env, { NEW_KEY: ' v ' });
+  assert.deepEqual(entry.env, { NEW_KEY: 'v' });
   assert.deepEqual(entry.headers, { Authorization: 'Bearer abc' });
   assert.deepEqual(changed.map((c) => `${c.kind}:${c.key}:${c.action}`).sort(),
     ['env:NEW_KEY:set', 'env:OLD:cleared', 'header:Authorization:set']);
@@ -187,8 +188,9 @@ test('an unchanged value is not reported as a change', () => {
 
 test('an oversized value is capped instead of stored whole', () => {
   const entry = {};
-  applyValues(entry, { env: { BIG: 'x'.repeat(MAX_VALUE_CHARS + 10) } });
+  const { changed } = applyValues(entry, { env: { BIG: 'x'.repeat(MAX_VALUE_CHARS + 10) } });
   assert.equal(entry.env.BIG.length, MAX_VALUE_CHARS);
+  assert.equal(changed[0].action, 'truncated');
 });
 
 test('the failure classifier knows identity errors from everything else', () => {
@@ -222,4 +224,133 @@ test('a stored spec is read back without re-deriving it', () => {
   assert.deepEqual(fieldGaps(spec, entry).missing, ['GH_TOKEN']);
   // An entry with no stored spec falls back to its own command line.
   assert.equal(specOf({ command: 'npx', args: ['-y', 'pkg'] }), null);
+});
+
+test('applyValues trims values and marks truncation as action: truncated', () => {
+  const entry = {};
+  const { changed } = applyValues(entry, {
+    env: {
+      SPACED: '  ghp_token123  ',
+      OVERSIZED: 'a'.repeat(MAX_VALUE_CHARS + 50),
+    },
+  });
+  assert.equal(entry.env.SPACED, 'ghp_token123');
+  assert.equal(entry.env.OVERSIZED.length, MAX_VALUE_CHARS);
+  const byKey = Object.fromEntries(changed.map((c) => [c.key, c]));
+  assert.equal(byKey.SPACED.action, 'set');
+  assert.equal(byKey.OVERSIZED.action, 'truncated');
+});
+
+test('model actor cannot configure code execution env vars, while user actor can', () => {
+  const modelEntry = {};
+  const { changed: mChanged, rejected: mRejected } = applyValues(modelEntry, {
+    env: {
+      NODE_OPTIONS: '--require /tmp/x.js',
+      PATH: '/bin:/usr/bin',
+      SAFE_TOKEN: 'secret',
+    },
+  }, { actor: 'model' });
+  assert.equal(mChanged.length, 1);
+  assert.equal(modelEntry.env.SAFE_TOKEN, 'secret');
+  assert.equal(modelEntry.env.NODE_OPTIONS, undefined);
+  assert.equal(modelEntry.env.PATH, undefined);
+  assert.equal(mRejected.length, 2);
+  assert(mRejected.every((r) => r.reason.includes('代码执行')));
+
+  const userEntry = {};
+  const { changed: uChanged, rejected: uRejected } = applyValues(userEntry, {
+    env: {
+      NODE_OPTIONS: '--require /tmp/x.js',
+      PATH: '/bin:/usr/bin',
+    },
+  }, { actor: 'user' });
+  assert.equal(uRejected.length, 0);
+  assert.equal(userEntry.env.NODE_OPTIONS, '--require /tmp/x.js');
+  assert.equal(userEntry.env.PATH, '/bin:/usr/bin');
+  assert.equal(uChanged.length, 2);
+});
+
+test('reserved transport headers are rejected', () => {
+  const entry = {};
+  const { changed, rejected } = applyValues(entry, {
+    headers: {
+      Host: 'evil.com',
+      'Content-Length': '100',
+      'Transfer-Encoding': 'chunked',
+      Connection: 'close',
+      Upgrade: 'websocket',
+      TE: 'trailers',
+      Trailer: 'X-Foo',
+      Authorization: 'Bearer ok',
+    },
+  });
+  assert.equal(changed.length, 1);
+  assert.equal(entry.headers.Authorization, 'Bearer ok');
+  assert.equal(entry.headers.Host, undefined);
+  assert.equal(rejected.length, 7);
+  assert(rejected.every((r) => r.reason.includes('保留请求头')));
+
+  assert.equal(normalizeField({ key: 'Host', kind: 'header' }), null);
+  assert.equal(normalizeField({ key: 'content-length', kind: 'header' }), null);
+});
+
+test('argFields longest-first alternation avoids regex misparses', () => {
+  // --environment=GITHUB_TOKEN must extract GITHUB_TOKEN, not ironment
+  const specLong = argFields({
+    command: 'docker',
+    args: ['run', '--environment=GITHUB_TOKEN', 'image'],
+  });
+  assert.equal(specLong.fields[0].key, 'GITHUB_TOKEN');
+  assert.equal(specLong.fields[0].required, true);
+  assert.equal(specLong.fields[0].secret, true);
+
+  // -eslint must not extract slint
+  const specEslint = argFields({
+    command: 'npx',
+    args: ['-eslint', 'foo'],
+  });
+  assert.equal(specEslint, null);
+
+  // -e GITHUB_TOKEN must be required and secret
+  const specShort = argFields({
+    command: 'docker',
+    args: ['run', '-e', 'GITHUB_TOKEN', 'image'],
+  });
+  assert.equal(specShort.fields[0].key, 'GITHUB_TOKEN');
+  assert.equal(specShort.fields[0].required, true);
+  assert.equal(specShort.fields[0].secret, true);
+});
+
+test('redactEchoValue masks userinfo and sensitive query parameters', () => {
+  assert.equal(
+    redactEchoValue('https://user:mypassword@example.com/api'),
+    'https://user:••••@example.com/api',
+  );
+  assert.equal(
+    redactEchoValue('https://example.com/path?api_key=secret123&other=val'),
+    'https://example.com/path?api_key=••••&other=val',
+  );
+  assert.equal(
+    redactEchoValue('https://example.com/path?token=ghp_xyz&foo=bar'),
+    'https://example.com/path?token=••••&foo=bar',
+  );
+  assert.equal(
+    redactEchoValue('https://example.com/path?access_token=secret_abc'),
+    'https://example.com/path?access_token=••••',
+  );
+  assert.equal(
+    redactEchoValue('https://plain.example.com/api/v1'),
+    'https://plain.example.com/api/v1',
+  );
+});
+
+test('normalizeField defaults secret: true when isSecret is omitted for credential-named fields', () => {
+  const tokenField = normalizeField({ key: 'SERVICE_AUTH_TOKEN' });
+  assert.equal(tokenField.secret, true);
+
+  const apiKeyField = normalizeField({ key: 'API_KEY' });
+  assert.equal(apiKeyField.secret, true);
+
+  const headlessField = normalizeField({ key: 'HEADLESS' });
+  assert.equal(headlessField.secret, false);
 });

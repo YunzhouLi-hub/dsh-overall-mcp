@@ -484,6 +484,49 @@ test('a configure on a duplicated name is refused, and slot picks the row', asyn
   });
 });
 
+test('configure notes rejections when all values are rejected', async () => {
+  await withHost(CONFIG_FIXTURE, async ({ call }) => {
+    const res = await call('/api/overall-mcp/configure', {
+      body: { name: 'gh', slot: 0, headers: { Host: 'evil.com' } },
+    });
+    assert.equal(res.body.saved, false);
+    assert.equal(res.body.rejected.length, 1);
+    assert.match(res.body.note, /未写入任何配置.*Host/);
+  });
+});
+
+test('overall_mcp_configure tool runs as actor: model and blocks code execution env vars', async () => {
+  await withHost(CONFIG_FIXTURE, async ({ tools }) => {
+    const tool = tools.get('overall_mcp_configure');
+    assert(tool, 'overall_mcp_configure tool must be registered');
+    const result = await tool.execute({
+      name: 'gh',
+      slot: 0,
+      env: {
+        NODE_OPTIONS: '--require /tmp/x.js',
+        SAFE_VAR: 'hello',
+      },
+    });
+    assert.equal(result.saved, true);
+    assert.equal(result.changed.length, 1);
+    assert.equal(result.changed[0].key, 'SAFE_VAR');
+    assert.equal(result.rejected.length, 1);
+    assert.equal(result.rejected[0].key, 'NODE_OPTIONS');
+    assert.match(result.note, /以下配置未写入.*NODE_OPTIONS/);
+  });
+});
+
+test('configure reports truncated note when value exceeds MAX_VALUE_CHARS', async () => {
+  await withHost(CONFIG_FIXTURE, async ({ call }) => {
+    const res = await call('/api/overall-mcp/configure', {
+      body: { name: 'gh', slot: 0, env: { SAFE_VAR: 'x'.repeat(5000) } },
+    });
+    assert.equal(res.body.saved, true);
+    assert.equal(res.body.changed[0].action, 'truncated');
+    assert.match(res.body.note, /超过 4096 字符，已截断保存/);
+  });
+});
+
 /** The chunk sequence a model stream yields for a plain text answer. */
 function textStream(text) {
   return [

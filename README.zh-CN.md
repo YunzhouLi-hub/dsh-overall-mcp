@@ -154,7 +154,7 @@ dsh plugin --profile web add ./dsh-overall-mcp
 一个服务器可以「装上了、挂上了、显示已连接」，然后每一次 `tools/call` 都回 `401`——因为 token 从没填过。在这一轮之前，第一条提示就是那次坏掉的工具调用。现在配置声明在安装时读出、随行存储、在点任何东西之前就摆出来。
 
 - **声明从哪来**（`lib/server-config.js`）：官方 Registry 的 `packages[].environmentVariables[]`（名字、说明、`isRequired`、`isSecret`）与 `remotes[].headers[]`；其他所有来源读条目**自己的启动方式**——`-e NAME` / `--env NAME`、命令/参数/地址里的 `$NAME` / `${NAME}` / `{NAME}` 占位符、以及裸的凭据形状名字（例如 `GITHUB_PERSONAL_ACCESS_TOKEN`，官方 GitHub 镜像就是这么启的）。`streamable-http`/`sse` 条目固定给一个**可选**的 `Authorization` 头：多数远程端点匿名可用，一个没人能填的必填项会让每一台都显得坏掉。多路声明取并集，`origin` 记最强证据（`official` > `args` > `manual`）；什么都没声明的行根本不带 `config`。
-- **存下来，不反复猜**：声明写进注册表条目（`config: { origin, fields }`），徽标重启后还在，手改过的配置文件也不会被二次判断。只有**必填**项为空才算「还差配置」；可选为空是提示，不是问题。
+- **存下来，不反复猜**：声明写进注册表条目（`config: { origin, fields }`），徽标重启后还在，手改过的配置文件也不会被二次判断。注册表文件以 `0o600` 权限存储并在读取时收紧权限；凭据明文保存在本机该文件中，依赖文件系统权限保护。只有**必填**项为空才算「还差配置」；可选为空是提示，不是问题。
 - **只出掩码**：`GET /servers` 带 `config: { origin, fields: [{key, kind, label, help, required, secret, hasValue, value}], missing, pending }` 与逐行 `needConfig`，另加「已启用且还差配置」的行数。密钥有值回 `••••`、没有回 `''`；非密钥（例如 base URL）原样回显，读的人才能看出这行指着哪个环境。`env`/`headers` 本身永不出现在任何响应里。
 - **表单**：有配置声明的行多一颗 **配置**；缺必填值的行再加 **待配置** 徽标，按钮用主色，页顶只写一次「有 N 台服务器装好了但还差配置」并给「去配置」快捷入口。弹层按声明列出字段（掩码输入、标「必填」），底部留一行自定义键值，保存走 `POST /configure`：写入后**只重挂本来就启用的行**（停用行保持停用）；空字符串等于删除该键（清除）；什么都没改动时如实回「没有需要写入的值」，不谎报已保存。
 - **安装即打开表单**：声明的必填项还空着时，条目以「待配置」装好，回复带 `needConfig` 与 `config.missing`，面板为刚写入的那一行直接打开弹层。这种失败**不问模型**（`diagnosisSkipped: 'needs-config'`），凭据形状的挂载错误同样不问：目录已经写明缺哪个键，再让模型从 `401` 反推只会更慢更差。

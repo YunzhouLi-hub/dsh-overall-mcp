@@ -99,10 +99,12 @@ function dataDir() {
  * silent loss unmounts every server — was still written in place.
  */
 async function writeJson(file, value) {
-  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const tmp = `${file}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(value, null, 2), 'utf8');
+  await fs.writeFile(tmp, JSON.stringify(value, null, 2), { encoding: 'utf8', mode: 0o600 });
+  try { await fs.chmod(tmp, 0o600); } catch {}
   await fs.rename(tmp, file);
+  try { await fs.chmod(file, 0o600); } catch {}
 }
 
 /**
@@ -115,6 +117,7 @@ async function readRegistryDocument(file) {
   let raw;
   try {
     raw = await fs.readFile(file, 'utf8');
+    try { await fs.chmod(file, 0o600); } catch {}
   } catch (err) {
     if (err?.code === 'ENOENT') return { registry: null, damaged: null };
     return { registry: null, damaged: String(err?.message ?? err) };
@@ -1045,14 +1048,18 @@ export async function apply(ctx) {
    * @param options - `{ slot, from }` to address one of several same-named rows.
    * @returns the masked config, the mount verdict, and what is still missing.
    */
-  async function doConfigureImpl(name, values, { slot = null, from = null } = {}) {
+  async function doConfigureImpl(name, values, { slot = null, from = null, actor = 'user' } = {}) {
     const entry = resolveEntry(name, { slot, from });
     const before = configState(specOf(entry), entry);
-    const { changed, rejected } = applyValues(entry, values ?? {});
+    const { changed, rejected } = applyValues(entry, values ?? {}, { actor });
     if (changed.length === 0) {
       // Nothing was written, so nothing is saved and nothing is remounted. A
       // reply saying 「已保存」 here would be the lie that makes the badge stay on
       // with no explanation.
+      let note = '没有需要写入的值（空值等于清除，未填写任何内容）。';
+      if (rejected.length > 0) {
+        note = `未写入任何配置：${rejected.map((r) => `${r.key}（${r.reason}）`).join('；')}。`;
+      }
       return {
         name,
         changed: [],
@@ -1060,7 +1067,7 @@ export async function apply(ctx) {
         saved: false,
         config: maskedFields(specOf(entry), entry),
         needConfig: before?.needs === true,
-        ...(rejected.length === 0 ? { note: '没有需要写入的值（空值等于清除，未填写任何内容）。' } : {}),
+        note,
       };
     }
     await save();
@@ -1081,6 +1088,13 @@ export async function apply(ctx) {
       ...(after?.needs ? { stillMissing: after.missing.length } : {}),
     });
     const notes = [];
+    const truncated = changed.filter((c) => c.action === 'truncated');
+    if (truncated.length > 0) {
+      notes.push(`配置项 ${truncated.map((c) => c.key).join('、')} 超过 4096 字符，已截断保存。`);
+    }
+    if (rejected.length > 0) {
+      notes.push(`以下配置未写入：${rejected.map((r) => `${r.key}（${r.reason}）`).join('；')}。`);
+    }
     if (externallyProvided(entry)) {
       notes.push(`${name} 的工具由另一个 mcp-client 挂载提供：值已写入本插件的注册表，但那一份挂载读的是它自己的配置，改动要等它重新加载才生效。`);
     }
@@ -1256,6 +1270,10 @@ export async function apply(ctx) {
     // 「无需更新」 about work nobody asked for. The panel always sends the row's
     // slot; an agent can do the same now (`slot`/`from` on overall_mcp_update).
     const entry = resolveEntry(name, { slot, from });
+    if (!entry.config) {
+      const spec = specOf(entry);
+      if (spec) entry.config = spec;
+    }
     const check = await checkEntryUpdate(entry);
     if (!check.detectable) throw new Error(`${name} is not launched through a package runner; update it manually`);
     if (check.error) throw new Error(`version lookup failed for ${check.pkg}: ${check.error}`);
@@ -1941,10 +1959,18 @@ export async function apply(ctx) {
    * `qualifiedName`, to build a link to its listing page). Everything the UI
    * shows is derived here instead of being forwarded wholesale.
    */
+  let backfilledSpecs = false;
   function annotateItem(item) {
     const entry = catalogItemToEntry(item);
     const name = entry?.name ?? null;
     const installed = name !== null && registry.servers.some((s) => s.name === name);
+    if (installed && entry?.config) {
+      const match = registry.servers.find((s) => s.name === name);
+      if (match && !match.config) {
+        match.config = entry.config;
+        backfilledSpecs = true;
+      }
+    }
     return {
       ...item,
       raw: undefined,
@@ -2117,12 +2143,17 @@ export async function apply(ctx) {
       errors: result.errors.length,
       ms: Date.now() - startedAt,
     });
+    const items = result.items
+      .map((item) => applyInstallEvidence(item, evidence.get(item.id)))
+      .map(annotateItem);
+    if (backfilledSpecs) {
+      backfilledSpecs = false;
+      await save();
+    }
     return {
       // Evidence first: `annotateItem` derives `installable` from the row's
       // install, so a recovered command has to be on the row before it runs.
-      items: result.items
-        .map((item) => applyInstallEvidence(item, evidence.get(item.id)))
-        .map(annotateItem),
+      items,
       errors: result.errors,
       // The panel prints one number per source beside 「共 N 条」, so it has to be
       // the number of *cards* that source is credited with after the merge — the
@@ -2442,6 +2473,7 @@ export async function apply(ctx) {
         return await doConfigure(name, { env, headers }, {
           slot: Number.isInteger(slot) ? slot : null,
           from: typeof from === 'string' && from !== '' ? from : null,
+          actor: 'model',
         });
       },
     }),
@@ -2741,6 +2773,7 @@ export async function apply(ctx) {
         return json(await doConfigure(name, { env, headers }, {
           slot: Number.isInteger(slot) ? slot : null,
           from: typeof from === 'string' && from !== '' ? from : null,
+          actor: 'user',
         }));
       })],
       ['/api/overall-mcp/set-source-enabled', ['POST'], guard(async (req) => {

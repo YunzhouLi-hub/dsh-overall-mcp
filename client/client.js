@@ -642,6 +642,10 @@ window.__ModuleLoader__.load({
 				padding: "1px 7px", borderRadius: 999, fontSize: 11.5, fontWeight: 600,
 				color: T.amber, background: T.soft2, whiteSpace: "nowrap", flexShrink: 0,
 			},
+			pendingBadge: {
+				padding: "1px 7px", borderRadius: 999, fontSize: 11.5, fontWeight: 500,
+				color: T.dim, background: T.soft, whiteSpace: "nowrap", flexShrink: 0,
+			},
 			configBanner: {
 				display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
 				padding: "9px 12px", borderRadius: 10, border: `1px solid ${T.line}`,
@@ -1070,7 +1074,12 @@ window.__ModuleLoader__.load({
 						key: "needcfg", style: styles.configBadge,
 						title: `还缺 ${configMissing.join("、") || "必填项"}：这台服务器的工具调用在填好并重新挂载前不会通。`,
 					}, "待配置")
-					: null,
+					: (server.config?.pending?.length > 0
+						? createElement("span", {
+							key: "pendingcfg", style: styles.pendingBadge,
+							title: `这台服务器还可配置 ${server.config.pending.join("、")}。`,
+						}, `可配置 ${server.config.pending.length} 项`)
+						: null),
 				badge
 					? createElement("span", { key: "newv", style: styles.updateBadge }, `可更新 → ${badge}`)
 					: orphan
@@ -1165,6 +1174,17 @@ window.__ModuleLoader__.load({
 					: "这个来源没有声明配置项：留空即可，只有服务需要令牌时才要填。";
 			const missing = result?.missing ?? server.config?.missing ?? [];
 
+			useEffect(() => {
+				const handleKeyDown = (e) => {
+					if (e.key === "Escape" || e.key === "Esc") {
+						e.stopPropagation();
+						onClose();
+					}
+				};
+				window.addEventListener("keydown", handleKeyDown);
+				return () => window.removeEventListener("keydown", handleKeyDown);
+			}, [onClose]);
+
 			const save = async () => {
 				setBusy(true); setError(""); setResult(null);
 				try {
@@ -1213,6 +1233,10 @@ window.__ModuleLoader__.load({
 								onClick: onClose, title: "关闭",
 							}, "关闭"),
 						]),
+						server.providedExternally
+							? createElement("div", { key: "extwarn", style: styles.warnLine },
+								`${server.name} 的工具由另一个 mcp-client 挂载提供：配置写入本插件的注册表，但那一份挂载读的是它自己的配置，改动不会立即反映在当前运行的工具中。`)
+							: null,
 						createElement("div", { key: "why", style: styles.fieldHelp }, originNote),
 						missing.length
 							? createElement("div", { key: "miss", style: styles.warnLine },
@@ -1221,52 +1245,60 @@ window.__ModuleLoader__.load({
 					]),
 
 					createElement("div", { key: "body", style: { display: "grid", gap: 12 } }, [
-						...fields.map((field) => createElement("div", {
-							key: `f:${idOf(field)}`, style: styles.fieldRow,
-						}, [
-							createElement("div", { key: "l", style: styles.fieldLabel }, [
-								createElement("span", { key: "k" }, field.label ?? field.key),
-								field.label && field.label !== field.key
-									? createElement("span", { key: "raw", style: styles.fieldOpt }, field.key)
+						...fields.map((field) => {
+							const inputId = `omkt-cfg-${server.name}-${field.kind}-${field.key}`;
+							const isClearing = dirty(field) && values[idOf(field)] === "";
+							return createElement("div", {
+								key: `f:${idOf(field)}`, style: styles.fieldRow,
+							}, [
+								createElement("label", { key: "l", htmlFor: inputId, style: { ...styles.fieldLabel, display: "flex", gap: 6, alignItems: "center", cursor: "pointer" } }, [
+									createElement("span", { key: "k" }, field.label ?? field.key),
+									field.label && field.label !== field.key
+										? createElement("span", { key: "raw", style: styles.fieldOpt }, field.key)
+										: null,
+									field.required
+										? createElement("span", { key: "r", style: styles.fieldReq }, "必填")
+										: createElement("span", { key: "o", style: styles.fieldOpt }, "可选"),
+									field.secret
+										? createElement("span", { key: "sec", style: styles.fieldOpt }, "· 密钥")
+										: null,
+									field.kind === "header"
+										? createElement("span", { key: "h", style: styles.fieldOpt }, "· 请求头")
+										: null,
+								]),
+								field.help
+									? createElement("div", { key: "h", style: styles.fieldHelp }, field.help)
 									: null,
-								field.required
-									? createElement("span", { key: "r", style: styles.fieldReq }, "必填")
-									: createElement("span", { key: "o", style: styles.fieldOpt }, "可选"),
-								field.secret
-									? createElement("span", { key: "sec", style: styles.fieldOpt }, "· 密钥")
-									: null,
-								field.kind === "header"
-									? createElement("span", { key: "h", style: styles.fieldOpt }, "· 请求头")
-									: null,
-							]),
-							field.help
-								? createElement("div", { key: "h", style: styles.fieldHelp }, field.help)
-								: null,
-							createElement("div", { key: "i", style: { display: "flex", gap: 6, alignItems: "center" } }, [
-								createElement("input", {
-									key: "in", className: "omkt-input",
-									style: styles.fieldInput,
-									type: field.secret ? "password" : "text",
-									value: dirty(field) ? values[idOf(field)] : "",
-									placeholder: field.hasValue
-										? (field.secret ? "已保存（不显示明文；留空＝不改）" : "已保存")
-										: (field.required ? "必填" : "可选"),
-									autoComplete: "off", spellCheck: false,
-									onChange: (e) => setValue(field, e.target.value),
-								}),
-								field.hasValue
-									? createElement("button", {
-										key: "clr", type: "button", className: "omkt-btn omkt-btn-outline",
-										style: styles.sourceMiniBtn, disabled: busy,
-										title: "保存时清除这个值",
-										onClick: () => clearValue(field),
-									}, "清除")
-									: null,
-								field.hasValue
-									? createElement("span", { key: "sv", style: styles.fieldSaved }, "已保存")
-									: null,
-							]),
-						])),
+								createElement("div", { key: "i", style: { display: "flex", gap: 6, alignItems: "center" } }, [
+									createElement("input", {
+										key: "in", id: inputId, className: "omkt-input",
+										style: styles.fieldInput,
+										type: field.secret ? "password" : "text",
+										value: dirty(field) ? values[idOf(field)] : "",
+										placeholder: isClearing
+											? "保存时将清除此项"
+											: (field.hasValue
+												? (field.secret ? "已保存（不显示明文；留空＝不改）" : (field.value || "已保存"))
+												: (field.required ? "必填" : "可选")),
+										autoComplete: "off", spellCheck: false,
+										onChange: (e) => setValue(field, e.target.value),
+									}),
+									field.hasValue
+										? createElement("button", {
+											key: "clr", type: "button", className: "omkt-btn omkt-btn-outline",
+											style: styles.sourceMiniBtn, disabled: busy,
+											title: "保存时清除这个值",
+											onClick: () => clearValue(field),
+										}, "清除")
+										: null,
+									isClearing
+										? createElement("span", { key: "sv", style: { ...styles.fieldSaved, color: T.amber, background: T.soft2 } }, "待清除")
+										: (field.hasValue
+											? createElement("span", { key: "sv", style: styles.fieldSaved }, "已保存")
+											: null),
+								]),
+							]);
+						}),
 						// A declaration can miss something (a provider that documents
 						// its variable nowhere). The form accepts the user's own keys:
 						// refusing them would mean this host knows better than the
@@ -1311,6 +1343,12 @@ window.__ModuleLoader__.load({
 						])),
 					]),
 
+					result?.rejected?.length
+						? createElement("div", { key: "rej", style: styles.warnLine }, [
+							createElement("div", { key: "rh", style: { fontWeight: 600 } }, "以下配置项未被保存："),
+							...result.rejected.map((r, i) => createElement("div", { key: `rej:${i}`, style: { fontSize: 12, marginTop: 2 } }, `• ${r.key}（${r.kind === "header" ? "请求头" : "环境变量"}）：${r.reason}`)),
+						])
+						: null,
 					result?.note
 						? createElement("div", { key: "note", style: styles.installFailure }, result.note)
 						: null,
@@ -3329,7 +3367,15 @@ window.__ModuleLoader__.load({
 			const afterConfigure = async () => {
 				// The reply already carries the fresh row list; refetch anyway so
 				// badges and counts on the page agree with the registry file.
-				await refresh();
+				const freshServers = await refresh();
+				if (configTarget) {
+					const all = Array.isArray(freshServers) ? freshServers : [];
+					const fresh = (Number.isInteger(configTarget.slot) ? all.find((s) => s.slot === configTarget.slot) : null)
+						?? all.find((s) => s.name === configTarget.name);
+					if (fresh) {
+						setConfigTarget(fresh);
+					}
+				}
 			};
 			// One action for the whole set of rows the last scan proved are gone:
 			// they are all the same kind of leftover, and removing them one by one
