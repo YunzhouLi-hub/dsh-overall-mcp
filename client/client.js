@@ -59,7 +59,7 @@ window.__ModuleLoader__.load({
 		// probe also checks CHANGELOG.md's newest section is this version, since
 		// a release note that stops at an older build tells a reader what
 		// changed in code they are not running.
-		const CLIENT_VERSION = "0.12.3";
+		const CLIENT_VERSION = "0.12.4";
 		// Where 「点个 star」 points. A constant, not a config: it is this
 		// plugin's own repository, and a panel that could be pointed at another
 		// repository would be asking for a star it does not deserve.
@@ -1560,7 +1560,7 @@ window.__ModuleLoader__.load({
 												style: styles.fieldLink,
 												title: field.helpUrl,
 												onClick: (e) => { e.stopPropagation(); openExternal(e, field.helpUrl); },
-											}, "去获取 →")
+											}, field.oauth ? "服务器页面 →" : "去获取 →")
 											: null,
 										field.resourceUrl
 											? createElement("a", {

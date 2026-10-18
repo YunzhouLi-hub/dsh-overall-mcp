@@ -1166,6 +1166,33 @@ export async function apply(ctx) {
     return healed;
   }
 
+  /** The host of an http(s) URL, or '' — the only part a form needs to name a server. */
+  function hostOfUrl(url) {
+    try {
+      return new URL(url).host;
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * A page a person can open for one endpoint.
+   *
+   * An OAuth-protected endpoint's `resource_metadata` document is not that
+   * page: it is JSON that says where the authorization server lives. What a
+   * reader can act on is the server's own listing — for a Smithery-hosted
+   * endpoint its page carries the 「connect」/requirements text, and the host
+   * pattern (`<name>--<owner>.run.tools`) names it without a lookup.
+   */
+  function humanPageFor(entry) {
+    const homepage = typeof entry?.homepage === 'string' ? entry.homepage : '';
+    if (/^https?:\/\//i.test(homepage)) return homepage;
+    const host = hostOfUrl(entry?.url);
+    const hosted = /^([a-z0-9][a-z0-9-]*)--([a-z0-9][a-z0-9-]*)\.run\.tools$/i.exec(host);
+    if (hosted) return `https://smithery.ai/servers/@${hosted[2]}/${hosted[1]}`;
+    return '';
+  }
+
   /**
    * Ask a hosted endpoint whether it wants a token, and turn the answer into the
    * one field that actually reaches it: an `Authorization` header.
@@ -1175,6 +1202,12 @@ export async function apply(ctx) {
    * tell (offline, `5xx`, an endpoint that rejects the probe), nothing is added:
    * an unproven requirement is exactly the 「每台远端都让填 token」 noise this
    * change exists to remove.
+   *
+   * Two demands look alike and are not: a `Bearer` challenge a key can satisfy,
+   * and a `401` whose `resource_metadata` names an OAuth authorization server —
+   * that one needs a browser login this plugin cannot perform. The second used
+   * to surface its metadata URL as 「去获取」, which opened raw JSON. It now says
+   * what it is and links the server's own page instead.
    */
   async function attachObservedAuth(entry) {
     if (!entry || entry.transport !== 'streamable-http' || typeof entry.url !== 'string') return;
@@ -1182,10 +1215,17 @@ export async function apply(ctx) {
     if (demand) entry.authDemand = demand;
     if (demand?.required !== true) return;
     const spec = configSpecFor(null, entry);
-    const help = [
-      demand.description ? `端点回了 401：${demand.description}` : '端点回了 401，要求证明身份。',
-      '按服务商的文档填，多数是 `Bearer <令牌>`。',
-    ].join(' ');
+    const authorizationHost = demand.oauth === true ? hostOfUrl(demand.authorizationServer) : '';
+    const help = demand.oauth === true
+      ? [
+        `端点回了 401，要的是 OAuth 登录${authorizationHost ? `（授权服务器 ${authorizationHost}）` : ''}。`,
+        '浏览器授权这一步插件走不完，装上也调不通；除非服务商另外发了 API key —— 那种情况把令牌按 `Bearer <令牌>` 填在这里就能用。',
+      ].join(' ')
+      : [
+        demand.description ? `端点回了 401：${demand.description}` : '端点回了 401，要求证明身份。',
+        '按服务商的文档填，多数是 `Bearer <令牌>`。',
+      ].join(' ');
+    const page = humanPageFor(entry);
     const field = normalizeField(
       {
         key: 'Authorization',
@@ -1195,16 +1235,41 @@ export async function apply(ctx) {
         required: true,
         secret: true,
         origin: 'observed',
-        // The endpoint's own authorization metadata stays a link instead of being
-        // pasted into the sentence: it explains *how* to authenticate, and it is
-        // not a page where a key is handed out — the two must not look alike.
-        resourceUrl: demand.resource,
+        ...(demand.oauth === true ? { oauth: true } : {}),
+        // A page a person can open — never the machine-readable metadata
+        // document: a link labelled 「去获取」 that lands on JSON is not a way to
+        // get anything.
+        ...(page ? { helpUrl: page } : {}),
       },
       { kind: 'header', origin: 'observed' },
     );
     if (!field) return;
     const rest = (spec?.fields ?? []).filter((existing) => existing.key !== 'Authorization');
     entry.config = { ...(entry.config ?? {}), origin: 'observed', via: 'header', fields: [field, ...rest] };
+  }
+
+  /**
+   * Rows written before the OAuth distinction keep the old field — a required
+   * `Authorization` whose link opened the metadata JSON. Re-probing them costs
+   * one request each and only happens for rows that still carry that shape.
+   */
+  async function healObservedAuths() {
+    const rows = Object.values(state.servers ?? {}).filter((row) => (
+      row?.transport === 'streamable-http'
+      && Array.isArray(row.config?.fields)
+      && row.config.fields.some((field) => typeof field.resourceUrl === 'string')
+    ));
+    if (rows.length === 0) return 0;
+    let healed = 0;
+    await Promise.all(rows.map(async (row) => {
+      try {
+        await attachObservedAuth(row);
+        if (!row.config?.fields?.some((field) => field.resourceUrl)) healed += 1;
+      } catch {
+        // A probe that failed leaves the row as it was; the next check retries.
+      }
+    }));
+    return healed;
   }
 
   async function doInstallImpl(item, { overwrite = false } = {}) {
@@ -1636,6 +1701,10 @@ export async function apply(ctx) {
     // the update verdicts above must not become an error because a detail
     // request for one row timed out.
     await backfillSmitheryConfigs();
+    // And the same click fixes the authorisation shape of rows written before
+    // the OAuth distinction: their link opened the metadata JSON.
+    const healedAuth = await healObservedAuths();
+    if (healedAuth > 0) log?.info?.(`overall-mcp: refreshed the authorization requirement of ${healedAuth} row(s)`);
     await save();
     return { ...result, ...(await serversPayload()) };
   }

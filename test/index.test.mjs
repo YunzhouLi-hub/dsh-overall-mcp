@@ -2054,3 +2054,77 @@ test('a failed detail request is reported as failed, not as a server without an 
     globalThis.fetch = real;
   }
 });
+
+test('an OAuth-protected endpoint links its own page, never the metadata JSON', async () => {
+  // The shape a reader actually hit: the required `Authorization` field carried
+  // `resourceUrl` = the RFC 9728 document, and 「去获取」 opened raw JSON. What is
+  // worth linking is the server's listing — for a Smithery-hosted endpoint the
+  // host pattern names it.
+  const detail = {
+    connections: [{ type: 'http', deploymentUrl: 'https://context7--upstash.run.tools', configSchema: { type: 'object', required: [], properties: {} } }],
+    remote: true,
+  };
+  const metadataUrl = 'https://context7--upstash.run.tools/.well-known/oauth-protected-resource';
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const href = String(url);
+    if (href.includes('registry.smithery.ai/servers/')) {
+      return { ok: true, status: 200, text: async () => '', json: async () => detail };
+    }
+    if (href === metadataUrl) {
+      return {
+        ok: true,
+        status: 200,
+        text: async () => '',
+        json: async () => ({ authorization_servers: ['https://auth.example.test/upstash/context7'], resource: 'https://context7--upstash.run.tools/' }),
+      };
+    }
+    if (href === 'https://context7--upstash.run.tools') {
+      return {
+        ok: false,
+        status: 401,
+        headers: {
+          get: (name) => (String(name).toLowerCase() === 'www-authenticate'
+            ? `Bearer error="invalid_token", resource_metadata="${metadataUrl}"`
+            : null),
+        },
+        text: async () => '',
+      };
+    }
+    return { ok: false, status: 404, text: async () => '', json: async () => ({}) };
+  };
+  try {
+    await withHost({ version: 1, servers: [] }, async ({ call, readRegistry }) => {
+      const install = await call('/api/overall-mcp/install', {
+        body: {
+          item: {
+            name: 'context7',
+            source: 'smithery',
+            transport: 'streamable-http',
+            qualifiedName: 'upstash/context7-mcp',
+            install: { transport: 'streamable-http', url: null, deferred: true },
+            description: 'hosted context7',
+          },
+        },
+      });
+      assert.equal(install.status, 200, JSON.stringify(install.body));
+      const row = (await readRegistry()).servers[0];
+      const field = row.config.fields[0];
+      assert.equal(field.key, 'Authorization');
+      assert.equal(field.oauth, true);
+      // The sentence says what the endpoint wants, and where it comes from.
+      assert.match(String(field.help), /OAuth/);
+      assert.match(String(field.help), /auth\.example\.test/);
+      // The link a person can open — not the metadata document.
+      assert.equal(field.helpUrl, 'https://smithery.ai/servers/@upstash/context7');
+      assert.equal(field.resourceUrl, undefined);
+      // And the masked projection the panel renders agrees.
+      const listed = (await call('/api/overall-mcp/servers')).body.servers[0];
+      assert.equal(listed.config.fields[0].oauth, true);
+      assert.equal(listed.config.fields[0].helpUrl, 'https://smithery.ai/servers/@upstash/context7');
+      assert.equal(listed.config.fields[0].resourceUrl, undefined);
+    });
+  } finally {
+    globalThis.fetch = real;
+  }
+});

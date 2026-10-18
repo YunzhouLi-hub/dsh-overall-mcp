@@ -75,3 +75,65 @@ test('the probe refuses anything that is not an http endpoint', async () => {
   assert.equal(demand, null);
   assert.equal(called, false);
 });
+
+test('resource metadata marks the demand as OAuth and names the authorization server', async () => {
+  // The document is machine-facing; what it is read for is the fact that the
+  // endpoint expects a browser login, and which server would run it.
+  const urls = [];
+  const demand = await probeRemoteAuth('https://demo--acme.run.tools', {
+    fetchImpl: async (url) => {
+      urls.push(String(url));
+      if (String(url) === 'https://demo--acme.run.tools') {
+        return {
+          status: 401,
+          headers: {
+            get: (name) => (String(name).toLowerCase() === 'www-authenticate'
+              ? 'Bearer error="invalid_token", resource_metadata="https://demo--acme.run.tools/.well-known/oauth-protected-resource"'
+              : null),
+          },
+          text: async () => '',
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          authorization_servers: ['https://auth.example.test/acme/demo'],
+          resource: 'https://demo--acme.run.tools/',
+        }),
+      };
+    },
+  });
+  assert.deepEqual(urls, [
+    'https://demo--acme.run.tools',
+    'https://demo--acme.run.tools/.well-known/oauth-protected-resource',
+  ]);
+  assert.equal(demand.required, true);
+  assert.equal(demand.oauth, true);
+  assert.equal(demand.authorizationServer, 'https://auth.example.test/acme/demo');
+  assert.equal(demand.resource, 'https://demo--acme.run.tools/.well-known/oauth-protected-resource');
+});
+
+test('a metadata document that cannot be read still counts as OAuth', async () => {
+  // `resource_metadata` on a 401 *is* the OAuth signal; only the server's name
+  // stays unknown. Reporting 「cannot tell」 here would put the raw JSON link
+  // back on the row.
+  const demand = await probeRemoteAuth('https://demo.run.tools', {
+    fetchImpl: async (url) => {
+      if (String(url) === 'https://demo.run.tools') {
+        return {
+          status: 401,
+          headers: {
+            get: (name) => (String(name).toLowerCase() === 'www-authenticate'
+              ? 'Bearer resource_metadata="https://demo.run.tools/.well-known/oauth-protected-resource"'
+              : null),
+          },
+          text: async () => '',
+        };
+      }
+      throw new Error('ENOTFOUND');
+    },
+  });
+  assert.equal(demand.oauth, true);
+  assert.equal(demand.authorizationServer, undefined);
+});

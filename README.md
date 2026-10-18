@@ -7,7 +7,7 @@
 <p align="center">English | <a href="README.zh-CN.md">中文</a></p>
 
 <p align="center">
- <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.12.3-4d6bfe" alt="version 0.12.3"></a>
+ <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.12.4-4d6bfe" alt="version 0.12.4"></a>
 </p>
 
 **A DeepSeek Harness plugin that scans every MCP configuration on the machine on first install and registers what it finds; aggregates six open MCP catalogs (5,364 deduplicated entries measured 2026-10) into one browsable, one-click-installable panel; and keeps a local census index of MCP repositories on GitHub (1,758 rows measured), recovering install commands from repository evidence and labelling each recovered command with where it came from.**
