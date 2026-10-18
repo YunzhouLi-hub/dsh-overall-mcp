@@ -1066,6 +1066,27 @@ export async function apply(ctx) {
   }
 
   /**
+   * The Smithery name a card refers to, wherever that card has been.
+   *
+   * Two shapes reach this host: a catalogue item as `lib/catalog.js` built it
+   * (`raw.qualifiedName`), and the same item as the panel sends it back.
+   * `annotateItem` deliberately drops `raw` from the market payload — it is the
+   * upstream record, not something the page should carry — and forwards the one
+   * field installs need as `qualifiedName` instead. Reading only `raw` therefore
+   * matched every test (which built the rich shape) and never the panel: every
+   * hosted Smithery install failed with 「详情端点没有给出 deploymentUrl」because
+   * the detail endpoint was never asked.
+   */
+  function qualifiedNameOf(item) {
+    const raw = item?.raw ?? {};
+    const candidates = [raw.qualifiedName, item?.qualifiedName, raw.name];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim() !== '') return candidate.trim();
+    }
+    return '';
+  }
+
+  /**
    * Give one Smithery row the schema its listing does not carry.
    *
    * The catalogue card says how the entry launches; only the detail endpoint
@@ -1081,8 +1102,7 @@ export async function apply(ctx) {
     // itself asks for — see `attachObservedAuth`.
     if (entry.transport !== 'stdio') return;
     if (entry.config?.schema) return;
-    const raw = item?.raw ?? {};
-    const qualified = typeof raw.qualifiedName === 'string' ? raw.qualifiedName.trim() : typeof raw.name === 'string' ? raw.name.trim() : '';
+    const qualified = qualifiedNameOf(item);
     if (qualified === '') return;
     const found = await fetchSmitheryConfig(qualified);
     if (!found?.schema) return;
@@ -1182,10 +1202,17 @@ export async function apply(ctx) {
     // endpoint knows it. Resolve it before the row exists, because an http entry
     // without a url is not installable at all (`catalogItemToEntry` refuses it).
     if (item?.install?.deferred === true) {
-      const raw = item?.raw ?? {};
-      const qualified = typeof raw.qualifiedName === 'string' ? raw.qualifiedName.trim() : typeof raw.name === 'string' ? raw.name.trim() : '';
+      const qualified = qualifiedNameOf(item);
       const found = qualified === '' ? null : await fetchSmitheryConfig(qualified);
       if (!found?.httpUrl) {
+        // Two different facts, two different sentences. A request that failed
+        // (429, timeout, offline) used to be reported as「它没给 deploymentUrl」,
+        // which reads like a defect in the server's own record and sends the
+        // user looking in the wrong place. A 429 is also the most likely state
+        // right after the market itself just read 6k records from them.
+        if (found?.error) {
+          throw new Error(`${item?.name ?? 'this server'}: 详情端点这次没答上来（${found.error}）—— 不是它没给端点；等几秒再点一次安装。`);
+        }
         throw new Error(`${item?.name ?? 'this server'}: Smithery 说它由官方托管，但详情端点没有给出 deploymentUrl —— 装不了（原来的 \`npx @smithery/cli run\` 只会拉起交互式登录，不会成为一台本地服务器）`);
       }
       resolved = { ...item, install: { ...item.install, url: found.httpUrl, deferred: false, resolvedAt: new Date().toISOString() } };

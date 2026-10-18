@@ -1988,12 +1988,17 @@ test('a hosted smithery install resolves its endpoint and turns the 401 into a r
     await withHost({ version: 1, servers: [] }, async ({ call, readRegistry }) => {
       const reply = await call('/api/overall-mcp/install', {
         body: {
+          // The shape the panel sends back: `annotateItem` drops `raw` from the
+          // market payload and forwards the one field an install needs as
+          // `qualifiedName`. The old version of this test passed `raw` and so
+          // agreed with a host that never resolved a single hosted install from
+          // the panel.
           item: {
             name: 'demo',
             source: 'smithery',
             transport: 'streamable-http',
+            qualifiedName: 'acme/demo',
             install: { transport: 'streamable-http', url: null, deferred: true },
-            raw: { qualifiedName: 'acme/demo', remote: true },
             description: 'hosted demo',
           },
         },
@@ -2011,6 +2016,39 @@ test('a hosted smithery install resolves its endpoint and turns the 401 into a r
       assert.match(String(row.config.fields[0].help), /Missing Authorization header/);
       // And it never becomes a CLI flag: there is no argv on an http row.
       assert.equal(row.config.via, 'header');
+    });
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+
+test('a failed detail request is reported as failed, not as a server without an endpoint', async () => {
+  const real = globalThis.fetch;
+  globalThis.fetch = async () => {
+    const err = new Error('HTTP 429');
+    err.status = 429;
+    throw err;
+  };
+  try {
+    await withHost({ version: 1, servers: [] }, async ({ call, readRegistry }) => {
+      const reply = await call('/api/overall-mcp/install', {
+        body: {
+          item: {
+            name: 'demo',
+            source: 'smithery',
+            transport: 'streamable-http',
+            qualifiedName: 'acme/demo',
+            install: { transport: 'streamable-http', url: null, deferred: true },
+          },
+        },
+      });
+      assert.notEqual(reply.status, 200);
+      const message = String(reply.body?.error ?? '');
+      assert.match(message, /详情端点这次没答上来/);
+      assert.match(message, /429/);
+      assert.doesNotMatch(message, /没有给出 deploymentUrl/,
+        'a request that failed must not be described as a record that declares nothing');
+      assert.equal((await readRegistry()).servers.length, 0, 'nothing was written');
     });
   } finally {
     globalThis.fetch = real;
