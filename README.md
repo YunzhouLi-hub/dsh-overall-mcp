@@ -7,12 +7,12 @@
 <p align="center">English | <a href="README.zh-CN.md">中文</a></p>
 
 <p align="center">
- <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.12.6-4d6bfe" alt="version 0.12.6"></a>
+ <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.12.7-4d6bfe" alt="version 0.12.7"></a>
 </p>
 
 **A DeepSeek Harness plugin that scans every MCP configuration on the machine on first install and registers what it finds; aggregates six open MCP catalogs (5,364 deduplicated entries measured 2026-10) into one browsable, one-click-installable panel; and keeps a local census index of MCP repositories on GitHub (1,758 rows measured), recovering install commands from repository evidence and labelling each recovered command with where it came from.**
 
-`README.zh-CN.md` is the same document in Chinese. [docs/ENGINEERING.md](https://github.com/YunzhouLi-hub/dsh-overall-mcp/blob/main/docs/ENGINEERING.md) keeps the engineering record — the measurements, the alternatives that were rejected, and why each choice went the way it did. The README describes what the plugin does; that file describes how it got there.
+`README.zh-CN.md` is the same document in Chinese. [docs/ENGINEERING.md](https://github.com/YunzhouLi-hub/dsh-overall-mcp/blob/main/docs/ENGINEERING.md) keeps the engineering record — the measurements, the alternatives that were rejected, and why each choice went the way it did. The README describes what the plugin does; that file describes how it got there. [docs/install-check.md](https://github.com/YunzhouLi-hub/dsh-overall-mcp/blob/main/docs/install-check.md) is narrower: one measured install from GitHub — the timings, what the lockfile pins, and why this plugin is not published to npm.
 
 ## What it looks like
 

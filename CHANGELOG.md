@@ -14,6 +14,19 @@
   由 `tools/client-smoke.mjs` 断言相等，并断言本文件的最新小节就是该版本——一份停在旧版本的
   更新日志，和一枚说谎的版本徽章是同一类问题。
 
+## 0.12.7 — 2026-10-18
+
+### 包里的 README，图片不再断
+
+- `files` 里补上 `docs`：README 的两个语言版本都用相对路径引用 `docs/images/*.png`，而 `files` 决定包里有什么——此前从 GitHub 或 npm 装下来的那份，README 的每张图都是断链。截图总计约 450KB，换来包里文档自洽。
+- 新增 `docs/install-check.md`：把「从 GitHub 装一次」的实测完整记录下来（2.4 秒、无构建授权、lockfile 钉到某个提交、装完自动启用、唯一的 peer 警告及其含义、移除后 profile 复原），并回答「为什么不发 npm 包」。
+
+### 从 Git 源装的，不再去问 npm 有没有新版
+
+- `lib/self-update.js` 新增 `isGitSpec(spec)`，识别 pnpm 接受的几种 Git 写法（`github:owner/repo`、`git+https://…`、`git://…`、裸 `https://….git`，均可带 `#tag`）。
+- 命中 Git 源时自更新检查直接返回 `reason: 'git'`，不再请求 npm。在此之前它会走到 npm 查询分支、拿到必然的 404，界面于是显示「npm 上查不到 dsh-overall-mcp 的发布版本」——真话，但答非所问：这个包从没打算发到 npm。现在给出的提示是该执行的那条命令（`dsh plugin add <spec>`，想钉版本就加 `#<tag>`）。
+- `updateSelf` 在这类安装上不会执行任何命令（此前会拼出 `dsh plugin add dsh-overall-mcp@<latest>`，那是个必然失败的命令）。
+
 ## 0.12.6 — 2026-10-18
 
 ### 装过的服务器，市场里不再说「安装」

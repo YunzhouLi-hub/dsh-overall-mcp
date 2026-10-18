@@ -11,6 +11,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   checkSelfUpdate,
+  isGitSpec,
   readInstalledSpec,
   readSelfPackage,
   resolveInstall,
@@ -131,6 +132,61 @@ test('a link: spec inside node_modules is treated as linked too', async () => {
     assert.equal(check.spec, 'link:../../workspace/dsh-overall-mcp');
   } finally {
     await rm(p.root, { recursive: true, force: true });
+  }
+});
+
+test('a Git source install is not an npm install, so there is nothing to compare', async () => {
+  const p = await fakeProfile({ spec: 'github:YunzhouLi-hub/dsh-overall-mcp' });
+  try {
+    let called = 0;
+    const check = await checkSelfUpdate({
+      moduleUrl: p.moduleUrl,
+      fetchImpl: async () => { called += 1; return { ok: true, json: async () => ({ 'dist-tags': { latest: '9.9.9' } }) }; },
+    });
+    // It *is* a profile install — the code sits in node_modules — but nothing
+    // npm knows about defines what that install should become.
+    assert.equal(check.install, 'registry');
+    assert.equal(check.checked, false);
+    assert.equal(check.updateAvailable, false);
+    assert.equal(check.reason, 'git');
+    assert.equal(check.spec, 'github:YunzhouLi-hub/dsh-overall-mcp');
+    assert.match(check.hint, /dsh plugin add github:YunzhouLi-hub\/dsh-overall-mcp/);
+    assert.equal(called, 0, 'a Git install must not be looked up on npm');
+  } finally {
+    await rm(p.root, { recursive: true, force: true });
+  }
+});
+
+test('updateSelf refuses a Git install instead of running an npm command', async () => {
+  const p = await fakeProfile({ spec: 'github:YunzhouLi-hub/dsh-overall-mcp' });
+  try {
+    let ran = 0;
+    const result = await updateSelf({
+      moduleUrl: p.moduleUrl,
+      run: async () => { ran += 1; return { code: 0, stdout: '', stderr: '' }; },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'git');
+    assert.equal(result.command, null);
+    assert.equal(ran, 0, 'no command may run for an install npm cannot resolve');
+  } finally {
+    await rm(p.root, { recursive: true, force: true });
+  }
+});
+
+test('isGitSpec knows the spellings pnpm accepts, and nothing else', () => {
+  for (const spec of [
+    'github:YunzhouLi-hub/dsh-overall-mcp',
+    'github:owner/repo#v1.2.3',
+    'git+https://github.com/owner/repo.git',
+    'git://github.com/owner/repo.git',
+    'https://github.com/owner/repo.git',
+    'https://github.com/owner/repo.git#main',
+  ]) {
+    assert.equal(isGitSpec(spec), true, spec);
+  }
+  for (const spec of ['^0.2.0', '0.12.7', 'link:../x', 'file:../x', 'workspace:*', '', 'https://example.com/readme', null, undefined]) {
+    assert.equal(isGitSpec(spec), false, String(spec));
   }
 });
 
