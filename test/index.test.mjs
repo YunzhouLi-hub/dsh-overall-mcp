@@ -340,6 +340,50 @@ test('the market route reuses a listing inside the TTL and validates a forced re
   }
 });
 
+test('the market marks a hosted row installed even when it has no endpoint yet', async () => {
+  // A Smithery hosted row defers its endpoint to install time, so
+  // `catalogItemToEntry` returns null for it. The name is still predictable,
+  // and without it the card offered 安装 for a server already in the registry.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    json: async () => ({
+      servers: [{
+        qualifiedName: 'brave',
+        displayName: 'Brave Search',
+        namespace: 'brave',
+        remote: true,
+        useCount: 100,
+      }],
+    }),
+  });
+  try {
+    const registry = {
+      version: 1,
+      servers: [{
+        name: 'brave-search',
+        source: 'catalog:smithery',
+        transport: 'streamable-http',
+        url: 'https://brave.run.tools',
+        headers: {},
+        enabled: true,
+      }],
+    };
+    await withHost(registry, async ({ call }) => {
+      const reply = await call('/api/overall-mcp/catalog', { body: { source: 'smithery' } });
+      assert.equal(reply.status, 200, JSON.stringify(reply.body));
+      const item = reply.body.items[0];
+      assert.equal(item.proposedName, 'brave-search', 'the name is derived without an entry');
+      assert.equal(item.installed, true, 'an installed row makes the card say 已安装');
+      assert.equal(item.installable, true, 'and it is still installable if the row is removed');
+    });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 test('the market route reports an unknown source as an error, not as an empty market', async () => {
   await withHost(FIXTURE, async ({ call }) => {
     const result = await call('/api/overall-mcp/catalog', { body: { source: 'nope' } });

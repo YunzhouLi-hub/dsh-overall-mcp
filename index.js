@@ -20,7 +20,7 @@ import { describeAbout, toolNamesFor, aboutSourceLabel, needsInstructionsRead } 
 import { handshakeCheck, waitedSeconds } from './lib/health.js';
 import { probeRemoteAuth } from './lib/remote-auth.js';
 import { scanHost, mergeIntoRegistry, collapseDuplicateRows, scannedSources, findOrphans, setMountHolder, clearMountHolder } from './lib/scanner.js';
-import { browseCatalog, catalogItemToEntry, CENSUS_SOURCE, fetchRepoStats, fetchSmitheryConfig, githubSearchQuota, searchGithubRepos, USER_AGENT } from './lib/catalog.js';
+import { browseCatalog, catalogItemToEntry, CENSUS_SOURCE, fetchRepoStats, fetchSmitheryConfig, githubSearchQuota, proposedNameOf, searchGithubRepos, USER_AGENT } from './lib/catalog.js';
 import {
   BASE_QUERIES, INDEX_FILE, INDEX_TTL_MS,
   crawlGithubRepos, indexDocumentOf, indexFreshness, mergeIndexRows, needsGithubCrawl, readIndexDocument,
@@ -2440,7 +2440,10 @@ export async function apply(ctx) {
   let backfilledSpecs = false;
   function annotateItem(item) {
     const entry = catalogItemToEntry(item);
-    const name = entry?.name ?? null;
+    // A hosted row has no entry until its detail request runs (no endpoint
+    // yet), but its name is still predictable — and without it the market
+    // offered 安装 for servers already in the registry.
+    const name = entry?.name ?? (item?.install ? proposedNameOf(item) : null);
     const installed = name !== null && registry.servers.some((s) => s.name === name);
     if (installed && entry?.config) {
       const match = registry.servers.find((s) => s.name === name);
