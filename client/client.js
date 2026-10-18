@@ -59,7 +59,7 @@ window.__ModuleLoader__.load({
 		// probe also checks CHANGELOG.md's newest section is this version, since
 		// a release note that stops at an older build tells a reader what
 		// changed in code they are not running.
-		const CLIENT_VERSION = "0.8.0";
+		const CLIENT_VERSION = "0.9.0";
 		// Where 「点个 star」 points. A constant, not a config: it is this
 		// plugin's own repository, and a panel that could be pointed at another
 		// repository would be asking for a star it does not deserve.
@@ -1040,6 +1040,63 @@ window.__ModuleLoader__.load({
 						return `检查${health?.ok ? "健康" : "不健康"}${detail}${at ? ` · ${at}` : ""}`;
 					}
 
+					/**
+					 * 本次进入界面按过「检查」的行。
+					 *
+					 * 一条体检结论说的是「这一刻能不能用」，不是这台服务器的属性：把它带过
+					 * 一次刷新，用户下次打开面板看到的就是上一班岗的旧答案。所以结论只
+					 * 跟随当前页面会话——关掉/刷新页面即清空，且必须由本会话亲手点出来。
+					 */
+					var checkedThisSession = new Set();
+					/** 只留下本会话点过「检查」的那几行的结论，其余一律不带。 */
+					function keepSessionHealth(rows) {
+						return rows.map((row) => {
+							if (!row || !row.health || checkedThisSession.has(row.name)) return row;
+							const { health, ...rest } = row;
+							return rest;
+						});
+					}
+
+					/**
+					 * 本页的语言。
+					 *
+					 * 面板自己的文案是中文，所以它要的是「读者读得懂的语言」，不是
+					 * 「插件作者的语言」。优先读 `<html lang>`，其次浏览器语言——宿主
+					 * 没有给插件暴露语言设置，这两处已经是页面上最可靠的信号。
+					 */
+					function pageLanguage() {
+						const doc = typeof document !== "undefined" ? document.documentElement : null;
+						const fromDoc = doc && typeof doc.lang === "string" ? doc.lang : "";
+						const fromNav = typeof navigator !== "undefined" && typeof navigator.language === "string"
+							? navigator.language
+							: "";
+						return (fromDoc || fromNav || "en").toLowerCase();
+					}
+					/** 译文按「语言 + 原句」为键：同一句话换个说法，就是一个新键。 */
+					function aboutKey(lang, text) {
+						return `${lang}\u0000${text}`;
+					}
+					/** 本页已经问过翻译的句子，避免同一句话在一次会话里反复 POST。 */
+					var requestedAbout = new Set();
+					/**
+					 * 把每行的用途说明换成本页语言。
+					 *
+					 * 只动 `source: "server"` 的那句（服务器自己写的散文）：其余两种是
+					 * 本插件生成的「工具：…」和启动命令，翻译它们只会把事实弄糊。原文
+					 * 保留在 `about.original`，行上的 tooltip 仍然能给出原始措辞。
+					 */
+					function localizeRows(rows, translations, lang) {
+						const list = Array.isArray(rows) ? rows : [];
+						const map = translations && typeof translations === "object" ? translations : {};
+						return list.map((row) => {
+							const about = row && row.about;
+							if (!about || about.source !== "server" || typeof about.text !== "string") return row;
+							const text = map[aboutKey(lang, about.text)];
+							if (typeof text !== "string" || text === "" || text === about.text) return row;
+							return { ...row, about: { ...about, text, original: about.text } };
+						});
+					}
+
 		function ServerRow({ server, busy, job, onToggle, onRemove, onUpdate, onConfigure, onHealth }) {
 			const enabled = server.enabled !== false;
 			const provided = server.providedExternally === true;
@@ -1106,7 +1163,9 @@ window.__ModuleLoader__.load({
 						about
 							? createElement("div", {
 									key: "about", className: "omkt-sabout", style: styles.about,
-									title: server.aboutLabel || undefined,
+									// 译文在行上，原始措辞留在 tooltip：读者看到的是能读懂的
+									// 那句，需要核对原文时仍拿得到服务器自己写的那句。
+									title: [server.aboutLabel, about.original].filter(Boolean).join("\n\n") || undefined,
 								}, about.text)
 							: null,
 						createElement("div", { key: "meta", className: "omkt-smeta", style: styles.meta },
@@ -2908,6 +2967,9 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, onI
 			// ask one), and what to do next — text that needs to survive the next
 			// render without being overwritten by the next success message.
 			const [installFailure, setInstallFailure] = useState("");
+			// 用途说明的译文，键是「语言 + 原句」（见 localizeRows）。空对象就表示
+			// 一行都还没翻，行上显示服务器原本的措辞。
+			const [aboutI18n, setAboutI18n] = useState({});
 			const [sourceFilter, setSourceFilter] = useState("");
 			const [stateFilter, setStateFilter] = useState("");
 			const [nameFilter, setNameFilter] = useState("");
@@ -3062,7 +3124,7 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, onI
 				// Anything but an array here (an `{ error }` body answered with 200, a
 				// route that changed shape) used to reach `.map()` on the next render
 				// and blank the page. The list is the page's spine: keep it an array.
-				setServers(Array.isArray(body?.servers) ? body.servers : []);
+				setServers(keepSessionHealth(Array.isArray(body?.servers) ? body.servers : []));
 				setRegistryError(typeof body.registryError === "string" ? body.registryError : "");
 				return body.servers;
 			}
@@ -3072,6 +3134,36 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, onI
 				loadSources();
 				loadStatus();
 			}, []);
+
+			// 第一次拿到服务器列表后问一次翻译：一批最多 I18N_MAX_ITEMS 句，宿主机自己
+			// 缓存，所以同一句话整台机器只翻一次。失败不弹错误——面板照常显示原文，
+			// 「翻译不了」不该比「看清楚这台服务器干什么」更重要。
+			useEffect(() => {
+				if (!Array.isArray(servers) || servers.length === 0) return;
+				const lang = pageLanguage();
+				const items = [];
+				for (const row of servers) {
+					const about = row && row.about;
+					if (!about || about.source !== "server" || typeof about.text !== "string") continue;
+					if (about.text.trim() === "") continue;
+					const key = aboutKey(lang, about.text);
+					if (requestedAbout.has(key)) continue;
+					requestedAbout.add(key);
+					items.push({ name: row.name, text: about.text, source: about.source });
+				}
+				if (items.length === 0) return;
+				api("/about-i18n", { method: "POST", body: JSON.stringify({ lang, items }), timeoutMs: 20000 })
+					.then((reply) => {
+						const translations = {};
+						for (const [name, text] of Object.entries(reply?.translations ?? {})) {
+							if (typeof text !== "string" || text === "") continue;
+							const source = servers.find((row) => row && row.name === name)?.about?.text;
+							if (typeof source === "string") translations[aboutKey(lang, source)] = text;
+						}
+						if (Object.keys(translations).length > 0) setAboutI18n((prev) => ({ ...prev, ...translations }));
+					})
+					.catch(() => { /* 保留原文 */ });
+			}, [servers]);
 
 			/**
 			 * Which build is answering, and with which data files.
@@ -3574,11 +3666,16 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, onI
 			// dead row into either a working one or a real error text, which is
 			// more useful than reporting「未挂载」back at the user who clicked 检查.
 			const doHealth = (server) => run(
-				() => api("/health", {
-					method: "POST",
-					body: JSON.stringify({ ...rowRef(server), retry: true }),
-					timeoutMs: 30000,
-				}),
+				async () => {
+					const reply = await api("/health", {
+						method: "POST",
+						body: JSON.stringify({ ...rowRef(server), retry: true }),
+						timeoutMs: 30000,
+					});
+					// 只有本次亲手问出来的结论才允许显示（refresh() 会按这个集合过滤）。
+					checkedThisSession.add(reply?.server?.name ?? server.name);
+					return reply;
+				},
 				(r) => {
 					const bad = (r.health?.checks ?? []).find((check) => check?.ok === false);
 					return `${r.server?.name ?? server.name}：${r.ok ? "健康" : "不健康"}${bad?.detail ? `（${bad.detail}）` : ""}`;
@@ -3996,6 +4093,11 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, onI
 			};
 
 			const all = servers || [];
+			// 每行那句「这台服务器是干什么的」是服务器自己写的一句话（见
+			// lib/about.js），语言由它的作者决定。这里是它被换成本页语言的地方：
+			// 译文按「语言 + 原句」缓存，原文留在 about.original 里当 tooltip，
+			// 所以翻译只是把同一句话换成读者看得懂的说法，不是改写事实。
+			const localized = localizeRows(all, aboutI18n, pageLanguage());
 			const stats = {
 				total: all.length,
 				enabled: all.filter((s) => s.enabled !== false).length,
@@ -4088,7 +4190,10 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, onI
 					return hay.includes(needle);
 				};
 				const bySource = new Map();
-				for (const server of all) {
+				// `localized`, not `all`: the rows the user reads carry the sentence
+				// in their own language, and everything downstream (grouping, the
+				// counts per group) is about those same rows.
+				for (const server of localized) {
 					const source = server.source || "manual";
 					if (sourceFilter && source !== sourceFilter) continue;
 					if (stateFilter === "enabled" && server.enabled === false) continue;
@@ -4102,7 +4207,7 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, onI
 				return [...bySource.entries()]
 					.map(([source, list]) => [source, list.sort((a, b) => a.name.localeCompare(b.name))])
 					.sort((a, b) => a[0].localeCompare(b[0]));
-			}, [servers, sourceFilter, stateFilter, nameFilter]);
+			}, [servers, aboutI18n, sourceFilter, stateFilter, nameFilter]);
 
 			const toggleCollapsed = (source) => setCollapsed((prev) => {
 				const next = new Set(prev);
@@ -5338,6 +5443,12 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, onI
 			// tools/render-server-health.mjs renders ServerRow directly with the
 			// three shapes the host sends (never checked / healthy / no tools).
 			ServerRow,
+			// A verdict belongs to the page session that asked for it, not to the
+			// row: the filter that enforces that is worth a probe of its own.
+			keepSessionHealth, checkedThisSession, healthLine,
+			// 用途说明换语言是纯映射，探针能直接喂它三行（服务器散文 / 本插件生成的
+			// 工具行 / 命令）来证明只有该动的那一行动了。
+			localizeRows, aboutKey, pageLanguage,
 			version: CLIENT_VERSION, bundleName: BUNDLE_NAME, panelId: PANEL_ID,
 		};
 		// Section is exported for tools/render-market-tab.mjs: the market tab's

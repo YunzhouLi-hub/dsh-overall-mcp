@@ -1783,13 +1783,140 @@ test('检查 reports which link of the mount actually failed', async () => {
     assert.equal(config.ok, false);
     assert.match(config.detail, /FS_TOKEN/);
     assert.equal(reply.body.health.checks.find((c) => c.id === 'enabled').ok, false);
-    // The verdict travels with the row, so a refresh does not forget it.
+    // The verdict travels with the row for the rest of this host run, so a
+    // refresh inside the same session does not forget it…
     assert.equal(reply.body.server.health.ok, false);
+    // …but it is never written down: a check answers 「这一刻能用吗」, and a stored
+    // answer would still be asserting itself after the process it described had
+    // been restarted. The file must stay free of it.
     const saved = await readRegistry();
-    assert.equal(saved.servers[0].health.ok, false);
-    assert.equal(typeof saved.servers[0].health.at, 'string');
+    assert.equal(saved.servers[0].health, undefined);
+    assert.equal(typeof reply.body.health.at, 'string');
     assert.equal((await call('/api/overall-mcp/health', { body: { name: 'nope', slot: 0 } })).status, 404);
   });
+});
+
+// ---------------------------------------------------------------------------
+// 上一版把体检结论写进了注册表. It read as a permanent property of the row —
+// 「检查健康」 still standing the morning after the host it described had been
+// restarted — so the key is now session-only, and a file that still carries one
+// is cleaned on load rather than trusted or silently ignored.
+test('a health verdict left in the file by an older build is dropped on load', async () => {
+  const registry = {
+    version: 1,
+    servers: [{
+      name: 'fs',
+      source: 'manual',
+      transport: 'stdio',
+      enabled: false,
+      command: 'my-own-fs',
+      args: [],
+      env: {},
+      health: { at: '2026-10-17T00:00:00.000Z', ok: true, attempted: false, toolCount: 3, checks: [], ms: 4 },
+    }],
+  };
+  await withHost(registry, async ({ call, readRegistry }) => {
+    const saved = await readRegistry();
+    assert.equal(saved.servers[0].health, undefined);
+    const payload = await call('/api/overall-mcp/servers');
+    assert.equal(payload.body.servers[0].health, undefined);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 每行那句「这台服务器是干什么的」是服务器自己写的散文（lib/about.js），语言由
+// 它的作者决定。On a Chinese panel with an English server that is one English
+// line among Chinese ones, so it is translated — once per sentence, by the
+// user's own model, and cached on disk so reopening the panel costs nothing.
+test('purpose lines are translated once, then served from the cache', async () => {
+  const seen = [];
+  const stream = (options) => {
+    seen.push(options);
+    return (async function* chunks() { for (const chunk of textStream('["用于读取文档的工具。"]')) yield chunk; })();
+  };
+  const registry = {
+    version: 1,
+    servers: [{
+      name: 'docs', source: 'manual', transport: 'stdio', enabled: false,
+      command: 'x', args: [], env: {},
+      about: { text: 'Tools for reading docs.', source: 'server', toolCount: 0 },
+    }],
+  };
+  await withHost(registry, async ({ call, dir }) => {
+    const first = await call('/api/overall-mcp/about-i18n', {
+      body: { lang: 'zh-CN', items: [{ name: 'docs', text: 'Tools for reading docs.' }] },
+    });
+    assert.equal(first.status, 200);
+    assert.equal(first.body.lang, 'zh', 'zh-CN and zh want the same sentence');
+    assert.equal(first.body.translations.docs, '用于读取文档的工具。');
+    assert.equal(first.body.unavailable, null);
+    // One call, to the user's own route, at temperature 0, carrying the line and
+    // the language it must be rendered in.
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].provider, 'fake-provider');
+    assert.equal(seen[0].temperature, 0);
+    assert.match(seen[0].messages[0].content[0].text, /Target language: zh/);
+    assert.match(seen[0].messages[0].content[0].text, /1\. Tools for reading docs\./);
+    // The translation is kept, so the next visit — even after a restart — is free.
+    const cache = JSON.parse(await fs.readFile(path.join(dir, 'about-i18n.json'), 'utf8'));
+    assert.deepEqual(cache, [{ lang: 'zh', source: 'Tools for reading docs.', text: '用于读取文档的工具。' }]);
+    const second = await call('/api/overall-mcp/about-i18n', {
+      body: { lang: 'zh', items: [{ name: 'docs', text: 'Tools for reading docs.' }] },
+    });
+    assert.equal(second.body.translations.docs, '用于读取文档的工具。');
+    assert.equal(seen.length, 1, 'the cache answered the second visit, not the model');
+  }, { llm: { stream } });
+});
+
+test('a line already in the reader\'s language is echoed back without asking', async () => {
+  let calls = 0;
+  const stream = () => {
+    calls += 1;
+    return (async function* chunks() { for (const chunk of textStream('["不该调我"]')) yield chunk; })();
+  };
+  await withHost(FIXTURE, async ({ call }) => {
+    // 工具：… is written by this plugin in Chinese, and a command line is a
+    // command line. Translating either would edit a fact rather than render it,
+    // so a line the client labels as anything but `server` comes straight back.
+    const reply = await call('/api/overall-mcp/about-i18n', {
+      body: {
+        lang: 'zh',
+        items: [
+          { name: 'a', text: '工具：read、write 等 2 个', source: 'tools' },
+          { name: 'b', text: 'npx -y @scope/pkg --flag', source: 'command' },
+        ],
+      },
+    });
+    assert.equal(reply.body.translations.a, '工具：read、write 等 2 个');
+    assert.equal(reply.body.translations.b, 'npx -y @scope/pkg --flag');
+    assert.equal(reply.body.unavailable, null);
+    assert.equal(reply.body.cached, 2);
+    assert.equal(calls, 0, 'nothing needed translating');
+  }, { llm: { stream } });
+});
+
+test('a host without a model leaves the sentence as the server wrote it', async () => {
+  await withHost(FIXTURE, async ({ call }) => {
+    const reply = await call('/api/overall-mcp/about-i18n', {
+      body: { lang: 'zh', items: [{ name: 'docs', text: 'Tools for reading docs.' }] },
+    });
+    assert.equal(reply.status, 200, 'no model is not a panel error');
+    assert.equal(reply.body.unavailable, 'no-llm');
+    assert.deepEqual(reply.body.translations, {}, 'the client keeps the original line');
+  });
+});
+
+test('a model that answers with prose does not get half-translated into the panel', async () => {
+  const stream = () => (async function* chunks() {
+    for (const chunk of textStream('Sure! Here is the translation you asked for:')) yield chunk;
+  })();
+  await withHost(FIXTURE, async ({ call }) => {
+    const reply = await call('/api/overall-mcp/about-i18n', {
+      body: { lang: 'zh', items: [{ name: 'docs', text: 'Tools for reading docs.' }] },
+    });
+    assert.equal(reply.body.unavailable, 'translate-failed');
+    assert.deepEqual(reply.body.translations, {});
+  }, { llm: { stream } });
 });
 
 // ---------------------------------------------------------------------------

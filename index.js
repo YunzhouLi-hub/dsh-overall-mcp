@@ -40,6 +40,10 @@ import {
   DIAGNOSIS_SYSTEM, buildDiagnosisPrompt, capText, diagnosisFactsOf, diagnosisTextOf,
 } from './lib/install-diagnosis.js';
 import {
+  I18N_CACHE_MAX, I18N_MAX_ITEMS, I18N_SYSTEM, buildTranslationPrompt, cacheFromRows, cacheRowsOf,
+  needsTranslation, parseTranslations, targetLang, translationKey,
+} from './lib/about-i18n.js';
+import {
   applyValues, channelOf, composeMountArgs, configSpecFor, configState, fieldGaps, isSmitheryCli, looksLikeCredentialFailure, maskedFields, smitheryFieldsOf, specOf,
 } from './lib/server-config.js';
 import { collectRepoMedia } from './lib/media.js';
@@ -86,6 +90,14 @@ const DIAGNOSIS_TIMEOUT_MS = 20000;
 const DIAGNOSIS_CACHE_MAX = 32;
 /** How long one (entry, error) diagnosis is reused. */
 const DIAGNOSIS_TTL_MS = 10 * 60 * 1000;
+/**
+ * How long a batch of purpose-line translations may take.
+ *
+ * Shorter than a diagnosis on purpose: the panel is already painted with the
+ * original sentences, so a slow model only means the rows stay English for this
+ * visit — not that the page waits.
+ */
+const ABOUT_I18N_TIMEOUT_MS = 15000;
 
 function dataDir() {
   const home = process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
@@ -284,6 +296,10 @@ export async function apply(ctx) {
   const log = ctx.logger?.('overall-mcp') ?? ctx.logger;
   const dir = dataDir();
   const registryFile = path.join(dir, 'registry.json');
+  // Translations of purpose lines, keyed by language + source sentence. Kept out
+  // of registry.json on purpose: it is a derived cache, and losing or deleting it
+  // costs one model call, not a user's server.
+  const aboutI18nFile = path.join(dir, 'about-i18n.json');
   const reportFile = path.join(dir, 'scan-report.json');
   // The plugin's own activity log (lib/events.js explains why). The sink is
   // installed before anything else in `apply()` runs, so the repairs and
@@ -377,6 +393,38 @@ export async function apply(ctx) {
     }
   }
 
+  // Older builds wrote the verdict of 检查 into the registry, so a check from
+  // yesterday was still asserting 「检查健康」 on a process that had been restarted
+  // twice since. A check answers "is this working *now*", which is a fact about
+  // this host's session, not about the document. The key is dropped here so the
+  // next save cleans the file; nothing reads it after this point.
+  {
+    let stripped = 0;
+    for (const s of registry.servers) {
+      if (s && Object.prototype.hasOwnProperty.call(s, 'health')) { delete s.health; stripped += 1; }
+    }
+    if (stripped > 0) await save();
+  }
+
+  /**
+   * Purpose lines already translated, keyed by language + source sentence.
+   *
+   * A cache, not state: deleting the file only costs one model call per line.
+   * It is read once at activation and written when a batch adds something.
+   */
+  let aboutI18nCache = new Map();
+  try {
+    aboutI18nCache = cacheFromRows(JSON.parse(await fs.readFile(aboutI18nFile, 'utf8')));
+  } catch { /* absent or unreadable — every line is simply a miss */ }
+
+  async function saveAboutI18n() {
+    try {
+      await writeJson(aboutI18nFile, cacheRowsOf(aboutI18nCache, I18N_CACHE_MAX));
+    } catch (err) {
+      log?.warn?.(`overall-mcp: 翻译缓存写入失败 — ${err?.message ?? err}`);
+    }
+  }
+
   const fibers = new Map(); // entry.name -> mcp-client Fiber
   /**
    * Mounts whose handshake had not finished when `connect()` hit its deadline.
@@ -388,6 +436,17 @@ export async function apply(ctx) {
    * work, so the panel shows the pending state (amber) instead of green.
    */
   const starting = new Set(); // entry.name, handshake in flight
+
+  /**
+   * The last 检查 verdict per row, held in memory only.
+   *
+   * Deliberately not persisted: the verdict is a statement about this session
+   * ("these tools are published *now*"), and a stored one outlives its truth the
+   * moment the host restarts or a mount dies. The panel additionally only draws
+   * a verdict that was asked for in the current page session, so a reload shows
+   * rows without claims rather than yesterday's answer.
+   */
+  const health = new Map(); // entry.name -> { at, ok, attempted, toolCount, checks, ms }
 
   // Repair provider-hostile regexes in every MCP schema mounted below.
   installSchemaGuard(ctx, log);
@@ -624,10 +683,11 @@ export async function apply(ctx) {
         starting: startingNow,
         status,
         providedExternally,
-        // The last health check this row was given, verbatim (`{ at, ok,
-        // toolCount, checks, ms }`). Absent until someone asks for one — a
-        // health verdict that expires silently would be worse than none.
-        ...(s.health ? { health: s.health } : {}),
+        // This session's 检查 verdict for the row, verbatim (`{ at, ok,
+        // toolCount, checks, ms }`). Absent until someone asks for one in this
+        // host run — it is never read back from the registry, because a verdict
+        // that outlives the process that computed it is just an old guess.
+        ...(health.has(s.name) ? { health: health.get(s.name) } : {}),
         serverName: s.serverName ?? toServerName(s.name) ?? undefined,
         error: s.connectError,
         package: (() => {
@@ -960,6 +1020,37 @@ export async function apply(ctx) {
     diagnosisCache.set(key, { at: now, value });
     evictOldest(diagnosisCache, DIAGNOSIS_CACHE_MAX);
     return { ok: true, ...value };
+  }
+
+  /**
+   * Translate a batch of purpose lines into `lang` with the user's own model.
+   *
+   * Same optional plumbing as the diagnosis above: no `llm` service or no
+   * configured route means the caller reports why, and the rows keep the words
+   * their servers shipped. @throws when the model was reachable but the answer
+   * was unusable — the caller turns that into `translate-failed` rather than a
+   * half-translated list.
+   */
+  async function translateAboutLines({ lang, route, texts }) {
+    const assembler = new BlockAssembler();
+    const options = {
+      provider: route.provider,
+      model: route.model,
+      system: I18N_SYSTEM,
+      messages: [{ role: 'user', content: [{ type: 'text', text: buildTranslationPrompt({ lang, texts }) }] }],
+      temperature: 0,
+      signal: AbortSignal.timeout(ABOUT_I18N_TIMEOUT_MS),
+    };
+    for await (const chunk of llmService.stream(options)) {
+      assembler.push(chunk);
+      if (chunk?.type === 'finish' && (chunk.reason?.kind === 'error' || chunk.reason?.kind === 'aborted')) {
+        const failure = chunk.reason.failure ?? {};
+        throw new Error(`翻译模型以 ${chunk.reason.kind} 结束：${failure.message ?? failure.code ?? '未知原因'}`);
+      }
+    }
+    const lines = parseTranslations(diagnosisTextOf(assembler.blocks()), texts.length);
+    if (!lines) throw new Error('翻译模型没有给出等长的 JSON 数组');
+    return lines;
   }
 
   /**
@@ -3073,7 +3164,7 @@ export async function apply(ctx) {
           },
         ];
         const ok = checks.every((check) => check.ok);
-        row.health = {
+        const verdict = {
           at: new Date().toISOString(),
           ok,
           attempted,
@@ -3081,13 +3172,72 @@ export async function apply(ctx) {
           checks,
           ms: Date.now() - startedAt,
         };
-        await save();
+        // Session-scoped on purpose: nothing here is written to the registry, so
+        // a restart cannot resurrect a verdict about a process that no longer
+        // exists.
+        health.set(row.name, verdict);
         emit({ kind: 'health', action: 'check', target: name, ok, toolCount: tools });
         const { servers } = await serversPayload();
         const fresh = (Number.isInteger(slot) ? servers[slot] : null)
           ?? servers.find((s) => s.name === name)
           ?? null;
-        return json({ ok, health: row.health, server: fresh });
+        return json({ ok, health: verdict, server: fresh });
+      })],
+      // ---- purpose lines in the reader's language ---------------------------
+      // 「这台服务器是干什么的」 comes from the server's own initialize block, in
+      // the language its author wrote. This route is the only place that ever
+      // asks a model to reword it: the client sends the language the page is in,
+      // gets back what it already had for every line that needs nothing, and
+      // costs a model call only for sentences no earlier visit has seen.
+      ['/api/overall-mcp/about-i18n', ['POST'], guard(async (req) => {
+        const { lang, items } = await readBody(req);
+        const target = targetLang(lang);
+        if (target === '') return json({ lang: '', translations: {}, unavailable: 'no-lang' });
+        const wanted = (Array.isArray(items) ? items : [])
+          .filter((it) => it && typeof it.name === 'string' && it.name !== ''
+            && typeof it.text === 'string' && it.text.trim() !== '')
+          .slice(0, I18N_MAX_ITEMS);
+        const translations = {};
+        const pending = [];
+        for (const item of wanted) {
+          // Only the sentence the server itself wrote is prose worth translating.
+          // 工具：… is this plugin's own Chinese, a command line is a command line,
+          // and a caller that says which one it sent is taken at its word; an
+          // unlabelled line is treated as prose, which is what the panel sends.
+          if (item.source !== undefined && item.source !== 'server') {
+            translations[item.name] = item.text;
+            continue;
+          }
+          if (!needsTranslation(item.text, target)) { translations[item.name] = item.text; continue; }
+          const hit = aboutI18nCache.get(translationKey(target, item.text));
+          if (typeof hit === 'string') { translations[item.name] = hit; continue; }
+          pending.push(item);
+        }
+        let unavailable = null;
+        if (pending.length > 0) {
+          const route = diagnosisRoute();
+          if (!llmService) unavailable = 'no-llm';
+          else if (!route) unavailable = 'no-route';
+          else {
+            try {
+              const lines = await translateAboutLines({ lang: target, route, texts: pending.map((it) => it.text) });
+              pending.forEach((item, index) => {
+                translations[item.name] = lines[index];
+                aboutI18nCache.set(translationKey(target, item.text), lines[index]);
+              });
+              while (aboutI18nCache.size > I18N_CACHE_MAX) {
+                aboutI18nCache.delete(aboutI18nCache.keys().next().value);
+              }
+              await saveAboutI18n();
+            } catch (err) {
+              // A model that answered with prose is not a panel error: the rows
+              // keep the sentences they had, and the reply says why in one word.
+              unavailable = 'translate-failed';
+              log?.warn?.(`overall-mcp: 说明文字翻译失败 — ${err?.message ?? err}`);
+            }
+          }
+        }
+        return json({ lang: target, translations, unavailable, cached: wanted.length - pending.length });
       })],
       ['/api/overall-mcp/set-source-enabled', ['POST'], guard(async (req) => {
         const { source, enabled } = await readBody(req);

@@ -157,4 +157,19 @@ assert.match(textOf(unhealthy[0]), /已连接/);
 assert.match(unhealthyText, /一个工具都没注册/);
 assert.equal(unhealthyLine.props.style.color, '#b3261e', 'unhealthy is red');
 
-console.log('ok — 检查 button + verdict line: unchecked rows invent nothing, a healthy verdict carries the tool count and time, an unhealthy one names the failed check');
+// ---- 4. a verdict belongs to the session that asked for it ------------------
+// The host answers a /servers refresh with whatever it last computed, and a
+// verdict is only true for the run that computed it. The page therefore drops
+// every verdict it did not ask for itself: reopen the panel and nothing is
+// claimed until 检查 is pressed again.
+const verdict = { at: healthyAt, ok: true, toolCount: 5, checks: [] };
+const stale = [{ name: 'fs-server', health: verdict }, { name: 'other' }];
+const kept = __test.keepSessionHealth(stale);
+assert.equal(kept[0].health, undefined, 'a verdict nobody asked for in this session is dropped');
+assert.equal(kept[1].health, undefined);
+__test.checkedThisSession.add('fs-server');
+const same = __test.keepSessionHealth([{ name: 'fs-server', health: verdict }]);
+assert.equal(same[0].health, verdict, 'the verdict this session asked for survives the refresh');
+assert.equal(same[0].name, 'fs-server', 'filtering keeps the row itself');
+
+console.log('ok — 检查 button + verdict line: unchecked rows invent nothing, a healthy verdict carries the tool count and time, an unhealthy one names the failed check, and a verdict only survives the session that asked for it');
