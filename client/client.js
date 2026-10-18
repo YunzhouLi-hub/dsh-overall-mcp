@@ -59,7 +59,7 @@ window.__ModuleLoader__.load({
 		// probe also checks CHANGELOG.md's newest section is this version, since
 		// a release note that stops at an older build tells a reader what
 		// changed in code they are not running.
-		const CLIENT_VERSION = "0.11.0";
+		const CLIENT_VERSION = "0.12.0";
 		// Where 「点个 star」 points. A constant, not a config: it is this
 		// plugin's own repository, and a panel that could be pointed at another
 		// repository would be asking for a star it does not deserve.
@@ -84,6 +84,12 @@ window.__ModuleLoader__.load({
 		// promise settles, so a request that never answered left every button
 		// disabled for good — no message, no way back except a reload.
 		const API_TIMEOUT_MS = 30000;
+		// 「检查」 may land on a mount whose handshake is still in flight — a
+		// first-run `npx` is downloading the package. One click therefore
+		// follows the same mount a few times instead of declaring it broken
+		// mid-download; the button says 检查中… for the whole window.
+		const HEALTH_ATTEMPTS = 3;
+		const HEALTH_RETRY_GAP_MS = 4000;
 		async function api(path, options) {
 			const { timeoutMs = API_TIMEOUT_MS, ...init } = options ?? {};
 			const controller = timeoutMs > 0 && typeof AbortController === "function"
@@ -1101,7 +1107,7 @@ window.__ModuleLoader__.load({
 						});
 					}
 
-		function ServerRow({ server, busy, job, onToggle, onRemove, onUpdate, onConfigure, onHealth }) {
+		function ServerRow({ server, busy, checking, job, onToggle, onRemove, onUpdate, onConfigure, onHealth }) {
 			const enabled = server.enabled !== false;
 			const provided = server.providedExternally === true;
 			// `connected` alone is 「有一个 fiber」, not 「能用」: a mount whose
@@ -1181,6 +1187,16 @@ window.__ModuleLoader__.load({
 								title: (server.health.checks || []).map((c) => `${c.ok ? "✓" : "✗"} ${c.detail}`).join("\n") || undefined,
 							}, healthLine(server.health))
 							: null,
+						// 旧装法的行（`@smithery/cli run …`）握手不会完成，原因不是慢：
+						// CLI 把记录解析成远程端点，拉起 mcp-remote 等浏览器登录。0.11.0
+						// 起按来源装成远程 http，但改不了已经装下的行——所以这里给出唯一
+						// 有效的下一步，而不是让它一直红着。
+						server.health && !server.health.ok && server.channel === "cli-json"
+							? createElement("div", {
+								key: "legacycli",
+								style: { ...styles.meta, color: "#8a5a00", whiteSpace: "normal" },
+							}, "这是旧装法（Smithery CLI 解析成远程端点，要浏览器登录）。移除后重新安装，会按它自己托管的方式装成远程 http。")
+							: null,
 					]),
 				]),
 				needsConfig
@@ -1215,10 +1231,16 @@ window.__ModuleLoader__.load({
 					createElement("button", {
 						key: "health", type: "button",
 						style: styles.button,
-						disabled: busy,
-						title: "查这台服务器能不能用：挂载、握手、已注册的工具、声明的要求",
+						// The click must say it is working: a healthy check can take
+						// 12s+, and a button that looks untouched for that long reads
+						// as a dead button — the user clicked it again, which started
+						// a second check on the same row.
+						disabled: busy || checking,
+						title: checking
+							? "正在等握手返回（首次运行可能在下载，最多约 40 秒）"
+							: "查这台服务器能不能用：挂载、握手、已注册的工具、声明的要求",
 						onClick: () => onHealth(server),
-					}, "检查"),
+					}, checking ? "检查中…" : "检查"),
 					// Any row with a declared field, plus any row whose launch takes
 					// its settings on the command line (a Smithery row can need a key
 					// before its schema has ever been fetched — the channel is the
@@ -1649,7 +1671,7 @@ window.__ModuleLoader__.load({
 			]);
 		}
 
-		function SourceGroup({ source, servers, busy, jobOf, collapsed, onToggleCollapsed, onToggleSource, onToggleServer, onRemove, onUpdate, onConfigure, onHealth }) {
+		function SourceGroup({ source, servers, busy, checkingKeys, jobOf, collapsed, onToggleCollapsed, onToggleSource, onToggleServer, onRemove, onUpdate, onConfigure, onHealth }) {
 			const enabledCount = servers.filter((s) => s.enabled !== false).length;
 			const allOn = enabledCount === servers.length && servers.length > 0;
 			return createElement("div", { style: styles.group }, [
@@ -1673,6 +1695,7 @@ window.__ModuleLoader__.load({
 				collapsed ? null : createElement("div", { key: "body", style: styles.groupBody },
 					servers.map((server) => createElement(ServerRow, {
 						key: rowKey(server), server, busy,
+						checking: (checkingKeys ?? []).includes(rowKey(server)),
 						job: jobOf(server),
 						onToggle: onToggleServer, onRemove, onUpdate, onConfigure, onHealth,
 					}))),
@@ -3048,6 +3071,10 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, onI
 			// 服务器」长得一样。
 			const [registryError, setRegistryError] = useState("");
 			const [busy, setBusy] = useState(false);
+			// Which rows have a 检查 in flight. Per row, not global: one slow
+			// handshake must not freeze the rest of the list, and the row's button
+			// has to say 检查中… for as long as this list contains it.
+			const [checkingKeys, setCheckingKeys] = useState([]);
 			const [error, setError] = useState("");
 			const [message, setMessage] = useState("");
 			// A mount failure is its own block, not a one-line error: it carries
@@ -3753,22 +3780,42 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, onI
 			// mount when the row is enabled but nothing is mounted — that turns a
 			// dead row into either a working one or a real error text, which is
 			// more useful than reporting「未挂载」back at the user who clicked 检查.
-			const doHealth = (server) => run(
-				async () => {
-					const reply = await api("/health", {
-						method: "POST",
-						body: JSON.stringify({ ...rowRef(server), retry: true }),
-						timeoutMs: 30000,
-					});
+			//
+			// Two things this click owns beyond the request:
+			//   - the row says 检查中… for the whole window (a first-run mount can
+			//     spend tens of seconds in `npx` before its handshake), and
+			//   - a handshake that is *still* starting is not a verdict about the
+			//     row: the check follows the same mount up to HEALTH_ATTEMPTS
+			//     times instead of calling a download a failure.
+			const doHealth = async (server) => {
+				const key = rowKey(server);
+				if (checkingKeys.includes(key)) return;
+				setCheckingKeys((prev) => [...prev, key]);
+				setError(""); setMessage("");
+				try {
+					let reply = null;
+					for (let attempt = 1; attempt <= HEALTH_ATTEMPTS; attempt += 1) {
+						reply = await api("/health", {
+							method: "POST",
+							body: JSON.stringify({ ...rowRef(server), retry: true }),
+							timeoutMs: API_TIMEOUT_MS,
+						});
+						const handshake = (reply?.health?.checks ?? []).find((check) => check?.id === "handshake");
+						if (handshake?.ok !== false || attempt === HEALTH_ATTEMPTS) break;
+						setMessage(`${reply?.server?.name ?? server.name} 还在握手（首次运行要先下载 CLI），${HEALTH_RETRY_GAP_MS / 1000}s 后再看一次…`);
+						await new Promise((resolve) => setTimeout(resolve, HEALTH_RETRY_GAP_MS));
+					}
 					// 只有本次亲手问出来的结论才允许显示（refresh() 会按这个集合过滤）。
 					checkedThisSession.add(reply?.server?.name ?? server.name);
-					return reply;
-				},
-				(r) => {
-					const bad = (r.health?.checks ?? []).find((check) => check?.ok === false);
-					return `${r.server?.name ?? server.name}：${r.ok ? "健康" : "不健康"}${bad?.detail ? `（${bad.detail}）` : ""}`;
-				},
-			);
+					await refresh();
+					const bad = (reply?.health?.checks ?? []).find((check) => check?.ok === false);
+					setMessage(`${reply?.server?.name ?? server.name}：${reply?.ok ? "健康" : "不健康"}${bad?.detail ? `（${bad.detail}）` : ""}`);
+				} catch (err) {
+					setError(String(err.message || err));
+				} finally {
+					setCheckingKeys((prev) => prev.filter((k) => k !== key));
+				}
+			};
 			// Opening the sheet is the whole click; the save is the sheet's own
 			// POST, because only it holds the values (and only it knows which of
 			// them was actually touched).
@@ -4918,7 +4965,7 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, onI
 						? createElement("div", { key: "nomatch", style: styles.message }, "没有符合筛选条件的服务器。")
 						: null,
 					...groups.map(([source, list]) => createElement(SourceGroup, {
-						key: source, source, servers: list, busy, jobOf,
+						key: source, source, servers: list, busy, checkingKeys, jobOf,
 						collapsed: collapsed.has(source),
 						onToggleCollapsed: () => toggleCollapsed(source),
 						onToggleSource: doToggleSource,

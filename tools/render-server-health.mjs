@@ -80,7 +80,7 @@ const row = (extra = {}) => ({
   ...extra,
 });
 
-const render = (server, calls) => __test.ServerRow({
+const render = (server, calls, extra = {}) => __test.ServerRow({
   server,
   busy: false,
   job: null,
@@ -89,6 +89,7 @@ const render = (server, calls) => __test.ServerRow({
   onUpdate: () => {},
   onConfigure: () => {},
   onHealth: (clicked) => calls.push(clicked),
+  ...extra,
 });
 
 // ---- 1. never checked: the button exists, no verdict is invented ------------
@@ -102,6 +103,15 @@ healthButton.props.onClick();
 assert.equal(calls.length, 1);
 assert.equal(calls[0].name, 'fs-server', '检查 sends the row, not a name-only guess');
 assert.equal(typeof healthButton.props.title, 'string');
+
+// ---- 1b. checking: the button says so, and cannot start a second check -----
+const checkingCalls = [];
+const checking = walk(render(row({ status: 'starting', connected: false }), checkingCalls, { checking: true }));
+const checkingButton = checking.find((node) => node.type === 'button' && textOf(node) === '检查中…');
+assert.ok(checkingButton, 'a row with a check in flight says 检查中…');
+assert.equal(checkingButton.props.disabled, true, '…and the button is disabled while it waits');
+assert.equal(checking.some((node) => textOf(node) === '检查'), false, 'the idle label is gone, not duplicated');
+assert.equal(typeof checkingButton.props.title, 'string');
 
 // ---- 2. healthy: one green line, tool count and time in it -----------------
 const healthyAt = '2026-10-18T08:31:07.000Z';
