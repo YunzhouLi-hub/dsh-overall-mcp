@@ -26,6 +26,7 @@
     "./lib/submission.js": "./lib/submission.js",
     "./lib/install-diagnosis.js": "./lib/install-diagnosis.js",
     "./lib/about-i18n.js": "./lib/about-i18n.js",
+    "./lib/health.js": "./lib/health.js",
     "./lib/about.js": "./lib/about.js",
     "./lib/media.js": "./lib/media.js",
     "./package.json": "./package.json",
@@ -42,8 +43,8 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "lint": "node --check index.js && node --check lib/server-config.js && node --check lib/scanner.js && node --check lib/catalog.js && node --check lib/catalog-cache.js && node --check lib/github-index.js && node --check lib/repo-install.js && node --check lib/custom-sources.js && node --check lib/install-diagnosis.js && node --check lib/about-i18n.js && node --check lib/submission.js && node --check lib/about.js && node --check lib/media.js && node --check lib/updates.js && node --check lib/self-update.js && node --check lib/installs.js && node --check lib/schema-guard.js && node --check lib/http-status.js && node --check lib/events.js && node --check lib/github-auth.js && node --check tools/registry-submission.mjs && node --check tools/readme-shots.mjs && node --check client/client.js",
-    "test": "node --test test/events.test.mjs test/github-auth.test.mjs test/scanner.test.mjs test/catalog.test.mjs test/catalog-cache.test.mjs test/server-config.test.mjs test/github-index.test.mjs test/repo-install.test.mjs test/custom-sources.test.mjs test/install-diagnosis.test.mjs test/about-i18n.test.mjs test/submission.test.mjs test/about.test.mjs test/schema-guard.test.mjs test/http-status.test.mjs test/updates.test.mjs test/media.test.mjs test/self-update.test.mjs test/installs.test.mjs test/index.test.mjs",
+    "lint": "node --check index.js && node --check lib/server-config.js && node --check lib/scanner.js && node --check lib/catalog.js && node --check lib/catalog-cache.js && node --check lib/github-index.js && node --check lib/repo-install.js && node --check lib/custom-sources.js && node --check lib/install-diagnosis.js && node --check lib/about-i18n.js && node --check lib/health.js && node --check lib/submission.js && node --check lib/about.js && node --check lib/media.js && node --check lib/updates.js && node --check lib/self-update.js && node --check lib/installs.js && node --check lib/schema-guard.js && node --check lib/http-status.js && node --check lib/events.js && node --check lib/github-auth.js && node --check tools/registry-submission.mjs && node --check tools/readme-shots.mjs && node --check client/client.js",
+    "test": "node --test test/events.test.mjs test/github-auth.test.mjs test/scanner.test.mjs test/catalog.test.mjs test/catalog-cache.test.mjs test/server-config.test.mjs test/github-index.test.mjs test/repo-install.test.mjs test/custom-sources.test.mjs test/install-diagnosis.test.mjs test/about-i18n.test.mjs test/health.test.mjs test/submission.test.mjs test/about.test.mjs test/schema-guard.test.mjs test/http-status.test.mjs test/updates.test.mjs test/media.test.mjs test/self-update.test.mjs test/installs.test.mjs test/index.test.mjs",
     "test:registry": "node tools/registry-submission.mjs --check --registry registry.json",
     "test:layout": "node tools/layout-probe.mjs && node tools/shot.mjs",
     "test:probes": "node tools/readme-shots.mjs --check && node tools/render-card.mjs && node tools/render-detail.mjs && node tools/render-market-tab.mjs && node tools/render-config-dialog.mjs && node tools/render-server-health.mjs && node tools/render-about-i18n.mjs && node tools/probe-server-about.mjs && node tools/probe-update-queue.mjs && node tools/client-smoke.mjs && node tools/verify-css.mjs && node tools/verify-sort-paging.mjs && node tools/verify-detail-links.mjs && node tools/verify-group-row.mjs",

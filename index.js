@@ -17,6 +17,7 @@ import * as mcpClient from '@deepseek-ai/dsh-mcp-client';
 import { BlockAssembler } from '@deepseek-ai/dsh-llm';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { describeAbout, toolNamesFor, aboutSourceLabel, needsInstructionsRead } from './lib/about.js';
+import { handshakeCheck, waitedSeconds } from './lib/health.js';
 import { scanHost, mergeIntoRegistry, collapseDuplicateRows, scannedSources, findOrphans, setMountHolder, clearMountHolder } from './lib/scanner.js';
 import { browseCatalog, catalogItemToEntry, CENSUS_SOURCE, fetchRepoStats, fetchSmitheryConfig, githubSearchQuota, searchGithubRepos, USER_AGENT } from './lib/catalog.js';
 import {
@@ -98,6 +99,15 @@ const DIAGNOSIS_TTL_MS = 10 * 60 * 1000;
  * visit — not that the page waits.
  */
 const ABOUT_I18N_TIMEOUT_MS = 15000;
+/**
+ * How long 检查 may wait for a mount that is still handshaking.
+ *
+ * Longer than the mount's own readiness deadline on purpose: this is the one
+ * place a person asks 「到底能不能用」 and is willing to wait for the answer,
+ * while a scan or a toggle has to move on. Bounded all the same — a child stuck
+ * on an interactive login never answers, and the verdict still has to print.
+ */
+const HEALTH_HANDSHAKE_WAIT_MS = 12000;
 
 function dataDir() {
   const home = process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
@@ -3120,6 +3130,22 @@ export async function apply(ctx) {
         if (!row) return json({ error: `no such server: ${name}` }, 404);
         const startedAt = Date.now();
         let attempted = false;
+        let waitedMs = 0;
+        // A mount that is still handshaking is not yet a failure, and 「21 ms」
+        // used to sit next to the sentence 「8s 内没返回」: the number came from the
+        // mount's deadline, not from anything this check had observed. Wait for
+        // the in-flight fiber once, so the verdict describes the moment it was
+        // taken rather than a flag left behind by an earlier attempt.
+        const inFlight = starting.has(row.name) ? fibers.get(row.name) : null;
+        if (inFlight && typeof inFlight.await === 'function') {
+          attempted = true;
+          const waitFrom = Date.now();
+          await Promise.race([
+            inFlight.await().catch(() => {}),
+            new Promise((resolve) => { setTimeout(resolve, HEALTH_HANDSHAKE_WAIT_MS); }),
+          ]);
+          waitedMs = Date.now() - waitFrom;
+        }
         if (retry === true && row.enabled !== false && row.providedExternally !== true && !fibers.has(row.name)) {
           attempted = true;
           try {
@@ -3145,11 +3171,7 @@ export async function apply(ctx) {
               ? (row.providedExternally === true ? '由其他插件提供同一个 serverName' : '已挂载')
               : row.connectError ? `未挂载：${capText(row.connectError, 180)}` : '未挂载',
           },
-          {
-            id: 'handshake',
-            ok: mounted && !handshaking,
-            detail: handshaking ? '握手未完成（8s 内没返回）' : mounted ? '握手完成' : '未开始',
-          },
+          { id: 'handshake', ...handshakeCheck({ mounted, starting: handshaking, waitedMs }) },
           {
             id: 'tools',
             ok: tools === null ? true : tools > 0,
@@ -3168,6 +3190,8 @@ export async function apply(ctx) {
           at: new Date().toISOString(),
           ok,
           attempted,
+          waitedMs,
+          waitedSeconds: waitedSeconds(waitedMs),
           toolCount: tools,
           checks,
           ms: Date.now() - startedAt,
