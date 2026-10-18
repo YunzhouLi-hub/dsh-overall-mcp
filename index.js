@@ -18,6 +18,7 @@ import { BlockAssembler } from '@deepseek-ai/dsh-llm';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { describeAbout, toolNamesFor, aboutSourceLabel, needsInstructionsRead } from './lib/about.js';
 import { handshakeCheck, waitedSeconds } from './lib/health.js';
+import { probeRemoteAuth } from './lib/remote-auth.js';
 import { scanHost, mergeIntoRegistry, collapseDuplicateRows, scannedSources, findOrphans, setMountHolder, clearMountHolder } from './lib/scanner.js';
 import { browseCatalog, catalogItemToEntry, CENSUS_SOURCE, fetchRepoStats, fetchSmitheryConfig, githubSearchQuota, searchGithubRepos, USER_AGENT } from './lib/catalog.js';
 import {
@@ -45,7 +46,7 @@ import {
   needsTranslation, parseTranslations, targetLang, translationKey,
 } from './lib/about-i18n.js';
 import {
-  applyValues, channelOf, composeMountArgs, configSpecFor, configState, fieldGaps, isSmitheryCli, looksLikeCredentialFailure, maskedFields, smitheryFieldsOf, specOf,
+  applyValues, channelOf, composeMountArgs, configSpecFor, configState, fieldGaps, isSmitheryCli, looksLikeCredentialFailure, maskedFields, mountArgv, normalizeField, smitheryFieldsOf, specOf,
 } from './lib/server-config.js';
 import { collectRepoMedia } from './lib/media.js';
 import { httpStatusFor } from './lib/http-status.js';
@@ -171,9 +172,10 @@ function toMcpConfig(entry, serverName) {
     transport: 'stdio',
     serverName,
     command: entry.command,
-    // A CLI-channel entry carries its settings as one argv element
-    // (`--config '{"key":"value"}'`); everything else keeps the args it came with.
-    args: [...(entry.args ?? []), ...composeMountArgs(entry)],
+    // `mountArgv` owns the argv: a CLI-channel entry appends its `--config` JSON,
+    // and a `docker run` entry threads its stored env through `-e KEY=value`
+    // before the image (docker's own process env never reaches the container).
+    args: mountArgv(entry),
     env: entry.env ?? {},
     cwd: entry.cwd ?? '',
   };
@@ -1073,6 +1075,11 @@ export async function apply(ctx) {
    */
   async function attachSmitherySchema(item, entry) {
     if (item?.source !== 'smithery' || !entry) return;
+    // A hosted server is reached over http, not launched: there is no argv to
+    // put a `--config` JSON into, so the CLI-shaped config would be a form whose
+    // values go nowhere. What such a row needs instead is the header the endpoint
+    // itself asks for — see `attachObservedAuth`.
+    if (entry.transport !== 'stdio') return;
     if (entry.config?.schema) return;
     const raw = item?.raw ?? {};
     const qualified = typeof raw.qualifiedName === 'string' ? raw.qualifiedName.trim() : typeof raw.name === 'string' ? raw.name.trim() : '';
@@ -1139,14 +1146,61 @@ export async function apply(ctx) {
     return healed;
   }
 
+  /**
+   * Ask a hosted endpoint whether it wants a token, and turn the answer into the
+   * one field that actually reaches it: an `Authorization` header.
+   *
+   * This is the only requirement the panel can state without guessing — the
+   * endpoint itself answers `401` and names the scheme. When the probe cannot
+   * tell (offline, `5xx`, an endpoint that rejects the probe), nothing is added:
+   * an unproven requirement is exactly the 「每台远端都让填 token」 noise this
+   * change exists to remove.
+   */
+  async function attachObservedAuth(entry) {
+    if (!entry || entry.transport !== 'streamable-http' || typeof entry.url !== 'string') return;
+    const demand = await probeRemoteAuth(entry.url, { timeoutMs: 5000 });
+    if (demand) entry.authDemand = demand;
+    if (demand?.required !== true) return;
+    const spec = configSpecFor(null, entry);
+    const help = [
+      demand.description ? `端点回了 401：${demand.description}` : '端点回了 401，要求证明身份。',
+      demand.resource ? `授权信息：${demand.resource}` : '',
+      '按服务商的文档填，多数是 `Bearer <令牌>`。',
+    ].filter(Boolean).join(' ');
+    const field = normalizeField(
+      { key: 'Authorization', kind: 'header', label: 'Authorization', help, required: true, secret: true, origin: 'observed' },
+      { kind: 'header', origin: 'observed' },
+    );
+    if (!field) return;
+    const rest = (spec?.fields ?? []).filter((existing) => existing.key !== 'Authorization');
+    entry.config = { ...(entry.config ?? {}), origin: 'observed', via: 'header', fields: [field, ...rest] };
+  }
+
   async function doInstallImpl(item, { overwrite = false } = {}) {
-    const entry = catalogItemToEntry(item);
+    let resolved = item;
+    // A hosted Smithery record has no endpoint in the listing — only the detail
+    // endpoint knows it. Resolve it before the row exists, because an http entry
+    // without a url is not installable at all (`catalogItemToEntry` refuses it).
+    if (item?.install?.deferred === true) {
+      const raw = item?.raw ?? {};
+      const qualified = typeof raw.qualifiedName === 'string' ? raw.qualifiedName.trim() : typeof raw.name === 'string' ? raw.name.trim() : '';
+      const found = qualified === '' ? null : await fetchSmitheryConfig(qualified);
+      if (!found?.httpUrl) {
+        throw new Error(`${item?.name ?? 'this server'}: Smithery 说它由官方托管，但详情端点没有给出 deploymentUrl —— 装不了（原来的 \`npx @smithery/cli run\` 只会拉起交互式登录，不会成为一台本地服务器）`);
+      }
+      resolved = { ...item, install: { ...item.install, url: found.httpUrl, deferred: false, resolvedAt: new Date().toISOString() } };
+    }
+    const entry = catalogItemToEntry(resolved);
     if (!entry) throw new Error('item has no installable transport (stdio command or http url)');
     // Smithery states the requirement on the detail endpoint, not on the card
     // (`connections[].configSchema`); without it the row would install looking
     // complete and fail on the first tool call. Fetched before the row is
     // written so the badge and the form are right from the first render.
-    await attachSmitherySchema(item, entry);
+    await attachSmitherySchema(resolved, entry);
+    // For a hosted row the requirement is whatever the endpoint answers: a `401`
+    // and a `Bearer` challenge become a required Authorization field, and a 200
+    // means the row is complete as it stands.
+    await attachObservedAuth(entry);
     // Whether this row is missing a required setting, read before mounting: a
     // declared-but-unfilled field predicts the auth failure, and the same fields
     // must be named by the badge, the reply and the config form.
@@ -2274,7 +2328,11 @@ export async function apply(ctx) {
       raw: undefined,
       qualifiedName: item.raw?.qualifiedName ?? undefined,
       proposedName: name,
-      installable: entry !== null,
+      // `catalogItemToEntry` refuses an http item that has no url yet, and a
+      // hosted Smithery row only learns its url at install time. Calling that
+      // 「需手动配置」 would hide the install button on every hosted entry —
+      // the transport is declared, so the row is installable by definition.
+      installable: entry !== null || item?.install?.deferred === true,
       installed,
       favorite: favorites.has(favoriteKeyOf(item)),
       // Installs made from this panel, so the card can show them next to the

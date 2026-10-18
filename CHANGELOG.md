@@ -14,6 +14,15 @@
   由 `tools/client-smoke.mjs` 断言相等，并断言本文件的最新小节就是该版本——一份停在旧版本的
   更新日志，和一枚说谎的版本徽章是同一类问题。
 
+## 0.11.0 — 2026-10-18
+
+### 装，就按来源写的方式装
+- `catalog:smithery` 的条目现在分两种装法。Smithery 自己托管（`remote: true`）的，装成远程 http——端点去详情端点要（`connections[].deploymentUrl`）；只有他们不托管的，才走 `npx @smithery/cli run`。
+- 之前一律装成后者，而它并不是一台本地服务器：CLI 把记录解析成同一个远程端点，拉起 `mcp-remote` 等交互式 OAuth 登录。无头挂载里这一步永远不会完成——实测 `run upstash/context7-mcp` 20 秒零响应，日志停在 `Another instance is running the sign-in for this server on port 4814`。这类行的状态因此永久停在「正在连接」。
+- `docker run` 的条目把存下的环境变量变成 `-e KEY=value`，并且插在镜像之前。docker CLI 只读它自己的进程环境，`config.env` 从来没有进过容器；而写在镜像之后的参数会被当成容器自己的命令。
+### 必填，只信端点的 401
+- 新 `lib/remote-auth.js`：对 http 端点发一次 `initialize`，把 `401` 和它的 `WWW-Authenticate` 读成一条必填的 `Authorization`。读不出来（超时、`5xx`、端点拒绝探针）就一条都不加——「不知道」不再冒充「不需要」，也不冒充「需要」。
+- 这样来的字段在表单里标成「这个端点自己要求的」，与「发布方声明的」分开，一眼能看出证据来自哪里。
 ## 0.10.0 — 2026-10-18
 
 ### 检查结论补上耗时

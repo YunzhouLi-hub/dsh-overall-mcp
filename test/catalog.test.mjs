@@ -354,7 +354,35 @@ test('smithery items expose installs, icon and verification for the card', async
   assert.equal(pg.installs, 12000);
   assert.equal(pg.verified, true);
   assert.equal(pg.icon, 'https://api.smithery.ai/servers/acme/pg/icon');
-  assert.equal(pg.install.command, 'npx');
+  // `remote: true` is Smithery's own statement that they host the server. The
+  // install is therefore the http endpoint (resolved from the detail endpoint at
+  // install time), not `npx @smithery/cli run` — that command resolves to the very
+  // same remote endpoint, spawns `mcp-remote`, and waits for an interactive OAuth
+  // sign-in that never happens in a headless mount.
+  assert.equal(pg.transport, 'streamable-http');
+  assert.equal(pg.install.transport, 'streamable-http');
+  assert.equal(pg.install.url, null, 'the listing carries no endpoint; install resolves it');
+  assert.equal(pg.install.deferred, true);
+  assert.equal(pg.install.command, undefined);
+});
+
+test('a smithery item they do not host keeps the local CLI install', async () => {
+  const fetchImpl = async (url) => {
+    if (String(url).includes('smithery')) {
+      return {
+        ok: true,
+        json: async () => ({
+          servers: [{ qualifiedName: 'acme/local', displayName: 'Local', description: 'runs here', remote: false, useCount: 1 }],
+        }),
+      };
+    }
+    return { ok: true, json: async () => ({}) };
+  };
+  const { items } = await browseCatalog({ fetchImpl, source: 'smithery' });
+  assert.equal(items[0].transport, 'stdio');
+  assert.equal(items[0].install.command, 'npx');
+  assert.deepEqual(items[0].install.args, ['-y', '@smithery/cli', 'run', 'acme/local']);
+  assert.equal(items[0].install.deferred, undefined);
 });
 
 // --- lifecycle (deprecation) ------------------------------------------------

@@ -59,7 +59,7 @@ window.__ModuleLoader__.load({
 		// probe also checks CHANGELOG.md's newest section is this version, since
 		// a release note that stops at an older build tells a reader what
 		// changed in code they are not running.
-		const CLIENT_VERSION = "0.10.0";
+		const CLIENT_VERSION = "0.11.0";
 		// Where 「点个 star」 points. A constant, not a config: it is this
 		// plugin's own repository, and a panel that could be pointed at another
 		// repository would be asking for a star it does not deserve.
@@ -1383,6 +1383,12 @@ window.__ModuleLoader__.load({
 			const ref = rowRef(server);
 			const originNote = server.config?.origin === "official"
 				? "这些字段来自官方注册表为这个包声明的环境变量（必填/密钥也是它说的）。"
+				: server.config?.origin === "observed"
+					// Nothing published it — the endpoint itself did. A hosted
+					// MCP endpoint answers `401` and names the scheme it wants,
+					// so this is the one requirement that is measured rather than
+					// guessed, and the sheet can say where it came from.
+					? "这些字段是这个端点自己要求的：不带凭据请求一次，它回了 401 并说明了要什么。"
 				: server.config?.origin === "smithery"
 					// A Smithery row does declare fields, and they are not
 					// environment variables: the CLI takes one JSON argument.
@@ -2044,7 +2050,10 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, onI
 				? (item.installable ? "可一键安装" : "需手动配置")
 				: installTransport === "stdio"
 					? `stdio · ${installRunner ?? "本地命令"}`
-					: "远程 · 免安装";
+					// A hosted row states its transport but not its endpoint — the
+					// detail endpoint is asked at install time. Saying 「免安装」
+					// would promise a click that still has one network step in it.
+					: item.install.deferred === true ? "远程 · 装时取端点" : "远程 · 免安装";
 			const installTitle = item.install
 				? [installTransport, item.install.command, item.install.url, item.installSource?.text].filter(Boolean).join(" · ")
 				: installChip;

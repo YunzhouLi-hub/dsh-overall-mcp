@@ -1961,3 +1961,58 @@ test('a config-bag save lands in --config, not in env', async () => {
     assert.deepEqual(composeMountArgs(row), ['--config', '{"braveApiKey":"BSA-test-value"}']);
   });
 });
+test('a hosted smithery install resolves its endpoint and turns the 401 into a required header', async () => {
+  const detail = {
+    connections: [{ type: 'http', deploymentUrl: 'https://demo.run.tools', configSchema: { type: 'object', required: [], properties: {} } }],
+    remote: true,
+  };
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const href = String(url);
+    if (href.includes('registry.smithery.ai/servers/')) {
+      return { ok: true, status: 200, text: async () => '', json: async () => detail };
+    }
+    if (href === 'https://demo.run.tools') {
+      return {
+        ok: false,
+        status: 401,
+        headers: {
+          get: (name) => (String(name).toLowerCase() === 'www-authenticate' ? 'Bearer error="invalid_token", error_description="Missing Authorization header"' : null),
+        },
+        text: async () => '',
+      };
+    }
+    return { ok: false, status: 404, text: async () => '', json: async () => ({}) };
+  };
+  try {
+    await withHost({ version: 1, servers: [] }, async ({ call, readRegistry }) => {
+      const reply = await call('/api/overall-mcp/install', {
+        body: {
+          item: {
+            name: 'demo',
+            source: 'smithery',
+            transport: 'streamable-http',
+            install: { transport: 'streamable-http', url: null, deferred: true },
+            raw: { qualifiedName: 'acme/demo', remote: true },
+            description: 'hosted demo',
+          },
+        },
+      });
+      assert.equal(reply.status, 200, JSON.stringify(reply.body));
+      const row = (await readRegistry()).servers[0];
+      // The listing had no endpoint; the detail endpoint did.
+      assert.equal(row.transport, 'streamable-http');
+      assert.equal(row.url, 'https://demo.run.tools');
+      // The requirement is measured, not guessed: the endpoint answered 401.
+      assert.equal(row.config.origin, 'observed');
+      assert.equal(row.config.fields[0].key, 'Authorization');
+      assert.equal(row.config.fields[0].kind, 'header');
+      assert.equal(row.config.fields[0].required, true);
+      assert.match(String(row.config.fields[0].help), /Missing Authorization header/);
+      // And it never becomes a CLI flag: there is no argv on an http row.
+      assert.equal(row.config.via, 'header');
+    });
+  } finally {
+    globalThis.fetch = real;
+  }
+});

@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 
 import {
   applyValues, argFields, configSpecFor, configState, fieldGaps, looksLikeCredentialFailure,
-  maskedFields, normalizeField, officialFields, remoteFields, smitheryFieldsOf, specOf, MAX_VALUE_CHARS,
+  maskedFields, mountArgv, normalizeField, officialFields, remoteFields, smitheryFieldsOf, specOf, MAX_VALUE_CHARS,
   RESERVED_HEADERS, CODE_LOADING_ENV_VARS, redactEchoValue,
 } from '../lib/server-config.js';
 
@@ -526,4 +526,41 @@ test('a Smithery configSchema counts as a declaration', () => {
   const spec = configSpecFor(null, entry);
   assert.equal(spec.via, 'cli-json');
   assert.equal(configState(spec, entry).needs, true);
+});
+// --- mount argv (docker) ----------------------------------------------------
+
+test('a docker row threads its env through -e, before the image', () => {
+  const entry = {
+    name: 'ctx',
+    transport: 'stdio',
+    command: 'docker',
+    args: ['run', '-i', '--rm', 'mcp/context7'],
+    env: { BRAVE_API_KEY: 'k', '2bad': 'no', EMPTY: '' },
+  };
+  // docker's CLI reads its *own* process env, so `config.env` would never reach
+  // the container; and `-e` after the image would become the container command.
+  assert.deepEqual(mountArgv(entry), ['run', '-i', '--rm', '-e', 'BRAVE_API_KEY=k', 'mcp/context7']);
+});
+
+test('an option that takes a value does not get mistaken for the image', () => {
+  const entry = {
+    name: 'ctx',
+    transport: 'stdio',
+    command: 'docker',
+    args: ['run', '-i', '-v', '/tmp/data:/data', '--rm', 'mcp/context7'],
+    env: { TOKEN: 't' },
+  };
+  assert.deepEqual(mountArgv(entry), ['run', '-i', '-v', '/tmp/data:/data', '--rm', '-e', 'TOKEN=t', 'mcp/context7']);
+});
+
+test('a docker row with nothing stored is left exactly as declared', () => {
+  const args = ['run', '-i', '--rm', 'mcp/context7'];
+  assert.deepEqual(mountArgv({ command: 'docker', args }), args);
+});
+
+test('a non-docker row keeps its env out of the argv', () => {
+  // npx/uvx/python take their environment from the process, so adding `-e` there
+  // would hand the key to the wrong parser.
+  const entry = { command: 'npx', args: ['-y', 'tavily-mcp@latest'], env: { TAVILY_API_KEY: 'k' } };
+  assert.deepEqual(mountArgv(entry), ['-y', 'tavily-mcp@latest']);
 });
