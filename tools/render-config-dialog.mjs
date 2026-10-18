@@ -169,6 +169,11 @@ for (const [label, server] of [['declared', declaredRow], ['bare', bareRow]]) {
     all.includes('写进那份 --config JSON'),
     'cli-json row: the escape hatch does not say where an extra key goes',
   );
+  // 其他键值 must read as optional. A pre-seeded empty row looks like a field
+  // waiting to be filled — its 移除 button is the tell, and there is nothing to
+  // remove until 「+ 加一行」 is pressed.
+  assert.ok(all.includes('+ 加一行'), 'the escape hatch lost its add button');
+  assert.ok(!all.includes('移除'), 'the escape hatch opened with an empty row, so it reads as required');
 
   const bags = __test.splitValues(
     declaredRow.config.fields,

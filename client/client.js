@@ -1256,7 +1256,11 @@ window.__ModuleLoader__.load({
 			// offered a channel that CLI never reads.
 			const defaultKind = server.channel === "cli-json" ? "config" : "env";
 			const [values, setValues] = useState({});
-			const [custom, setCustom] = useState([{ key: "", kind: defaultKind, value: "" }]);
+			// No row is pre-seeded. An empty input with an empty select reads as
+			// 「请填写」, and this block is the opposite of that: it is the escape
+			// hatch for keys nothing declared, and it may stay untouched forever.
+			// 「+ 加一行」 is what makes one appear.
+			const [custom, setCustom] = useState([]);
 			const [busy, setBusy] = useState(false);
 			const [error, setError] = useState("");
 			const [result, setResult] = useState(null);
@@ -1436,7 +1440,7 @@ window.__ModuleLoader__.load({
 								// A `--config` row's extra keys belong in the same JSON as its
 								// declared ones; defaulting to 环境变量 there would offer a
 								// channel that server never reads.
-								onClick: () => setCustom((prev) => [...prev, { key: "", kind: server.channel === "cli-json" ? "config" : "env", value: "" }]),
+								onClick: () => setCustom((prev) => [...prev, { key: "", kind: defaultKind, value: "" }]),
 							}, "+ 加一行"),
 						]),
 						...custom.map((row, index) => createElement("div", {
