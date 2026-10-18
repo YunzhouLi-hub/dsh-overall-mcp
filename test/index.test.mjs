@@ -19,6 +19,9 @@ import path from 'node:path';
 // The search-budget state lives in the catalog module, not in the host, so the
 // case below can watch it and clean up after itself.
 import { forgetGithubSearchQuota, githubSearchQuota } from '../lib/catalog.js';
+// The mount arguments are what proves a `config` value reached the `--config`
+// flag instead of the `env` bag the CLI never reads.
+import { composeMountArgs } from '../lib/server-config.js';
 
 // The two DSH peer packages are supplied by the harness at runtime and are not
 // installed here; without this mapping `import('../index.js')` cannot resolve.
@@ -1786,5 +1789,48 @@ test('检查 reports which link of the mount actually failed', async () => {
     assert.equal(saved.servers[0].health.ok, false);
     assert.equal(typeof saved.servers[0].health.at, 'string');
     assert.equal((await call('/api/overall-mcp/health', { body: { name: 'nope', slot: 0 } })).status, 404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 配置在 `--config` 行上曾经写错袋子. A Smithery row's declared key is
+// `kind: 'config'`, which means "this goes into the JSON string of the --config
+// flag". The sheet wrote every non-header field to `env` — a bag that CLI never
+// reads — so the save answered 已保存 while the row kept saying 还缺, forever.
+test('a config-bag save lands in --config, not in env', async () => {
+  const registry = {
+    version: 1,
+    servers: [{
+      name: 'brave-search',
+      source: 'catalog:smithery',
+      transport: 'stdio',
+      enabled: false,
+      command: 'npx',
+      args: ['-y', '@smithery/cli', 'run', 'brave'],
+      env: {},
+      config: {
+        fields: [{ key: 'braveApiKey', kind: 'config', label: 'Brave API Key', required: true, secret: true, declared: true }],
+        origin: 'smithery',
+        via: 'cli-json',
+        flag: '--config',
+      },
+    }],
+  };
+  await withHost(registry, async ({ call, readRegistry }) => {
+    const reply = await call('/api/overall-mcp/configure', {
+      body: { name: 'brave-search', slot: 0, config: { braveApiKey: 'BSA-test-value' } },
+    });
+    assert.equal(reply.status, 200, JSON.stringify(reply.body));
+    assert.equal(reply.body.saved, true);
+    assert.deepEqual(reply.body.changed, [{ key: 'braveApiKey', kind: 'config', action: 'set' }]);
+    // The row is satisfied, and the value is where the mount reads it.
+    assert.equal(reply.body.needConfig, false);
+    const row = (await readRegistry()).servers[0];
+    assert.equal(row.configValues.braveApiKey, 'BSA-test-value');
+    assert.equal('braveApiKey' in (row.env ?? {}), false);
+    // The mask is computed on the way out, so it never reaches the file.
+    assert.equal(reply.body.config.fields[0].value, '••••');
+    // What the mount would actually be told — the whole point of the channel.
+    assert.deepEqual(composeMountArgs(row), ['--config', '{"braveApiKey":"BSA-test-value"}']);
   });
 });

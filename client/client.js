@@ -1217,10 +1217,46 @@ window.__ModuleLoader__.load({
 		 *     submitted every input would send `••••` as the token itself.
 		 *   - Cross-check with what the host owes us.
 		 */
+		/**
+		 * Route the sheet's inputs into their three bags: `env`, `headers`, `config`.
+		 *
+		 * A field's `kind` is the channel the server itself declared, and it decides
+		 * where the value goes — not one catch-all bag. Before this, a Smithery
+		 * field (`kind: 'config'`) was written to `env`, a place `@smithery/cli run`
+		 * never reads; the save looked successful and the row kept saying 还缺
+		 * forever, because `composeMountArgs` reads `configValues` for the
+		 * `--config` JSON.
+		 *
+		 * Pure and module-scope on purpose: `tools/render-config-dialog.mjs` asserts
+		 * the routing without needing a live React state machine to type into.
+		 */
+		function splitValues(fields, values, custom) {
+			const bags = { env: {}, headers: {}, config: {} };
+			const target = (kind) => (kind === "header" ? bags.headers : kind === "config" ? bags.config : bags.env);
+			for (const field of fields) {
+				const id = `${field.kind}:${field.key}`;
+				// Only touched fields: an untouched secret renders as 「已保存」 and the
+				// host never echoes it back, so submitting every input would write
+				// 「••••」 as the token itself.
+				if (!Object.prototype.hasOwnProperty.call(values, id)) continue;
+				target(field.kind)[field.key] = values[id];
+			}
+			for (const row of custom) {
+				const key = String(row?.key ?? "").trim();
+				if (key === "" || row?.value === "") continue;
+				target(row.kind)[key] = row.value;
+			}
+			return bags;
+		}
+
 		function ConfigDialog({ server, onClose, onSaved }) {
 			const fields = server.config?.fields ?? [];
+			// A `--config` row stores its settings as JSON on the command line, so a
+			// brand-new key row must default to 配置项 there. Seeding it as 环境变量
+			// offered a channel that CLI never reads.
+			const defaultKind = server.channel === "cli-json" ? "config" : "env";
 			const [values, setValues] = useState({});
-			const [custom, setCustom] = useState([{ key: "", kind: "env", value: "" }]);
+			const [custom, setCustom] = useState([{ key: "", kind: defaultKind, value: "" }]);
 			const [busy, setBusy] = useState(false);
 			const [error, setError] = useState("");
 			const [result, setResult] = useState(null);
@@ -1262,19 +1298,11 @@ window.__ModuleLoader__.load({
 			const save = async () => {
 				setBusy(true); setError(""); setResult(null);
 				try {
-					const env = {}; const headers = {};
-					for (const field of fields) {
-						if (!dirty(field)) continue;
-						(field.kind === "header" ? headers : env)[field.key] = values[idOf(field)];
-					}
-					for (const row of custom) {
-						const key = row.key.trim();
-						if (key === "" || row.value === "") continue;
-						(row.kind === "header" ? headers : env)[key] = row.value;
-					}
+					const bags = splitValues(fields, values, custom);
 					const payload = { ...ref };
-					if (Object.keys(env).length) payload.env = env;
-					if (Object.keys(headers).length) payload.headers = headers;
+					if (Object.keys(bags.env).length) payload.env = bags.env;
+					if (Object.keys(bags.headers).length) payload.headers = bags.headers;
+					if (Object.keys(bags.config).length) payload.config = bags.config;
 					const reply = await api("/configure", { method: "POST", body: JSON.stringify(payload) });
 					setResult(reply);
 					setValues({});
@@ -1397,12 +1425,18 @@ window.__ModuleLoader__.load({
 						// person holding the token.
 						createElement("div", { key: "kv", style: styles.kvHead }, [
 							createElement("span", { key: "t", style: styles.fieldLabel }, "其他键值"),
-							createElement("span", { key: "h", style: styles.fieldOpt }, "没有列出来的变量可以自己加"),
+							createElement("span", { key: "h", style: styles.fieldOpt },
+								server.channel === "cli-json"
+									? "没有被声明、但这台服务器要的键——写进那份 --config JSON"
+									: "没有列出来的变量可以自己加"),
 							createElement("span", { key: "sp", style: styles.spacer }),
 							createElement("button", {
 								key: "add", type: "button", className: "omkt-btn omkt-btn-outline",
 								style: styles.sourceMiniBtn, disabled: busy,
-								onClick: () => setCustom((prev) => [...prev, { key: "", kind: "env", value: "" }]),
+								// A `--config` row's extra keys belong in the same JSON as its
+								// declared ones; defaulting to 环境变量 there would offer a
+								// channel that server never reads.
+								onClick: () => setCustom((prev) => [...prev, { key: "", kind: server.channel === "cli-json" ? "config" : "env", value: "" }]),
 							}, "+ 加一行"),
 						]),
 						...custom.map((row, index) => createElement("div", {
@@ -1415,10 +1449,11 @@ window.__ModuleLoader__.load({
 							}, [
 								createElement("option", { key: "e", value: "env" }, "环境变量"),
 								createElement("option", { key: "h", value: "header" }, "请求头"),
+								createElement("option", { key: "c", value: "config" }, "配置项"),
 							]),
 							createElement("input", {
 								key: "key", className: "omkt-input", style: styles.kvKey,
-								value: row.key, placeholder: row.kind === "header" ? "Authorization" : "MY_VAR",
+								value: row.key, placeholder: row.kind === "header" ? "Authorization" : row.kind === "config" ? "apiKey" : "MY_VAR",
 								onChange: (e) => setCustom((prev) => prev.map((r, i) => (i === index ? { ...r, key: e.target.value } : r))),
 							}),
 							createElement("input", {
@@ -1438,7 +1473,7 @@ window.__ModuleLoader__.load({
 					result?.rejected?.length
 						? createElement("div", { key: "rej", style: styles.warnLine }, [
 							createElement("div", { key: "rh", style: { fontWeight: 600 } }, "以下配置项未被保存："),
-							...result.rejected.map((r, i) => createElement("div", { key: `rej:${i}`, style: { fontSize: 12, marginTop: 2 } }, `• ${r.key}（${r.kind === "header" ? "请求头" : "环境变量"}）：${r.reason}`)),
+							...result.rejected.map((r, i) => createElement("div", { key: `rej:${i}`, style: { fontSize: 12, marginTop: 2 } }, `• ${r.key}（${r.kind === "header" ? "请求头" : r.kind === "config" ? "配置项" : "环境变量"}）：${r.reason}`)),
 						])
 						: null,
 					result?.note
@@ -5292,6 +5327,9 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, onI
 			// that renders the section can reach it; rendering it directly is the
 			// only way to catch a throw that happens before the first paint.
 			ConfigDialog,
+			// The three-bag routing, so a probe can prove a declared `config` key is
+			// not silently written to `env`.
+			splitValues,
 			// A row's 检查 button and its verdict line exist only on a row, so
 			// tools/render-server-health.mjs renders ServerRow directly with the
 			// three shapes the host sends (never checked / healthy / no tools).

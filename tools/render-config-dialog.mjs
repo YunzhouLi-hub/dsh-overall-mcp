@@ -77,6 +77,7 @@ function textOf(node) {
 const declaredRow = {
   name: 'brave-search', slot: 6, transport: 'stdio', serverName: 'brave-search',
   enabled: true, connected: false, status: 'stopped', providedExternally: false, needConfig: true,
+  channel: 'cli-json',
   config: {
     origin: 'smithery', missing: ['braveApiKey'], pending: [],
     fields: [{
@@ -156,6 +157,31 @@ for (const [label, server] of [['declared', declaredRow], ['bare', bareRow]]) {
   } finally {
     globalThis.fetch = before;
   }
+}
+
+// 5. A `--config` row must not offer 环境变量 as the home for its keys. The
+//    declared braveApiKey is `kind: 'config'`, and a value written to `env` is a
+//    value `@smithery/cli run` never reads — the save reports success while the
+//    row keeps saying 还缺 forever.
+{
+  const all = textOf(__test.ConfigDialog({ server: declaredRow, onClose: () => {}, onSaved: async () => {} }));
+  assert.ok(
+    all.includes('写进那份 --config JSON'),
+    'cli-json row: the escape hatch does not say where an extra key goes',
+  );
+
+  const bags = __test.splitValues(
+    declaredRow.config.fields,
+    { 'config:braveApiKey': 'BSA-example' },
+    [{ key: ' extraMode ', kind: 'config', value: 'fast' }, { key: 'MODE', kind: 'env', value: 'dev' }],
+  );
+  assert.deepEqual(bags.config, { braveApiKey: 'BSA-example', extraMode: 'fast' }, 'a config key did not reach the --config bag');
+  assert.deepEqual(bags.env, { MODE: 'dev' }, 'an env key did not reach the env bag');
+  assert.deepEqual(bags.headers, {}, 'a headers bag was invented for a stdio row');
+
+  // Untouched fields still contribute nothing, whichever channel they are on.
+  const untouched = __test.splitValues(declaredRow.config.fields, {}, [{ key: '', kind: 'config', value: '' }]);
+  assert.deepEqual(untouched, { env: {}, headers: {}, config: {} }, 'an untouched form produced a value');
 }
 
 console.log('\nconfig sheet renders: declared and bare rows both paint, untouched saves stay empty');

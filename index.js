@@ -2662,12 +2662,13 @@ export async function apply(ctx) {
         name: { type: 'string', required: true },
         env: { type: 'json', description: 'Environment values keyed by variable name, e.g. {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_…"}.' },
         headers: { type: 'json', description: 'HTTP header values for a remote (streamable-http) entry, e.g. {"Authorization": "Bearer …"}.' },
+        config: { type: 'json', description: 'Values for a server that takes its settings as a JSON flag (a Smithery CLI entry: `--config`), keyed by the field names whose kind is `config`. Sending such a key through `env` writes it where that CLI never reads, and the row keeps reporting it as missing.' },
         slot: { type: 'integer', description: 'Position of the row in the overall_mcp_list answer, to pick one of several same-named entries.' },
         from: { type: 'string', description: 'Version the row displayed (fallback for a client that rendered before slots existed).' },
       },
       output: jsonOut,
-      async execute({ name, env, headers, slot, from }) {
-        return await doConfigure(name, { env, headers }, {
+      async execute({ name, env, headers, config, slot, from }) {
+        return await doConfigure(name, { env, headers, config }, {
           slot: Number.isInteger(slot) ? slot : null,
           from: typeof from === 'string' && from !== '' ? from : null,
           actor: 'model',
@@ -2970,9 +2971,9 @@ export async function apply(ctx) {
         return json(result);
       })],
       ['/api/overall-mcp/configure', ['POST'], guard(async (req) => {
-        const { name, env, headers, slot, from } = await readBody(req);
+        const { name, env, headers, config, slot, from } = await readBody(req);
         if (typeof name !== 'string' || name === '') return json({ error: 'name (string) required' }, 400);
-        return json(await doConfigure(name, { env, headers }, {
+        return json(await doConfigure(name, { env, headers, config }, {
           slot: Number.isInteger(slot) ? slot : null,
           from: typeof from === 'string' && from !== '' ? from : null,
           actor: 'user',

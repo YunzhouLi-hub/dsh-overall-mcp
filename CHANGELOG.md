@@ -60,6 +60,23 @@ dispose、一个工具都没注册，行上照样是「已连接」——这是�
 `tools/render-server-health.mjs` 断言三种形状：没检查过不编造、健康带工具数与时间、不健康
 点名失败的那一项。
 
+### 一个键的去处
+
+配置表单把「不是请求头的键」一律写进 `env`。对 `--config` 型的服务器（Smithery CLI：`npx
+-y @smithery/cli run brave`）这是写错了袋子——它只读命令行上那串 JSON，`env` 里的
+`braveApiKey` 它一辈子不会看。症状因此特别难查：保存回「已保存」，`configValues` 仍是空的，
+行上继续写「还缺 braveApiKey」，看起来像表单没生效，其实是生效了但落到了没人读的地方。
+
+现在按字段自己声明的通道分三袋：`header` → `headers`，`config` → `configValues`（挂载时序列化
+成 `--config <json>`），其余 → `env`。同一处修理还带出「其他键值」那行：`--config` 行上新加的
+键默认就是「配置项」，提示也从「没有列出来的变量可以自己加」改成「写进那份 --config JSON」，
+否则界面替用户选了一条这台服务器读不到的通道。
+
+`tools/render-config-dialog.mjs` 直接断言这条路由：声明的 `config` 键必须落在 `config` 袋里，
+`env` 键必须落在 `env` 袋里，没人碰过的表单三个袋子都为空（这条同时挡住「把 `••••` 当值回传」）。
+`test/index.test.mjs` 再从宿主侧验一遍：存进去之后 `composeMountArgs` 必须真的产出
+`["--config", "{\"braveApiKey\":\"…\"}"]`。
+
 ## 0.7.0 — 2026-10-17
 
 ### 页头多了一枚「点个 star」
