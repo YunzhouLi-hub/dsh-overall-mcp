@@ -3,11 +3,11 @@
 import { readFile } from 'node:fs/promises';
 
 // Classes that exist only as selection hooks for the browser probes: a row's
-// purpose line and facts line are built inline, and once those styles are
-// written as attributes the only way to find them again is a class. They carry
-// no rules on purpose — adding a no-op rule just to satisfy this check would be
-// exactly the dead class the check exists to catch.
-const HOOKS = new Set(['omkt-srow', 'omkt-srow-main', 'omkt-sname', 'omkt-sabout', 'omkt-smeta']);
+// purpose line, facts line and health verdict are built inline, and once those
+// styles are written as attributes the only way to find them again is a class.
+// They carry no rules on purpose — adding a no-op rule just to satisfy this
+// check would be exactly the dead class the check exists to catch.
+const HOOKS = new Set(['omkt-srow', 'omkt-srow-main', 'omkt-sname', 'omkt-sabout', 'omkt-smeta', 'omkt-shealth']);
 
 const src = await readFile('client/client.js', 'utf8');
 const used = new Set();

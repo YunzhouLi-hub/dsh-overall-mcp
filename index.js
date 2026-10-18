@@ -40,7 +40,7 @@ import {
   DIAGNOSIS_SYSTEM, buildDiagnosisPrompt, capText, diagnosisFactsOf, diagnosisTextOf,
 } from './lib/install-diagnosis.js';
 import {
-  applyValues, channelOf, composeMountArgs, configSpecFor, configState, isSmitheryCli, looksLikeCredentialFailure, maskedFields, smitheryFieldsOf, specOf,
+  applyValues, channelOf, composeMountArgs, configSpecFor, configState, fieldGaps, isSmitheryCli, looksLikeCredentialFailure, maskedFields, smitheryFieldsOf, specOf,
 } from './lib/server-config.js';
 import { collectRepoMedia } from './lib/media.js';
 import { httpStatusFor } from './lib/http-status.js';
@@ -624,6 +624,10 @@ export async function apply(ctx) {
         starting: startingNow,
         status,
         providedExternally,
+        // The last health check this row was given, verbatim (`{ at, ok,
+        // toolCount, checks, ms }`). Absent until someone asks for one — a
+        // health verdict that expires silently would be worse than none.
+        ...(s.health ? { health: s.health } : {}),
         serverName: s.serverName ?? toServerName(s.name) ?? undefined,
         error: s.connectError,
         package: (() => {
@@ -3006,6 +3010,83 @@ export async function apply(ctx) {
           ?? servers.find((s) => s.name === name)
           ?? null;
         return json({ healed, server: fresh });
+      })],
+      // 「测一下这台服务器到底能不能用」. Local, cheap, no model call: what decides
+      // a mount is the plugin's own bookkeeping (`fibers` / `starting` /
+      // `connectError`), the host's tool registry (are any `mcp__<server>__`
+      // tools actually published?), and the declarations (is a required value
+      // still missing?). The tool count is the part the dot cannot show: a
+      // server whose process died still has its row, and 「已连接」 on a row the
+      // model cannot see a single tool on is exactly the lie this answers.
+      ['/api/overall-mcp/health', ['POST'], guard(async (req) => {
+        const { name, slot, retry } = await readBody(req);
+        if (typeof name !== 'string' || name === '') return json({ error: 'name (string) required' }, 400);
+        const rows = registry.servers ?? [];
+        const row = Number.isInteger(slot) && rows[slot]?.name === name
+          ? rows[slot]
+          : rows.find((s) => s.name === name) ?? null;
+        if (!row) return json({ error: `no such server: ${name}` }, 404);
+        const startedAt = Date.now();
+        let attempted = false;
+        if (retry === true && row.enabled !== false && row.providedExternally !== true && !fibers.has(row.name)) {
+          attempted = true;
+          try {
+            await connect(row);
+          } catch (err) {
+            row.connectError = String(err?.message ?? err);
+          }
+        }
+        const serverName = row.serverName ?? toServerName(row.name);
+        const mounted = row.providedExternally === true || fibers.has(row.name);
+        const handshaking = starting.has(row.name);
+        const tools = serverName && typeof ctx.tools?.schemas === 'function'
+          ? ctx.tools.schemas().filter((s) => typeof s?.name === 'string' && s.name.startsWith(`mcp__${serverName}__`)).length
+          : null;
+        const spec = specOf(row);
+        const gaps = spec ? fieldGaps(spec, row) : { missing: [], pending: [] };
+        const checks = [
+          { id: 'enabled', ok: row.enabled !== false, detail: row.enabled === false ? '已停用' : '已启用' },
+          {
+            id: 'mounted',
+            ok: mounted,
+            detail: mounted
+              ? (row.providedExternally === true ? '由其他插件提供同一个 serverName' : '已挂载')
+              : row.connectError ? `未挂载：${capText(row.connectError, 180)}` : '未挂载',
+          },
+          {
+            id: 'handshake',
+            ok: mounted && !handshaking,
+            detail: handshaking ? '握手未完成（8s 内没返回）' : mounted ? '握手完成' : '未开始',
+          },
+          {
+            id: 'tools',
+            ok: tools === null ? true : tools > 0,
+            detail: tools === null
+              ? '工具表不可读'
+              : tools > 0 ? `${tools} 个工具在册` : '一个工具都没注册：服务进程可能已经退出',
+          },
+          {
+            id: 'config',
+            ok: gaps.missing.length === 0,
+            detail: gaps.missing.length > 0 ? `还缺 ${gaps.missing.join('、')}` : '声明的要求已齐',
+          },
+        ];
+        const ok = checks.every((check) => check.ok);
+        row.health = {
+          at: new Date().toISOString(),
+          ok,
+          attempted,
+          toolCount: tools,
+          checks,
+          ms: Date.now() - startedAt,
+        };
+        await save();
+        emit({ kind: 'health', action: 'check', target: name, ok, toolCount: tools });
+        const { servers } = await serversPayload();
+        const fresh = (Number.isInteger(slot) ? servers[slot] : null)
+          ?? servers.find((s) => s.name === name)
+          ?? null;
+        return json({ ok, health: row.health, server: fresh });
       })],
       ['/api/overall-mcp/set-source-enabled', ['POST'], guard(async (req) => {
         const { source, enabled } = await readBody(req);

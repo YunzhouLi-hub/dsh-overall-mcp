@@ -1,6 +1,6 @@
 {
   "name": "dsh-overall-mcp",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Overall MCP for DeepSeek Harness: first-run host-wide MCP config scan + auto-import, plus live aggregation of open MCP catalogs (official registry / Smithery / Docker MCP / awesome-remote / awesome-mcp-servers) for search and one-click install.",
   "keywords": ["deepseek-harness", "dsh", "dsh-plugin", "mcp", "model-context-protocol", "scanner", "catalog"],
   "license": "MIT",
@@ -45,7 +45,7 @@
     "test": "node --test test/events.test.mjs test/github-auth.test.mjs test/scanner.test.mjs test/catalog.test.mjs test/catalog-cache.test.mjs test/server-config.test.mjs test/github-index.test.mjs test/repo-install.test.mjs test/custom-sources.test.mjs test/install-diagnosis.test.mjs test/submission.test.mjs test/about.test.mjs test/schema-guard.test.mjs test/http-status.test.mjs test/updates.test.mjs test/media.test.mjs test/self-update.test.mjs test/installs.test.mjs test/index.test.mjs",
     "test:registry": "node tools/registry-submission.mjs --check --registry registry.json",
     "test:layout": "node tools/layout-probe.mjs && node tools/shot.mjs",
-    "test:probes": "node tools/readme-shots.mjs --check && node tools/render-card.mjs && node tools/render-detail.mjs && node tools/render-market-tab.mjs && node tools/render-config-dialog.mjs && node tools/probe-server-about.mjs && node tools/probe-update-queue.mjs && node tools/client-smoke.mjs && node tools/verify-css.mjs && node tools/verify-sort-paging.mjs && node tools/verify-detail-links.mjs && node tools/verify-group-row.mjs",
+    "test:probes": "node tools/readme-shots.mjs --check && node tools/render-card.mjs && node tools/render-detail.mjs && node tools/render-market-tab.mjs && node tools/render-config-dialog.mjs && node tools/render-server-health.mjs && node tools/probe-server-about.mjs && node tools/probe-update-queue.mjs && node tools/client-smoke.mjs && node tools/verify-css.mjs && node tools/verify-sort-paging.mjs && node tools/verify-detail-links.mjs && node tools/verify-group-row.mjs",
     "test:live": "node tools/probe-favorites.mjs",
     "verify:ci": "npm run lint && npm test && npm run test:registry && npm run test:probes",
     "verify": "npm run verify:ci && npm run test:layout"

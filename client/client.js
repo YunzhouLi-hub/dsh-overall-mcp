@@ -59,7 +59,7 @@ window.__ModuleLoader__.load({
 		// probe also checks CHANGELOG.md's newest section is this version, since
 		// a release note that stops at an older build tells a reader what
 		// changed in code they are not running.
-		const CLIENT_VERSION = "0.7.0";
+		const CLIENT_VERSION = "0.8.0";
 		// Where 「点个 star」 points. A constant, not a config: it is this
 		// plugin's own repository, and a panel that could be pointed at another
 		// repository would be asking for a star it does not deserve.
@@ -1032,7 +1032,15 @@ window.__ModuleLoader__.load({
 			}));
 		}
 
-		function ServerRow({ server, busy, job, onToggle, onRemove, onUpdate, onConfigure }) {
+					/** 「检查」那一行怎么读：一句结论 + 第一个不通过的项 + 时刻。 */
+					function healthLine(health) {
+						const at = typeof health?.at === "string" ? health.at.slice(11, 19) : "";
+						const bad = (health?.checks || []).find((check) => check && check.ok === false);
+						const detail = bad?.detail ? `：${bad.detail}` : health?.toolCount ? ` · ${health.toolCount} 个工具` : "";
+						return `检查${health?.ok ? "健康" : "不健康"}${detail}${at ? ` · ${at}` : ""}`;
+					}
+
+		function ServerRow({ server, busy, job, onToggle, onRemove, onUpdate, onConfigure, onHealth }) {
 			const enabled = server.enabled !== false;
 			const provided = server.providedExternally === true;
 			// `connected` alone is 「有一个 fiber」, not 「能用」: a mount whose
@@ -1103,6 +1111,13 @@ window.__ModuleLoader__.load({
 							: null,
 						createElement("div", { key: "meta", className: "omkt-smeta", style: styles.meta },
 							[server.transport, status, toolCount, prefix, pkg].filter(Boolean).join(" · ")),
+						server.health
+							? createElement("div", {
+								key: "health", className: "omkt-shealth",
+								style: { ...styles.meta, color: server.health.ok ? "#2f7d32" : "#b3261e", whiteSpace: "normal" },
+								title: (server.health.checks || []).map((c) => `${c.ok ? "✓" : "✗"} ${c.detail}`).join("\n") || undefined,
+							}, healthLine(server.health))
+							: null,
 					]),
 				]),
 				needsConfig
@@ -1134,6 +1149,13 @@ window.__ModuleLoader__.load({
 							? createElement("span", { key: "newv", style: styles.jobOutcome }, `✓ 已更新到 ${didUpdate}`)
 							: null,
 				createElement("span", { key: "actions", style: { display: "flex", gap: 6, alignItems: "center", ...styles.spacer } }, [
+					createElement("button", {
+						key: "health", type: "button",
+						style: styles.button,
+						disabled: busy,
+						title: "查这台服务器能不能用：挂载、握手、已注册的工具、声明的要求",
+						onClick: () => onHealth(server),
+					}, "检查"),
 					// Any row with a declared field, plus any row whose launch takes
 					// its settings on the command line (a Smithery row can need a key
 					// before its schema has ever been fetched — the channel is the
@@ -1216,7 +1238,7 @@ window.__ModuleLoader__.load({
 					// the sheet denying what it was showing.
 					? "这些字段来自 Smithery 为这台服务器声明的配置；保存后以 --config 的 JSON 交给 CLI。"
 					: server.config?.origin === "args"
-						? "这个来源没有声明配置项；下面是从它的启动命令里识别出的变量名。"
+						? "这个来源没有声明配置项；下面是从它的启动命令里认出来的变量名，所以一个都没有标「必填」——只有发布方声明过的才算必填。"
 						// Nothing declared is a legitimate answer, and it means the
 						// server works without configuration — not that this sheet
 						// failed to find out. Say which of the two happened, because
@@ -1310,7 +1332,16 @@ window.__ModuleLoader__.load({
 										: null,
 									field.required
 										? createElement("span", { key: "r", style: styles.fieldReq }, "必填")
-										: createElement("span", { key: "o", style: styles.fieldOpt }, "可选"),
+										: field.declared === true
+											? createElement("span", { key: "o", style: styles.fieldOpt }, "可选")
+											// Nobody published whether this key is needed — its name
+											// came out of the launch command. Saying 可选 here would
+											// assert something no source said, and 必填 would make
+											// the row look unfinished on a guess.
+											: createElement("span", {
+												key: "u", style: styles.fieldOpt,
+												title: "这个键是从启动命令里认出来的；来源没有声明它是否必填",
+											}, "来源未声明"),
 									field.secret
 										? createElement("span", { key: "sec", style: styles.fieldOpt }, "· 密钥")
 										: null,
@@ -1320,6 +1351,15 @@ window.__ModuleLoader__.load({
 								]),
 								field.help
 									? createElement("div", { key: "h", style: styles.fieldHelp }, field.help)
+									: null,
+								// What the declaration said beyond 「必填」: a default the user
+								// can accept, and the closed set the publisher allows.
+								(field.default || field.choices?.length > 0)
+									? createElement("div", { key: "dflt", style: styles.fieldHelp },
+										[
+											field.default ? `默认：${field.default}` : "",
+											field.choices?.length > 0 ? `可选值：${field.choices.join(" / ")}` : "",
+										].filter(Boolean).join(" · "))
 									: null,
 								createElement("div", { key: "i", style: { display: "flex", gap: 6, alignItems: "center" } }, [
 									createElement("input", {
@@ -1426,7 +1466,7 @@ window.__ModuleLoader__.load({
 			]);
 		}
 
-		function SourceGroup({ source, servers, busy, jobOf, collapsed, onToggleCollapsed, onToggleSource, onToggleServer, onRemove, onUpdate, onConfigure }) {
+		function SourceGroup({ source, servers, busy, jobOf, collapsed, onToggleCollapsed, onToggleSource, onToggleServer, onRemove, onUpdate, onConfigure, onHealth }) {
 			const enabledCount = servers.filter((s) => s.enabled !== false).length;
 			const allOn = enabledCount === servers.length && servers.length > 0;
 			return createElement("div", { style: styles.group }, [
@@ -1451,7 +1491,7 @@ window.__ModuleLoader__.load({
 					servers.map((server) => createElement(ServerRow, {
 						key: rowKey(server), server, busy,
 						job: jobOf(server),
-						onToggle: onToggleServer, onRemove, onUpdate, onConfigure,
+						onToggle: onToggleServer, onRemove, onUpdate, onConfigure, onHealth,
 					}))),
 			]);
 		}
@@ -3490,6 +3530,21 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, onI
 				() => api("/remove", { method: "POST", body: JSON.stringify(rowRef(server)) }),
 				(r) => r.note ?? `${r.removed} 已移除`,
 			);
+			// 「测一下这台服务器能不能用」. `retry: true` lets the host attempt one
+			// mount when the row is enabled but nothing is mounted — that turns a
+			// dead row into either a working one or a real error text, which is
+			// more useful than reporting「未挂载」back at the user who clicked 检查.
+			const doHealth = (server) => run(
+				() => api("/health", {
+					method: "POST",
+					body: JSON.stringify({ ...rowRef(server), retry: true }),
+					timeoutMs: 30000,
+				}),
+				(r) => {
+					const bad = (r.health?.checks ?? []).find((check) => check?.ok === false);
+					return `${r.server?.name ?? server.name}：${r.ok ? "健康" : "不健康"}${bad?.detail ? `（${bad.detail}）` : ""}`;
+				},
+			);
 			// Opening the sheet is the whole click; the save is the sheet's own
 			// POST, because only it holds the values (and only it knows which of
 			// them was actually touched).
@@ -4639,6 +4694,7 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, onI
 						onRemove: doRemove,
 						onUpdate: doUpdate,
 						onConfigure: doConfigure,
+						onHealth: doHealth,
 					})),
 				]) : null,
 
@@ -5236,6 +5292,10 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, onI
 			// that renders the section can reach it; rendering it directly is the
 			// only way to catch a throw that happens before the first paint.
 			ConfigDialog,
+			// A row's 检查 button and its verdict line exist only on a row, so
+			// tools/render-server-health.mjs renders ServerRow directly with the
+			// three shapes the host sends (never checked / healthy / no tools).
+			ServerRow,
 			version: CLIENT_VERSION, bundleName: BUNDLE_NAME, panelId: PANEL_ID,
 		};
 		// Section is exported for tools/render-market-tab.mjs: the market tab's

@@ -1744,3 +1744,47 @@ test('a row nothing can be asked about answers with itself, unhealed', async () 
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// 「测一下这台服务器能不能用」. The dot only knows whether a fiber exists; a server
+// whose process died kept its row (and even 已连接) while the model could not see
+// a single tool. 检查 answers with the four facts that decide a mount and says
+// which one failed, so a dead row is diagnosable instead of merely grey.
+test('检查 reports which link of the mount actually failed', async () => {
+  const registry = {
+    version: 1,
+    servers: [{
+      name: 'fs',
+      source: 'manual',
+      transport: 'stdio',
+      enabled: false,
+      command: 'my-own-fs',
+      args: ['--root', '.'],
+      env: {},
+      // A declaration the user has not filled in: the row is unfinished, and 检查
+      // has to say so even though nothing is mounted.
+      config: {
+        origin: 'official',
+        fields: [{ key: 'FS_TOKEN', kind: 'env', label: 'FS_TOKEN', required: true, secret: true, declared: true }],
+      },
+    }],
+  };
+  await withHost(registry, async ({ call, readRegistry }) => {
+    const reply = await call('/api/overall-mcp/health', { body: { name: 'fs', slot: 0 } });
+    assert.equal(reply.status, 200);
+    // Every check runs, in a fixed order, so the panel can point at the first ✗.
+    assert.deepEqual(reply.body.health.checks.map((c) => c.id), ['enabled', 'mounted', 'handshake', 'tools', 'config']);
+    assert.equal(reply.body.health.attempted, false);
+    assert.equal(reply.body.ok, false);
+    const config = reply.body.health.checks.find((c) => c.id === 'config');
+    assert.equal(config.ok, false);
+    assert.match(config.detail, /FS_TOKEN/);
+    assert.equal(reply.body.health.checks.find((c) => c.id === 'enabled').ok, false);
+    // The verdict travels with the row, so a refresh does not forget it.
+    assert.equal(reply.body.server.health.ok, false);
+    const saved = await readRegistry();
+    assert.equal(saved.servers[0].health.ok, false);
+    assert.equal(typeof saved.servers[0].health.at, 'string');
+    assert.equal((await call('/api/overall-mcp/health', { body: { name: 'nope', slot: 0 } })).status, 404);
+  });
+});

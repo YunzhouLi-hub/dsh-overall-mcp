@@ -301,7 +301,10 @@ test('argFields longest-first alternation avoids regex misparses', () => {
     args: ['run', '--environment=GITHUB_TOKEN', 'image'],
   });
   assert.equal(specLong.fields[0].key, 'GITHUB_TOKEN');
-  assert.equal(specLong.fields[0].required, true);
+  // Inferred from the command line, so never required — only a published
+  // declaration may claim 必填.
+  assert.equal(specLong.fields[0].required, false);
+  assert.equal(specLong.fields[0].declared, undefined);
   assert.equal(specLong.fields[0].secret, true);
 
   // -eslint must not extract slint
@@ -311,13 +314,13 @@ test('argFields longest-first alternation avoids regex misparses', () => {
   });
   assert.equal(specEslint, null);
 
-  // -e GITHUB_TOKEN must be required and secret
+  // -e GITHUB_TOKEN is secret by name, and (still) not required by anyone
   const specShort = argFields({
     command: 'docker',
     args: ['run', '-e', 'GITHUB_TOKEN', 'image'],
   });
   assert.equal(specShort.fields[0].key, 'GITHUB_TOKEN');
-  assert.equal(specShort.fields[0].required, true);
+  assert.equal(specShort.fields[0].required, false);
   assert.equal(specShort.fields[0].secret, true);
 });
 
@@ -410,4 +413,86 @@ test('specOf still answers null for a row nothing declares', () => {
   assert.equal(specOf(entry), null);
   // An empty stored list on such a row is honest, not a derivation failure.
   assert.equal(specOf({ ...entry, config: { fields: [] } }), null);
+});
+
+/**
+ * The registry record is the only authoritative statement of what a server
+ * needs, so nothing the schema carries may be dropped on the way in: the
+ * requirement flag, the secret flag, the default, the closed set of choices.
+ * Without this the panel guessed 必填 from a name pattern and the published
+ * answer was thrown away one layer earlier than the guess.
+ */
+test('officialFields keeps the declaration, its default and its choices', () => {
+  const item = {
+    raw: {
+      packages: [{
+        environmentVariables: [
+          { name: 'BRAVE_API_KEY', description: 'Your Brave Search subscription token.', isRequired: true, isSecret: true },
+          { name: 'ENABLED_TOOLGROUPS', description: 'Comma-separated groups.', default: 'readonly', choices: ['readonly', 'readwrite'] },
+        ],
+      }],
+    },
+  };
+  const spec = officialFields(item);
+  assert.equal(spec.origin, 'official');
+  const [key, groups] = spec.fields;
+  assert.equal(key.key, 'BRAVE_API_KEY');
+  assert.equal(key.required, true);
+  assert.equal(key.secret, true);
+  // The form may only say 必填 when the publisher did: `declared` is that fact.
+  assert.equal(key.declared, true);
+  assert.match(key.help, /Brave Search subscription token/);
+  assert.equal(groups.required, false);
+  assert.equal(groups.declared, true);
+  assert.equal(groups.default, 'readonly');
+  assert.deepEqual(groups.choices, ['readonly', 'readwrite']);
+});
+
+/** server.json spells the same members snake_case; a record pasted from it must read the same. */
+test('officialFields reads the snake_case spelling too', () => {
+  const spec = officialFields({
+    raw: { packages: [{ environment_variables: [{ name: 'GCS_BUCKET', is_required: true }] }] },
+  });
+  assert.equal(spec.fields[0].key, 'GCS_BUCKET');
+  assert.equal(spec.fields[0].required, true);
+  assert.equal(spec.fields[0].declared, true);
+});
+
+/**
+ * A key inferred from the command line is a guess, and a guess must not become
+ * 「还缺 xxx」 / 待配置: the row would claim the server is unfinished on evidence
+ * nobody published.
+ */
+test('a key inferred from the command line is never required', () => {
+  const entry = { transport: 'stdio', command: 'npx', args: ['-y', 'thing', '--env', 'THING_TOKEN'] };
+  const spec = configSpecFor(null, entry);
+  assert.equal(spec.fields[0].key, 'THING_TOKEN');
+  assert.equal(spec.fields[0].secret, true);
+  assert.equal(spec.fields[0].required, false);
+  assert.equal(spec.fields[0].declared, undefined);
+  assert.equal(configState(spec, entry).needs, false);
+  // It is still offered, just not as a requirement.
+  assert.deepEqual(fieldGaps(spec, entry).missing, []);
+  assert.deepEqual(fieldGaps(spec, entry).pending, ['THING_TOKEN']);
+});
+
+/** The masked projection is what the panel renders, so `declared` has to survive it. */
+test('maskedFields carries declared/default/choices to the form', () => {
+  const item = {
+    raw: {
+      packages: [{
+        environmentVariables: [
+          { name: 'TOKEN_A', isRequired: true },
+          { name: 'GROUPS', default: 'readonly', choices: ['readonly', 'readwrite'] },
+        ],
+      }],
+    },
+  };
+  const spec = configSpecFor(item, { transport: 'stdio', command: 'npx', args: ['-y', 'x'] });
+  const masked = maskedFields(spec, {});
+  assert.equal(masked.fields[0].declared, true);
+  assert.equal(masked.fields[0].required, true);
+  assert.equal(masked.fields[1].default, 'readonly');
+  assert.deepEqual(masked.fields[1].choices, ['readonly', 'readwrite']);
+  assert.deepEqual(masked.missing, ['TOKEN_A']);
 });
