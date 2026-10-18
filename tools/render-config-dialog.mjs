@@ -88,6 +88,18 @@ const declaredRow = {
   },
 };
 
+// The same row after the key was saved once: the sheet no longer has anything
+// required left to fill, so 保存 may proceed with an otherwise untouched form.
+const savedRow = {
+  ...declaredRow,
+  needConfig: false,
+  config: {
+    ...declaredRow.config,
+    missing: [],
+    fields: [{ ...declaredRow.config.fields[0], hasValue: true, value: '' }],
+  },
+};
+
 // A row nothing declares: the form is still the place to add a key by hand.
 const bareRow = {
   name: 'my-own-fs', slot: 2, transport: 'stdio', enabled: true, connected: true,
@@ -144,19 +156,73 @@ for (const [label, server] of [['declared', declaredRow], ['bare', bareRow]]) {
     return { ok: true, json: async () => ({ saved: true, needConfig: false }) };
   };
   try {
-    const tree = __test.ConfigDialog({ server: declaredRow, onClose: () => {}, onSaved: async () => {} });
+    const tree = __test.ConfigDialog({ server: savedRow, onClose: () => {}, onSaved: async () => {} });
     const save = walk(tree).find((n) => n.type === 'button' && textOf(n) === '保存并重新挂载');
     assert.ok(save, 'the sheet has no save button');
+    assert.notEqual(save.props.disabled, true, 'a row whose required key is saved must allow 保存');
     await save.props.onClick();
     assert.equal(sent.length, 1, `save must make exactly one request (made ${sent.length})`);
     assert.ok(sent[0].url.endsWith('/configure'), `save posted to ${sent[0].url}`);
     assert.equal(sent[0].body.env, undefined, 'save sent an env bag for a form nobody touched');
     assert.equal(sent[0].body.headers, undefined, 'save sent a headers bag for a form nobody touched');
+    assert.equal(sent[0].body.config, undefined, 'save sent a config bag for a form nobody touched');
     assert.equal(sent[0].body.name, 'brave-search', 'save did not address the row by name');
     assert.equal(sent[0].body.slot, 6, 'save lost the row slot');
   } finally {
     globalThis.fetch = before;
   }
+}
+
+// 4b. A required key that is still empty blocks the save instead of shipping a
+//     mount the host already knows will fail.
+{
+  const tree = __test.ConfigDialog({ server: declaredRow, onClose: () => {}, onSaved: async () => {} });
+  const all = textOf(tree);
+  const save = walk(tree).find((n) => n.type === 'button' && textOf(n) === '保存并重新挂载');
+  assert.equal(save?.props?.disabled, true, 'save stayed enabled with a required key empty');
+  assert.ok(all.includes('还有必填项没填：braveApiKey'), 'the sheet does not say which required key is empty');
+  assert.deepEqual(
+    __test.requiredStillMissing(declaredRow.config.fields, {}),
+    ['braveApiKey'],
+    'the guard does not report the declared-required key',
+  );
+  assert.deepEqual(
+    __test.requiredStillMissing(declaredRow.config.fields, { 'config:braveApiKey': '   ' }),
+    ['braveApiKey'],
+    'a whitespace-only value is not a filled required field',
+  );
+  assert.deepEqual(
+    __test.requiredStillMissing(savedRow.config.fields, {}),
+    [],
+    'a saved required value was reported missing',
+  );
+}
+
+// 4c. The composed `--config` argument, with secrets masked, including keys
+//     added by hand.
+{
+  const preview = __test.previewCliConfig(
+    declaredRow,
+    declaredRow.config.fields,
+    { 'config:braveApiKey': 'BSA-example' },
+    [{ key: 'extraMode', kind: 'config', value: 'fast' }],
+  );
+  assert.equal(
+    preview,
+    '--config {"braveApiKey":"••••","extraMode":"fast"}',
+    `the preview does not compose the argument the CLI receives: ${preview}`,
+  );
+  assert.ok(!preview.includes('BSA-example'), 'the preview leaked the secret');
+  assert.equal(
+    __test.previewCliConfig(declaredRow, savedRow.config.fields, {}, []),
+    '--config {"braveApiKey":"••••"}',
+    'a saved secret did not appear (masked) in the preview',
+  );
+  assert.equal(
+    __test.previewCliConfig(bareRow, [], {}, []),
+    '',
+    'a row that is not a --config row got a preview',
+  );
 }
 
 // 5. A `--config` row must not offer 环境变量 as the home for its keys. The

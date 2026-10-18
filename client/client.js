@@ -59,7 +59,7 @@ window.__ModuleLoader__.load({
 		// probe also checks CHANGELOG.md's newest section is this version, since
 		// a release note that stops at an older build tells a reader what
 		// changed in code they are not running.
-		const CLIENT_VERSION = "0.9.0";
+		const CLIENT_VERSION = "0.10.0";
 		// Where 「点个 star」 points. A constant, not a config: it is this
 		// plugin's own repository, and a panel that could be pointed at another
 		// repository would be asking for a star it does not deserve.
@@ -1032,13 +1032,17 @@ window.__ModuleLoader__.load({
 			}));
 		}
 
-					/** 「检查」那一行怎么读：一句结论 + 第一个不通过的项 + 时刻。 */
-					function healthLine(health) {
-						const at = typeof health?.at === "string" ? health.at.slice(11, 19) : "";
-						const bad = (health?.checks || []).find((check) => check && check.ok === false);
-						const detail = bad?.detail ? `：${bad.detail}` : health?.toolCount ? ` · ${health.toolCount} 个工具` : "";
-						return `检查${health?.ok ? "健康" : "不健康"}${detail}${at ? ` · ${at}` : ""}`;
-					}
+	/** 「检查」那一行怎么读：一句结论 + 第一个不通过的项 + 耗时 + 时刻。 */
+	function healthLine(health) {
+		const at = typeof health?.at === "string" ? health.at.slice(11, 19) : "";
+		const bad = (health?.checks || []).find((check) => check && check.ok === false);
+		const detail = bad?.detail ? `：${bad.detail}` : health?.toolCount ? ` · ${health.toolCount} 个工具` : "";
+		// The host has always timed the handshake (`ms` on the verdict); leaving it
+		// off the line hid the one number that answers 「它慢不慢」.
+		const ms = typeof health?.ms === "number" && Number.isFinite(health.ms) && health.ms >= 0 ? health.ms : null;
+		const took = ms === null ? "" : ` · ${ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`}`;
+		return `检查${health?.ok ? "健康" : "不健康"}${detail}${took}${at ? ` · ${at}` : ""}`;
+	}
 
 					/**
 					 * 本次进入界面按过「检查」的行。
@@ -1308,6 +1312,55 @@ window.__ModuleLoader__.load({
 			return bags;
 		}
 
+		/**
+		 * Declared-required fields that would still be empty after this save.
+		 *
+		 * The declaration says 「缺了它就别想握手」; letting 保存 through anyway
+		 * turned that into a failed mount the reader had to diagnose. Clearing a
+		 * saved required value lands here too — which is the point: the form may
+		 * not produce a state the row already knows is broken.
+		 */
+		function requiredStillMissing(fields, values) {
+			return (fields || []).filter((field) => {
+				if (field?.required !== true) return false;
+				const id = `${field.kind}:${field.key}`;
+				if (Object.prototype.hasOwnProperty.call(values ?? {}, id)) {
+					return String(values[id] ?? "").trim() === "";
+				}
+				return field.hasValue !== true;
+			}).map((field) => field.key);
+		}
+
+		/**
+		 * The `--config` argument as it would be handed to the CLI, masked.
+		 *
+		 * A `--config` row's values are invisible until the process starts: the
+		 * form's fields say what was typed, not what the command line will carry.
+		 * Showing the composed JSON (secrets as ••••) is the one place the reader
+		 * can see the whole payload, including keys added by hand.
+		 */
+		function previewCliConfig(server, fields, values, custom) {
+			if (server?.channel !== "cli-json") return "";
+			const picked = {};
+			for (const field of fields || []) {
+				const id = `${field.kind}:${field.key}`;
+				if (field.kind !== "config") continue;
+				const touched = Object.prototype.hasOwnProperty.call(values ?? {}, id);
+				const next = touched ? String(values[id] ?? "").trim() : "";
+				if (next !== "") picked[field.key] = field.secret ? "••••" : next;
+				else if (!touched && field.hasValue === true) picked[field.key] = field.secret ? "••••" : (field.value ?? "");
+			}
+			for (const row of custom || []) {
+				if (row?.kind !== "config") continue;
+				const key = String(row.key ?? "").trim();
+				if (key === "" || row.value === "") continue;
+				picked[key] = String(row.value);
+			}
+			if (Object.keys(picked).length === 0) return "";
+			const flag = server?.config?.flag ?? "--config";
+			return `${flag} ${JSON.stringify(picked)}`;
+		}
+
 		function ConfigDialog({ server, onClose, onSaved }) {
 			const fields = server.config?.fields ?? [];
 			// A `--config` row stores its settings as JSON on the command line, so a
@@ -1346,6 +1399,8 @@ window.__ModuleLoader__.load({
 							? "已向 Smithery 确认：这台服务器没有声明要填的配置项，不填也能启动；下面的空行留给你补额外变量。"
 							: "官方注册表、启动命令、来源详情都查过了：这台服务器没有声明要填的配置项，不填也能启动；下面的空行留给你补额外变量。";
 			const missing = result?.missing ?? server.config?.missing ?? [];
+			const requiredMissing = requiredStillMissing(fields, values);
+			const cliPreview = previewCliConfig(server, fields, values, custom);
 
 			useEffect(() => {
 				const handleKeyDown = (e) => {
@@ -1359,6 +1414,11 @@ window.__ModuleLoader__.load({
 			}, [onClose]);
 
 			const save = async () => {
+				const missingNow = requiredStillMissing(fields, values);
+				if (missingNow.length) {
+					setError(`先填 ${missingNow.join("、")}：发布方声明它们是必填项。`);
+					return;
+				}
 				setBusy(true); setError(""); setResult(null);
 				try {
 					const bags = splitValues(fields, values, custom);
@@ -1406,6 +1466,10 @@ window.__ModuleLoader__.load({
 						missing.length
 							? createElement("div", { key: "miss", style: styles.warnLine },
 								`还缺 ${missing.join("、")}：填好并保存后会自动重新挂载，工具才会通。`)
+							: null,
+						requiredMissing.length
+							? createElement("div", { key: "reqmiss", style: styles.warnLine },
+								`还有必填项没填：${requiredMissing.join("、")}。保存按钮在填好之前不会提交——现在提交也只会让这一行继续不可用。`)
 							: null,
 					]),
 
@@ -1531,6 +1595,17 @@ window.__ModuleLoader__.load({
 								onClick: () => setCustom((prev) => prev.filter((_, i) => i !== index)),
 							}, "移除"),
 						])),
+						// The composed `--config`: what the CLI will actually receive,
+						// with every secret already replaced by ••••.
+						cliPreview
+							? createElement("div", { key: "preview", style: styles.fieldHelp }, [
+								createElement("div", { key: "t" }, "启动时实际传给 CLI 的参数（密钥以 •••• 显示）："),
+								createElement("code", {
+									key: "c",
+									style: { display: "block", marginTop: 4, padding: "4px 6px", borderRadius: 4, background: T.soft2, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 11.5, color: T.text2, wordBreak: "break-all" },
+								}, cliPreview),
+							])
+							: null,
 					]),
 
 					result?.rejected?.length
@@ -1549,7 +1624,11 @@ window.__ModuleLoader__.load({
 					createElement("div", { key: "actions", style: styles.detailActions }, [
 						createElement("button", {
 							key: "save", type: "button", className: "omkt-btn omkt-btn-primary",
-							style: { ...styles.button, ...styles.primary }, disabled: busy,
+							style: { ...styles.button, ...styles.primary },
+							disabled: busy || requiredMissing.length > 0,
+							title: requiredMissing.length > 0
+								? `先填 ${requiredMissing.join("、")}：发布方声明它是必填项`
+								: undefined,
 							onClick: save,
 						}, busy ? "保存中…" : "保存并重新挂载"),
 						createElement("button", {
@@ -5439,6 +5518,9 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, onI
 			// The three-bag routing, so a probe can prove a declared `config` key is
 			// not silently written to `env`.
 			splitValues,
+			// What the save button refuses to submit, and what the CLI will receive:
+			// both are pure functions over (fields, values, custom).
+			requiredStillMissing, previewCliConfig,
 			// A row's 检查 button and its verdict line exist only on a row, so
 			// tools/render-server-health.mjs renders ServerRow directly with the
 			// three shapes the host sends (never checked / healthy / no tools).

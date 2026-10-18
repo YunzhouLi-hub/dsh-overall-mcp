@@ -126,6 +126,19 @@ const healthyText = textOf(healthyLine);
 assert.match(healthyText, /检查健康/);
 assert.match(healthyText, /5 个工具/);
 assert.match(healthyText, /08:31:07/);
+// The handshake was timed by the host all along; the line now says so. Under a
+// second it reads in ms, over a second in s — the unit follows the magnitude.
+assert.match(healthyText, /41ms/, 'the verdict line drops the measured duration');
+assert.equal(
+  __test.healthLine({ ok: true, at: healthyAt, toolCount: 5, ms: 1234, checks: [] }),
+  '检查健康 · 5 个工具 · 1.2s · 08:31:07',
+  'a slow handshake is not rendered in seconds',
+);
+assert.equal(
+  __test.healthLine({ ok: true, at: healthyAt, toolCount: 5, checks: [] }),
+  '检查健康 · 5 个工具 · 08:31:07',
+  'a verdict without a duration invented one',
+);
 assert.equal(healthyLine.props.style.color, '#2f7d32', 'healthy is green');
 // The hover text is the whole checklist, so a reader can see what passed.
 assert.match(healthyLine.props.title, /✓ 握手完成/);
