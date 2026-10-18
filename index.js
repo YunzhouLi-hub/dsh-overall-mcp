@@ -1184,11 +1184,22 @@ export async function apply(ctx) {
     const spec = configSpecFor(null, entry);
     const help = [
       demand.description ? `端点回了 401：${demand.description}` : '端点回了 401，要求证明身份。',
-      demand.resource ? `授权信息：${demand.resource}` : '',
       '按服务商的文档填，多数是 `Bearer <令牌>`。',
-    ].filter(Boolean).join(' ');
+    ].join(' ');
     const field = normalizeField(
-      { key: 'Authorization', kind: 'header', label: 'Authorization', help, required: true, secret: true, origin: 'observed' },
+      {
+        key: 'Authorization',
+        kind: 'header',
+        label: 'Authorization',
+        help,
+        required: true,
+        secret: true,
+        origin: 'observed',
+        // The endpoint's own authorization metadata stays a link instead of being
+        // pasted into the sentence: it explains *how* to authenticate, and it is
+        // not a page where a key is handed out — the two must not look alike.
+        resourceUrl: demand.resource,
+      },
       { kind: 'header', origin: 'observed' },
     );
     if (!field) return;

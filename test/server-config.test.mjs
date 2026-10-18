@@ -564,3 +564,58 @@ test('a non-docker row keeps its env out of the argv', () => {
   const entry = { command: 'npx', args: ['-y', 'tavily-mcp@latest'], env: { TAVILY_API_KEY: 'k' } };
   assert.deepEqual(mountArgv(entry), ['-y', 'tavily-mcp@latest']);
 });
+
+// --- where to get it --------------------------------------------------------
+
+test('a field links to the page its description names', () => {
+  // Brave's own sentence: `Your Brave Search subscription token. Get one at
+  // [api-dashboard.search.brave.com](https://api-dashboard.search.brave.com/app/keys).`
+  const field = normalizeField({
+    key: 'BRAVE_API_KEY',
+    declared: true,
+    required: true,
+    label: 'Brave API Key',
+    help: 'Your Brave Search subscription token. Get one at https://api-dashboard.search.brave.com/app/keys.',
+    origin: 'official',
+  });
+  assert.equal(field.helpUrl, 'https://api-dashboard.search.brave.com/app/keys');
+  // The sentence stays a sentence; the link is an extra, not a replacement.
+  assert.match(field.help, /Get one at/);
+});
+
+test('an explicit link wins, and a non-http one is never a link', () => {
+  const explicit = normalizeField({ key: 'TOKEN', help: 'see https://a.example/x', helpUrl: 'https://b.example/get', resourceUrl: 'https://c.example/meta' });
+  assert.equal(explicit.helpUrl, 'https://b.example/get');
+  assert.equal(explicit.resourceUrl, 'https://c.example/meta');
+  assert.equal(normalizeField({ key: 'TOKEN', help: 'nothing here' }).helpUrl, undefined);
+  assert.equal(normalizeField({ key: 'TOKEN', helpUrl: 'javascript:alert(1)' }).helpUrl, undefined);
+  assert.equal(normalizeField({ key: 'TOKEN', resourceUrl: 'file:///etc/passwd' }).resourceUrl, undefined);
+});
+
+test('the form payload carries both links through', () => {
+  const spec = {
+    origin: 'observed',
+    via: 'header',
+    fields: [{
+      key: 'Authorization', kind: 'header', label: 'Authorization', required: true, secret: true,
+      help: '端点回了 401。', helpUrl: 'https://example.test/keys', resourceUrl: 'https://example.test/.well-known/oauth-protected-resource',
+    }],
+  };
+  const masked = maskedFields(spec, { headers: {} });
+  assert.equal(masked.fields[0].helpUrl, 'https://example.test/keys');
+  assert.equal(masked.fields[0].resourceUrl, 'https://example.test/.well-known/oauth-protected-resource');
+});
+
+test('a stored field written before the link existed still gets one — but only from declared text', () => {
+  const declared = {
+    origin: 'smithery',
+    fields: [{ key: 'braveApiKey', kind: 'config', label: 'Brave API Key', declared: true, required: true, secret: true, help: 'Get one at https://api-dashboard.search.brave.com/app/keys.' }],
+  };
+  assert.equal(maskedFields(declared, {}).fields[0].helpUrl, 'https://api-dashboard.search.brave.com/app/keys');
+  // An error message from an endpoint is evidence, not a signup page.
+  const observed = {
+    origin: 'observed',
+    fields: [{ key: 'Authorization', kind: 'header', label: 'Authorization', required: true, secret: true, help: '端点回了 401，见 https://x/.well-known/oauth-protected-resource。' }],
+  };
+  assert.equal(maskedFields(observed, {}).fields[0].helpUrl, undefined);
+});

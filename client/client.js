@@ -59,7 +59,7 @@ window.__ModuleLoader__.load({
 		// probe also checks CHANGELOG.md's newest section is this version, since
 		// a release note that stops at an older build tells a reader what
 		// changed in code they are not running.
-		const CLIENT_VERSION = "0.12.1";
+		const CLIENT_VERSION = "0.12.2";
 		// Where 「点个 star」 points. A constant, not a config: it is this
 		// plugin's own repository, and a panel that could be pointed at another
 		// repository would be asking for a star it does not deserve.
@@ -692,6 +692,7 @@ window.__ModuleLoader__.load({
 			fieldReq: { fontSize: 11, color: T.amber, fontWeight: 600 },
 			fieldOpt: { fontSize: 11, color: T.text3, fontWeight: 400 },
 			fieldHelp: { fontSize: 11.5, color: T.text3, lineHeight: 1.6 },
+			fieldLink: { fontSize: 11.5, color: T.brand, textDecoration: "underline", cursor: "pointer" },
 			fieldInput: {
 				width: "100%", boxSizing: "border-box", padding: "6px 9px", borderRadius: 8,
 				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text,
@@ -1188,7 +1189,7 @@ window.__ModuleLoader__.load({
 							}, healthLine(server.health))
 							: null,
 						// 旧装法的行（`@smithery/cli run …`）握手不会完成，原因不是慢：
-						// CLI 把记录解析成远程端点，拉起 mcp-remote 等浏览器登录。0.11.0
+						// CLI 把记录解析成远程端点，拉起 mcp-remote 等浏览器登录。0.11.1
 						// 起按来源装成远程 http，但改不了已经装下的行——所以这里给出唯一
 						// 有效的下一步，而不是让它一直红着。
 						server.health && !server.health.ok && server.channel === "cli-json"
@@ -1534,6 +1535,35 @@ window.__ModuleLoader__.load({
 								]),
 								field.help
 									? createElement("div", { key: "h", style: styles.fieldHelp }, field.help)
+									: null,
+								// Where to actually go and get it. A form that asks for a token
+								// without saying where tokens come from leaves the reader to
+								// guess, and guessing is how people paste the wrong kind of key.
+								(field.helpUrl || field.resourceUrl)
+									? createElement("div", { key: "go", style: { display: "flex", gap: 12, flexWrap: "wrap" } }, [
+										field.helpUrl
+											? createElement("a", {
+												key: "get",
+												href: field.helpUrl,
+												target: "_blank",
+												rel: "noreferrer",
+												style: styles.fieldLink,
+												title: field.helpUrl,
+												onClick: (e) => { e.stopPropagation(); openExternal(e, field.helpUrl); },
+											}, "去获取 →")
+											: null,
+										field.resourceUrl
+											? createElement("a", {
+												key: "how",
+												href: field.resourceUrl,
+												target: "_blank",
+												rel: "noreferrer",
+												style: styles.fieldLink,
+												title: field.resourceUrl,
+												onClick: (e) => { e.stopPropagation(); openExternal(e, field.resourceUrl); },
+											}, "授权说明 →")
+											: null,
+									])
 									: null,
 								// What the declaration said beyond 「必填」: a default the user
 								// can accept, and the closed set the publisher allows.

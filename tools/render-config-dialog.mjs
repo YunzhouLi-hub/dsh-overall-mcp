@@ -72,6 +72,21 @@ function textOf(node) {
   return parts.join('');
 }
 
+/** Every rendered anchor, with the href it would send the reader to. */
+function anchorsOf(node) {
+  const found = [];
+  const walk = (n) => {
+    if (n == null || n === false) return;
+    if (Array.isArray(n)) { n.forEach(walk); return; }
+    if (typeof n !== 'object' || !('type' in n)) return;
+    if (n.type === 'a' && n.props?.href) found.push({ href: n.props.href, text: textOf(n) });
+    walk(n.children);
+    walk(n.props?.children);
+  };
+  walk(node);
+  return found;
+}
+
 // The derived shape: `maskedFields()` over a spec rebuilt from the Smithery
 // schema, which is what brave-search answers after the empty-list fix.
 const declaredRow = {
@@ -83,6 +98,9 @@ const declaredRow = {
     fields: [{
       key: 'braveApiKey', kind: 'config', label: 'Brave API Key',
       help: 'Your Brave Search subscription token.',
+      // Brave's description names the dashboard page; the sheet turns that into a
+      // link so nobody has to copy a URL out of a sentence by hand.
+      helpUrl: 'https://api-dashboard.search.brave.com/app/keys',
       required: true, secret: true, hasValue: false, value: '',
     }],
   },
@@ -130,6 +148,13 @@ for (const [label, server] of [['declared', declaredRow], ['bare', bareRow]]) {
   // And the source is described as declaring them, not denying it.
   assert.ok(all.includes('Smithery'), 'declared row: the sheet does not say where the fields came from');
   assert.ok(!all.includes('这个来源没有声明配置项'), 'declared row: the sheet denies declaring fields it shows');
+  // A form that asks for a token owes the reader a way to go and get one.
+  assert.ok(all.includes('去获取'), 'declared row: no 「去获取」 link next to a key it asks for');
+  const links = anchorsOf(__test.ConfigDialog({ server: declaredRow, onClose: () => {}, onSaved: async () => {} }));
+  assert.ok(
+    links.some((link) => link.href === 'https://api-dashboard.search.brave.com/app/keys' && link.text.includes('去获取')),
+    `declared row: 「去获取」 does not point at the page the description names (saw ${JSON.stringify(links)})`,
+  );
 }
 
 // 3. A bare row still offers the key/value escape hatch, and claims nothing.
