@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 
 import {
   applyValues, argFields, configSpecFor, configState, fieldGaps, looksLikeCredentialFailure,
-  maskedFields, normalizeField, officialFields, remoteFields, specOf, MAX_VALUE_CHARS,
+  maskedFields, normalizeField, officialFields, remoteFields, smitheryFieldsOf, specOf, MAX_VALUE_CHARS,
   RESERVED_HEADERS, CODE_LOADING_ENV_VARS, redactEchoValue,
 } from '../lib/server-config.js';
 
@@ -495,4 +495,35 @@ test('maskedFields carries declared/default/choices to the form', () => {
   assert.equal(masked.fields[1].default, 'readonly');
   assert.deepEqual(masked.fields[1].choices, ['readonly', 'readwrite']);
   assert.deepEqual(masked.missing, ['TOKEN_A']);
+});
+
+/** A Smithery configSchema is a declaration too — it is the publisher's own list. */
+test('a Smithery configSchema counts as a declaration', () => {
+  const entry = {
+    args: ['-y', '@smithery/cli', 'run', 'brave'],
+    config: {
+      schema: {
+        type: 'object',
+        required: ['braveApiKey'],
+        properties: {
+          braveApiKey: { type: 'string', title: 'Brave API Key' },
+          mode: { type: 'string', default: 'fast', enum: ['fast', 'slow'] },
+        },
+      },
+    },
+  };
+  const fields = smitheryFieldsOf(entry);
+  assert.deepEqual(fields.map((f) => f.key), ['braveApiKey', 'mode']);
+  assert.equal(fields[0].required, true);
+  assert.equal(fields[0].secret, true);
+  // Without this the sheet labels the key 「来源未声明」, which is the one thing a
+  // schema-declared key is not.
+  assert.equal(fields[0].declared, true);
+  assert.equal(fields[1].required, false);
+  assert.equal(fields[1].declared, true);
+  assert.equal(fields[1].default, 'fast');
+  assert.deepEqual(fields[1].choices, ['fast', 'slow']);
+  const spec = configSpecFor(null, entry);
+  assert.equal(spec.via, 'cli-json');
+  assert.equal(configState(spec, entry).needs, true);
 });

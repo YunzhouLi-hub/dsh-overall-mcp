@@ -34,6 +34,13 @@
 - `default` 与 `choices` 也一路带到表单（`默认：readonly · 可选值：readonly / readwrite`），
   并同时认 snake_case 拼法：`server.json` 规范写的是 `environment_variables` / `is_required`，
   服务端返回的是 camelCase，只认一种就等于只看了一半的目录。
+- **同名服务器、不同记录，声明的东西可以完全不同**——这不是本插件的缺陷，是目录的现实：
+  `io.github.brave/brave-search-mcp-server` 的包记录里 `BRAVE_API_KEY` 是
+  `isRequired: true, isSecret: true`；而 `ai.smithery/brave`（同一份代码的托管变体）只声明了
+  一条 `Authorization: Bearer {smithery_api_key}`，没有任何 `environmentVariables`。按它装的
+  行走的是 Smithery 自己的 `configSchema`（`required: ["braveApiKey"]`）。三类记录都算「声明」，
+  所以 `smitheryFieldsOf` 出来的字段同样带 `declared`，否则表单会把一个 schema 明写的键叫作
+  「来源未声明」。
 
 ### 「检查」：这台服务器到底能不能用
 
