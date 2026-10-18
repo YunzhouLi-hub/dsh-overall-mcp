@@ -58,7 +58,7 @@ const GHOST_ITEM = {
   install: { transport: 'stdio', command: 'npx', args: ['-y', 'ghost-mcp'] },
 };
 
-async function withHost(registry, run, { llm, files, mount } = {}) {
+async function withHost(registry, run, { llm, files, mount, schemas } = {}) {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), 'overall-mcp-contract-'));
   const dir = path.join(home, 'overall-mcp');
   await fs.mkdir(dir, { recursive: true });
@@ -96,7 +96,9 @@ async function withHost(registry, run, { llm, files, mount } = {}) {
       },
       tools: {
         register(definition) { tools.set(definition.name, definition); return () => {}; },
-        schemas: () => [],
+        // A case that needs the tool registry to change under the plugin (the
+        // handshake landing after install) passes a live array.
+        schemas: () => (Array.isArray(schemas) ? [...schemas] : []),
       },
       inject(keys, callback) {
         if (keys.includes('connection')) {
@@ -1793,6 +1795,43 @@ test('检查 reports which link of the mount actually failed', async () => {
     assert.equal(saved.servers[0].health, undefined);
     assert.equal(typeof reply.body.health.at, 'string');
     assert.equal((await call('/api/overall-mcp/health', { body: { name: 'nope', slot: 0 } })).status, 404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 装完那一秒的结论不是最终结论. A remote endpoint answers the install request
+// before its tools are published, so the first 检查 legitimately saw zero of
+// them; the row then stayed red on a server that works. The list now re-derives
+// a failed verdict from live facts and keeps the upgrade.
+test('a failed 检查 verdict is upgraded once the tools actually appear', async () => {
+  const toolbox = [];
+  const registry = {
+    version: 1,
+    servers: [{
+      name: 'ctx7',
+      source: 'manual',
+      transport: 'streamable-http',
+      url: 'https://ctx7.test/mcp',
+      headers: {},
+      enabled: true,
+    }],
+  };
+  await withHost(registry, async ({ call }) => {
+    const checked = await call('/api/overall-mcp/health', { body: { name: 'ctx7', slot: 0 } });
+    assert.equal(checked.body.ok, false);
+    assert.equal(checked.body.health.toolCount, 0);
+    assert.equal(checked.body.health.checks.find((c) => c.id === 'tools').ok, false);
+    // The handshake lands after the response that reported the failure.
+    toolbox.push({ name: 'mcp__ctx7__search' });
+    const listed = await call('/api/overall-mcp/servers', { method: 'GET' });
+    const row = listed.body.servers[0];
+    assert.equal(row.health.ok, true);
+    assert.equal(row.health.toolCount, 1);
+    assert.equal(row.health.checks.find((c) => c.id === 'tools').detail, '1 个工具在册');
+  }, {
+    schemas: toolbox,
+    // The shape `ctx.plugin(mcpClient, …)` returns: a fiber with `await`/`dispose`.
+    mount: () => ({ await: () => Promise.resolve(), dispose: () => Promise.resolve() }),
   });
 });
 

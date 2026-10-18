@@ -643,6 +643,11 @@ export async function apply(ctx) {
     return enabled.map((entry) => byName.get(entry.name));
   }
 
+  // Assigned by `apply()` where the tool registry is reachable (the route block
+  // closes over `ctx`); `publicList` runs at module-ish scope inside `apply` and
+  // can only reach it through this binding.
+  let healthVerdict = null;
+
   function publicList() {
     const orphans = new Set(orphanEntries());
     return registry.servers.map((s, slot) => {
@@ -677,6 +682,20 @@ export async function apply(ctx) {
       // and the panel shows a 配置 button for exactly those rows — with a free-form
       // form — instead of waiting for a schema nobody has asked for yet.
       const channel = channelOf(s);
+      // A verdict is a snapshot, and the thing it found missing can arrive
+      // afterwards: a remote endpoint answers the install response before its
+      // tools are registered, so 「一个工具都没注册」 was true at that instant and
+      // false a moment later. Upgrade a stale failure from live facts rather
+      // than leaving a working server red until someone presses 检查 again. A
+      // verdict that still fails costs nothing and is left alone.
+      const cachedHealth = health.get(s.name);
+      if (cachedHealth && cachedHealth.ok === false && !s.connectError) {
+        const live = healthVerdict?.(s, {
+          attempted: cachedHealth.attempted === true,
+          waitedMs: Number.isFinite(cachedHealth.waitedMs) ? cachedHealth.waitedMs : 0,
+        });
+        if (live.ok) health.set(s.name, live);
+      }
       return {
         name: s.name,
         // Position in the registry. Two rows can share a name (one client config
@@ -3048,6 +3067,59 @@ export async function apply(ctx) {
       try { return await request.json(); } catch { return {}; }
     };
 
+    /**
+     * Build a 检查 verdict from what is true right now.
+     *
+     * Extracted so the panel can re-derive it: a verdict taken at install time
+     * says 「一个工具都没注册」 because the tools did not exist yet, and a server
+     * that then works should not stay red until someone presses 检查 again. The
+     * caller decides whether this becomes the stored verdict — the explicit
+     * check always writes it, the list only upgrades a stale failure.
+     */
+    healthVerdict = function healthVerdict(row, { attempted = false, waitedMs = 0, startedAt = Date.now() } = {}) {
+      const serverName = row.serverName ?? toServerName(row.name);
+      const mounted = row.providedExternally === true || fibers.has(row.name);
+      const handshaking = starting.has(row.name);
+      const tools = serverName && typeof ctx.tools?.schemas === 'function'
+        ? ctx.tools.schemas().filter((s) => typeof s?.name === 'string' && s.name.startsWith(`mcp__${serverName}__`)).length
+        : null;
+      const spec = specOf(row);
+      const gaps = spec ? fieldGaps(spec, row) : { missing: [], pending: [] };
+      const checks = [
+        { id: 'enabled', ok: row.enabled !== false, detail: row.enabled === false ? '已停用' : '已启用' },
+        {
+          id: 'mounted',
+          ok: mounted,
+          detail: mounted
+            ? (row.providedExternally === true ? '由其他插件提供同一个 serverName' : '已挂载')
+            : row.connectError ? `未挂载：${capText(row.connectError, 180)}` : '未挂载',
+        },
+        { id: 'handshake', ...handshakeCheck({ mounted, starting: handshaking, waitedMs }) },
+        {
+          id: 'tools',
+          ok: tools === null ? true : tools > 0,
+          detail: tools === null
+            ? '工具表不可读'
+            : tools > 0 ? `${tools} 个工具在册` : '一个工具都没注册：服务进程可能已经退出',
+        },
+        {
+          id: 'config',
+          ok: gaps.missing.length === 0,
+          detail: gaps.missing.length > 0 ? `还缺 ${gaps.missing.join('、')}` : '声明的要求已齐',
+        },
+      ];
+      return {
+        at: new Date().toISOString(),
+        ok: checks.every((check) => check.ok),
+        attempted,
+        waitedMs,
+        waitedSeconds: waitedSeconds(waitedMs),
+        toolCount: tools,
+        checks,
+        ms: Date.now() - startedAt,
+      };
+    };
+
     const routes = [
       // Which build is running, and what it has been doing. The panel showed a
       // source as unavailable while the reason lived in a process that had
@@ -3319,53 +3391,13 @@ export async function apply(ctx) {
             row.connectError = String(err?.message ?? err);
           }
         }
-        const serverName = row.serverName ?? toServerName(row.name);
-        const mounted = row.providedExternally === true || fibers.has(row.name);
-        const handshaking = starting.has(row.name);
-        const tools = serverName && typeof ctx.tools?.schemas === 'function'
-          ? ctx.tools.schemas().filter((s) => typeof s?.name === 'string' && s.name.startsWith(`mcp__${serverName}__`)).length
-          : null;
-        const spec = specOf(row);
-        const gaps = spec ? fieldGaps(spec, row) : { missing: [], pending: [] };
-        const checks = [
-          { id: 'enabled', ok: row.enabled !== false, detail: row.enabled === false ? '已停用' : '已启用' },
-          {
-            id: 'mounted',
-            ok: mounted,
-            detail: mounted
-              ? (row.providedExternally === true ? '由其他插件提供同一个 serverName' : '已挂载')
-              : row.connectError ? `未挂载：${capText(row.connectError, 180)}` : '未挂载',
-          },
-          { id: 'handshake', ...handshakeCheck({ mounted, starting: handshaking, waitedMs }) },
-          {
-            id: 'tools',
-            ok: tools === null ? true : tools > 0,
-            detail: tools === null
-              ? '工具表不可读'
-              : tools > 0 ? `${tools} 个工具在册` : '一个工具都没注册：服务进程可能已经退出',
-          },
-          {
-            id: 'config',
-            ok: gaps.missing.length === 0,
-            detail: gaps.missing.length > 0 ? `还缺 ${gaps.missing.join('、')}` : '声明的要求已齐',
-          },
-        ];
-        const ok = checks.every((check) => check.ok);
-        const verdict = {
-          at: new Date().toISOString(),
-          ok,
-          attempted,
-          waitedMs,
-          waitedSeconds: waitedSeconds(waitedMs),
-          toolCount: tools,
-          checks,
-          ms: Date.now() - startedAt,
-        };
+        const verdict = healthVerdict(row, { attempted, waitedMs, startedAt });
+        const ok = verdict.ok;
         // Session-scoped on purpose: nothing here is written to the registry, so
         // a restart cannot resurrect a verdict about a process that no longer
         // exists.
         health.set(row.name, verdict);
-        emit({ kind: 'health', action: 'check', target: name, ok, toolCount: tools });
+        emit({ kind: 'health', action: 'check', target: name, ok, toolCount: verdict.toolCount });
         const { servers } = await serversPayload();
         const fresh = (Number.isInteger(slot) ? servers[slot] : null)
           ?? servers.find((s) => s.name === name)
