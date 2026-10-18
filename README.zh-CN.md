@@ -7,7 +7,7 @@
 <p align="center"><a href="README.md">English</a> | 中文</p>
 
 <p align="center">
- <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.9.0-4d6bfe" alt="version 0.8.0"></a>
+ <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.9.0-4d6bfe" alt="version 0.9.0"></a>
 </p>
 
 **DeepSeek Harness 插件：首次安装自动扫描宿主机全部 MCP 配置并注册；实时聚合 6 个网络开放 MCP 目录共 5000+ 条目（官方 Registry / Smithery / Docker MCP Catalog / GitHub MCP / Awesome 远程 / Awesome 本地），外加一份本机的 GitHub 普查索引（实测 1758 行），并把这些仓库里能从证据恢复出来的安装命令带上出处补进行里，以卡片形式浏览与一键接入。**
