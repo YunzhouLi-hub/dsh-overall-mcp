@@ -179,6 +179,12 @@ assert.match(unhealthyText, /检查不健康/);
 assert.match(textOf(unhealthy[0]), /已连接/);
 assert.match(unhealthyText, /一个工具都没注册/);
 assert.equal(unhealthyLine.props.style.color, '#b3261e', 'unhealthy is red');
+// 灯也要跟着结论走。以前它只按 `connected` 上色，于是「挂上了但一个工具都没有」
+// 这一行是绿色的——用户看到的正是这个：红字写着不健康，旁边一枚绿点。
+const dotOf = (nodes) => nodes.find((node) => node.props?.style?.width === 8 && node.props?.style?.borderRadius === '50%');
+assert.equal(dotOf(unhealthy).props.style.background, '#e0a020', 'a failed check paints the dot amber, not green');
+assert.equal(dotOf(healthy).props.style.background, '#00b42a', "a healthy verdict leaves green meaning 「能用」");
+assert.match(textOf(unhealthy[0]), /检查未通过/, 'the status line says the check failed');
 
 // ---- 4. a verdict belongs to the session that asked for it ------------------
 // The host answers a /servers refresh with whatever it last computed, and a
@@ -195,4 +201,4 @@ const same = __test.keepSessionHealth([{ name: 'fs-server', health: verdict }]);
 assert.equal(same[0].health, verdict, 'the verdict this session asked for survives the refresh');
 assert.equal(same[0].name, 'fs-server', 'filtering keeps the row itself');
 
-console.log('ok — 检查 button + verdict line: unchecked rows invent nothing, a healthy verdict carries the tool count and time, an unhealthy one names the failed check, and a verdict only survives the session that asked for it');
+console.log('ok — 检查 button + verdict line: unchecked rows invent nothing, a healthy verdict carries the tool count and time, an unhealthy one names the failed check and paints the dot amber, and a verdict only survives the session that asked for it');

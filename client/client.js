@@ -59,7 +59,7 @@ window.__ModuleLoader__.load({
 		// probe also checks CHANGELOG.md's newest section is this version, since
 		// a release note that stops at an older build tells a reader what
 		// changed in code they are not running.
-		const CLIENT_VERSION = "0.12.2";
+		const CLIENT_VERSION = "0.12.3";
 		// Where 「点个 star」 points. A constant, not a config: it is this
 		// plugin's own repository, and a panel that could be pointed at another
 		// repository would be asking for a star it does not deserve.
@@ -739,12 +739,14 @@ window.__ModuleLoader__.load({
 			meta: { color: T.text3, fontSize: 12 },
 			dot: (state) => ({
 				width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
-				// Amber is 「这一行还没检查通过」: a failed mount and a handshake
-				// still in flight both look like a server that exists but cannot
-				// answer yet. Green must mean 「能用」, otherwise a broken server
-				// sitting next to a working one is indistinguishable from it.
+				// Amber is 「这一行还没检查通过」: a failed mount, a handshake
+				// still in flight, and a verdict that came back with a failed
+				// check all look like a server that exists but cannot answer.
+				// Green must mean 「能用」, otherwise a broken server sitting next
+				// to a working one is indistinguishable from it — and that is
+				// exactly what happened to a mounted server with zero tools.
 				background: state === "on" ? T.green
-					: state === "error" || state === "starting" ? "#e0a020"
+					: state === "error" || state === "starting" || state === "unhealthy" ? "#e0a020"
 						: state === "off" ? "#f53f3f"
 							: state === "external" ? T.blue
 								: "rgba(128,128,128,0.6)",
@@ -1117,14 +1119,22 @@ window.__ModuleLoader__.load({
 			// a plain idle either — idle means 「停用之外什么都没发生」.
 			const starting = server.starting === true && !server.error;
 			const failed = typeof server.error === "string" && server.error !== "";
+			// 有一个 fiber 不等于能用。context7 挂上了、握手也过了、一个工具都
+			// 没注册，而圆点还是绿的——因为 `connected` 只回答「有没有 fiber」。
+			// 最近一次「检查」的结论比它更接近事实，所以排在其前。结论只活在
+			// 问它的那个会话里（见 index.js 的 health Map），所以这里读作
+			// 「刚查过，没过」，不是一个会被写死的永久状态。
+			const unhealthy = !failed && !starting && server.health?.ok === false;
 			const state = failed ? "error"
 				: provided ? "external"
 					: starting ? "starting"
-						: enabled ? (server.connected ? "on" : "idle") : "off";
+						: unhealthy ? "unhealthy"
+							: enabled ? (server.connected ? "on" : "idle") : "off";
 			const status = failed ? `连接失败：${server.error}`
 				: provided ? "已由其他插件提供（跳过重复挂载）"
 					: starting ? "正在连接（握手未完成）· 检查未通过"
-						: enabled ? (server.connected ? "已连接" : "未连接") : "已停用";
+						: unhealthy ? "已连接 · 检查未通过"
+							: enabled ? (server.connected ? "已连接" : "未连接") : "已停用";
 			const prefix = server.serverName ? `工具前缀 mcp__${server.serverName}__` : "";
 			const pkg = server.package ? `${server.package.name}@${server.package.version ?? "latest"}` : "";
 			const update = server.update;
