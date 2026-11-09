@@ -1,5 +1,5 @@
 <p align="center">
- <img src="https://raw.githubusercontent.com/YunzhouLi-hub/dsh-overall-mcp/main/docs/images/icon.png" width="112" height="112" alt="全局 MCP & Skill: one blue hub with five satellites">
+ <img src="https://raw.githubusercontent.com/YunzhouLi-hub/dsh-overall-mcp/main/docs/images/icon.png" width="112" height="112" alt="Overall MCP & Skill icon">
 </p>
 
 <h1 align="center">全局 MCP &amp; Skill</h1>
@@ -7,114 +7,110 @@
 <p align="center"><a href="README.zh-CN.md">中文</a> | English</p>
 
 <p align="center">
- <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.3-4d6bfe" alt="version 1.0.3"></a>
+ <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.4-4d6bfe" alt="version 1.0.4"></a>
  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4d6bfe" alt="license MIT"></a>
  <img src="https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-4d6bfe" alt="node ^22.19 || >=24">
 </p>
 
-**One panel in DeepSeek Harness for both halves of "what this machine can do": MCP servers and Skills.** It scans every MCP configuration on the host and registers what it finds, puts six open MCP catalogues and four skill marketplaces behind one search box, keeps a local index of both so paging, search and install need no network, and records what actually ran — tool round trips and skill triggers — so "configured" and "used" stop being the same word.
+**Manage MCP servers and Skills in DeepSeek Harness: discover local capabilities, install from several marketplaces, and inspect actual usage.** Open **全局 MCP & Skill** below Plugins in the sidebar.
 
-The panel registers itself in the sidebar as **全局 MCP & Skill**, directly under *Plugins* (`order: 5` in `sidebar.panellist`).
+## Features
 
-## At a glance
-
-| | |
+| View | What it provides |
 |---|---|
-| **已注册** | Every server found in the host's MCP configs, grouped by which file it came from; enable, disable, remove, reveal. |
-| **MCP 市场** | Six catalogues (official registry, Smithery, Docker MCP, GitHub MCP, awesome-remote, awesome-list) deduplicated into one list; search, category, one-click install. |
-| **Skill 空间** | Skills read from four roots (`~/skills`, `~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`), grouped by origin, with open-folder and a move-to-trash remove. |
-| **Skill 市场** | ClawHub, SkillHub, the official set and GitHub, asked at once; install unpacks the archive itself. |
-| **调用** | What actually ran: `tool/call` → `tool/result` round trips, plus every skill trigger (the `skill` tool and the `/name` you type). Today's count, success rate, latency, a 1 h / 24 h / 7 d window. |
-| **索引** | A local 收录 index of SkillHub, ClawHub and GitHub — slice, or a source walked to its end. Once it holds rows, paging and search read the file (zero requests). |
+| **MCP · Registered** | Scan host MCP configurations, inspect connections, enable, disable, configure, check, or remove servers. Filter and group by source, with source-wide bulk actions. |
+| **MCP · Market** | Search, categorize, bookmark, and install deduplicated entries from the official Registry, Smithery, Docker MCP, GitHub MCP, Awesome Remote, and Awesome List. |
+| **Skill · Registered** | Read `$DSH_HOME/skills`, `~/.agents/skills`, `~/.claude/skills`, and `~/.codex/skills`. Inspect descriptions, origins, files, and directories, with search, sorting, and an alphabet index. |
+| **Skill · Market** | Browse ClawHub, Anthropic official skills, SkillHub, and GitHub. Use a local index, categories, source filters, popularity ranking, and installation. |
+| **MCP · Calls** | Inspect tool requests, responses, outcomes, latency, and connection failures over the last hour, 24 hours, or 7 days. |
+| **Skill · Calls** | Inspect tool loads and slash-command references, filter events, fold repeated references, and page through results. References count with their actual multiplicity; latency averages only measured tool loads. |
+
+Both Registered lists default to 20 entries and offer **20 / 50 / 100** per page. MCP and Skill share one navigation row and preserve the selected view type when switching.
+
+### Counters and ranking
+
+- Stars and download counts can refresh. Opening or paging measures supported counters for the visible items, with a five-minute cache for successful measurements. Manual refresh bypasses that cache.
+- Rate limits, network failures, or missing fields retain earlier values with a visible error and measurement time. Old values are not presented as a successful refresh.
+- Skills default to popularity order. Only SkillHub downloads and Stars receive a **30%** ranking weight; in the all-sources popularity view, SkillHub entries start at rank **21**. If fewer than 20 other-source entries match, SkillHub entries remain withheld from that view and can be accessed through the source filter. A SkillHub-only filter does not reserve those positions, and displayed counters retain their original values.
+- Global popularity uses the local index plus measured updates. It does not claim that every marketplace entry is refreshed simultaneously.
+- The Calls rail includes only resources with actual events **inside the selected time window**. Names, counts, and scope labels agree. Export covers the current filtered results within the host's retained records.
 
 ## Screenshots
 
-These are the real panel: `client/client.js` rendered over a fixed fixture, so the pictures cannot drift from what the code draws.
+These images render the current `client/client.js` in the real React runtime using fixed example data. They do not contain personal sessions or live marketplace measurements.
 
-### 已注册 — servers grouped by where they came from
+### MCP · Registered
 
-![The Registered tab: servers grouped by source, a GitHub access card naming the census index, and the actions that belong to the page](https://raw.githubusercontent.com/YunzhouLi-hub/dsh-overall-mcp/main/docs/images/registered.png)
+Connection state, source, and actions share a compact list; details open on demand, with page-size controls below.
 
-### MCP 市场 — six catalogues behind one search box
+![MCP Registered: shared navigation, connection state, source filters, server actions, and pagination](https://raw.githubusercontent.com/YunzhouLi-hub/dsh-overall-mcp/main/docs/images/registered.png)
 
-![The MCP market: search, category and source filters, a per-source count line, and the card wall with stars, licence and tags](https://raw.githubusercontent.com/YunzhouLi-hub/dsh-overall-mcp/main/docs/images/market.png)
+### MCP · Market
 
-### Detail — everything behind one card
+![MCP Market: search, category and source filters, recommendations, and three columns of connector cards](https://raw.githubusercontent.com/YunzhouLi-hub/dsh-overall-mcp/main/docs/images/market.png)
 
-![The detail panel: the launch command, the keys the server needs, its transport, stars, licence, and the actions](https://raw.githubusercontent.com/YunzhouLi-hub/dsh-overall-mcp/main/docs/images/detail.png)
+### MCP · Detail
 
-### Skill 空间 — the same page, switched by one pill
+![Connector detail: purpose, configuration, installation command, and source information](https://raw.githubusercontent.com/YunzhouLi-hub/dsh-overall-mcp/main/docs/images/detail.png)
 
-![The Skill space: skills grouped by the folder they came from, each card carrying origin, version, size and last change](https://raw.githubusercontent.com/YunzhouLi-hub/dsh-overall-mcp/main/docs/images/skill.png)
+### Skill · Registered
 
-### Skill 市场 — four marketplaces, one box
+![Skill Registered: names, descriptions, origins, file information, alphabet navigation, and paging](https://raw.githubusercontent.com/YunzhouLi-hub/dsh-overall-mcp/main/docs/images/skill.png)
 
-![The Skill market: one search box asking four sources, each source reporting its own count, and a source that failed saying so in red](https://raw.githubusercontent.com/YunzhouLi-hub/dsh-overall-mcp/main/docs/images/skillmarket.png)
+### Skill · Market
 
-### 调用 — what actually ran
+![Skill Market: multiple sources, popularity sorting, recommendations, and installation](https://raw.githubusercontent.com/YunzhouLi-hub/dsh-overall-mcp/main/docs/images/skillmarket.png)
 
-![The Calls tab: today's count, success rate and average latency on top; a pinned rail of servers or skills; a timeline of round trips and skill triggers, with the folding window and the window chips](https://raw.githubusercontent.com/YunzhouLi-hub/dsh-overall-mcp/main/docs/images/calls.png)
+### MCP · Calls
 
-## Install
+![MCP Calls: time window, resources active in that window, failure state, and request-response details](https://raw.githubusercontent.com/YunzhouLi-hub/dsh-overall-mcp/main/docs/images/calls.png)
+
+### Skill · Calls
+
+![Skill Calls: tool loads and command references, actual trigger counts, folding controls, and pagination](https://raw.githubusercontent.com/YunzhouLi-hub/dsh-overall-mcp/main/docs/images/skill-calls.png)
+
+## Install and update
+
+Requires **Node.js `^22.19.0 || >=24.0.0`** and DeepSeek Harness.
 
 ```sh
 git clone https://github.com/YunzhouLi-hub/dsh-overall-mcp.git
 dsh plugin --profile <profile> add /path/to/dsh-overall-mcp
-# restart DSH: host code loads at startup, the panel reloads with the page
 ```
 
-- **Node** `^22.19.0 || >=24.0.0`.
-- **GitHub access is optional** but changes what two features can do: a stored token (or `gh auth login`) gives 30 search requests a minute, code search, and a full GitHub crawl on its own quota. Without one, browsing falls back to repository search and the panel shows GitHub's own 403 when the 10-a-minute quota runs out.
-- The plugin's self-update compares this package against npm; a git checkout is skipped by design — update with `git pull` and a restart.
+Replace `<profile>` with your DSH profile name and the directory with your local checkout, then restart DSH. Update a checkout with `git pull` and a restart. Packages installed through npm can use the panel's self-update action. Updating GitHub code does not publish an npm package.
 
-## What it writes — and what it never touches
+**The host loads Skills when a session starts.** After adding or removing a Skill, restart DSH and use a new session. Discovery does not mean a running session has loaded it; Skills have no enable switch.
 
-Everything it owns lives under `$DSH_HOME/overall-mcp/`:
+## Local index and network access
 
-| File | What it is |
+Once collected, a Skill index supports local search, categories, sorting, and paging. **Installation still downloads files, and counter refresh still contacts providers.** Refreshing a page does not crawl the entire market. Use source management to collect the full index again when needed.
+
+The index records received rows, source cursors, sample/full modes, and incomplete coverage. It is a cache, not a live mirror. An October 2026 collection measured 214,747 rows, including 205,037 from SkillHub; those are historical measurements, not today's marketplace totals.
+
+GitHub authentication is optional. Detect an existing `gh` login or configure a Token in GitHub access settings for a larger allowance. GitHub's response determines the actual quota and reset time. Source failures show a Chinese explanation with expandable original diagnostics.
+
+## Data and directories
+
+Plugin data lives in `$DSH_HOME/overall-mcp/`, defaulting to `~/.dsh/overall-mcp/` when `DSH_HOME` is unset.
+
+| File or directory | Contents |
 |---|---|
-| `registry.json` | The registered servers, their source, version, transport and mount state. |
-| `catalog-cache.json` | The last MCP catalogue per source (read instead of the network until it ages out). |
-| `skills-index.json` | The 收录 index: rows, per-source cursors, `modes`, `truncations`, `minStars`. |
-| `calls.jsonl` | The 调用 feed, one line per round trip / trigger. Every invocation is kept; folding repeats into one row is a read-time decision. |
-| `ui-prefs.json` | Display preferences only (the fold window). It never holds configuration. |
-| `events.ndjson` | The action log the page header expands. |
-| `skills-trash/<time>/` | Where 移除 moves a skill folder — moved, never deleted. |
+| `registry.json` | Registered servers, origins, and configuration. |
+| `catalog-cache.json` | Cached MCP catalogs. |
+| `skills-index.json` | Skill index, source cursors, and coverage notes. |
+| `github-auth.json` | Locally saved GitHub credentials, never returned to the panel in plain text. |
+| `calls.jsonl` | Bounded call records; reference folding happens on read without rewriting event timestamps. |
+| `ui-prefs.json` | View preferences such as the reference-folding window. |
+| `events.ndjson` | Operation and source-request diagnostics. |
+| `skills-trash/` | Recovery directory for removed Skills. |
 
-It **reads** the host's MCP configuration files and never writes them; it writes new skills into `$DSH_HOME/skills/<name>/` and says the exact path.
+The plugin reads existing host MCP configurations without rewriting those files. New Skills go into `$DSH_HOME/skills/<name>/`, with the exact path shown after installation. Removing a Skill moves it into the plugin's recovery directory.
 
-## HTTP API
+## Development and verification
 
-The panel talks to these routes (Connection-authenticated; they exist for the page, not as a public API):
-
-```
-GET  /status           GET  /registry        GET  /catalog
-POST /scan             GET  /skills          GET  /skills/market
-POST /skills/market/install                   POST /skills/market/walk   {action: start|stop}
-GET  /calls?space=mcp|skill&range=1h|24h|7d&merge=<ms>&filter=&q=
-GET|POST /prefs        GET  /events          GET  /favorites
-POST /install          POST /toggle          POST /remove               POST /self-update
-```
-
-## Measured 2026-10
-
-Numbers the panel reports, and what they mean:
-
-- **SkillHub, full crawl**: 2,107 requests over 43 minutes produced **205,037 rows** of an upstream total of 210,612. The listing drifts while it is being paged, so 2,107 pages × 100 rows dedupe to 205k; the file records `modes.skillhub = "full"` and its cursor `done`.
-- **GitHub, slice**: **7,722 repositories** at ≥ 5★. GitHub's search cannot page past 1,000 results, so the walk descends through star bands; seven bands were wider than one window and are recorded in the file's `truncations` rather than quietly dropped.
-- **ClawHub, slice**: 1,988 rows. ClawHub publishes no total, and the panel does not invent one.
-- **The index as a whole**: 214,747 rows, 163 MB, `complete: true`. Paging, search and install read it with zero network requests.
-
-## Limits it admits
-
-- GitHub search: 10 requests a minute anonymously, 30 with a token; a full crawl paces at 6.5 s per request on purpose.
-- SkillHub full crawl pages a drifting listing, so the row count is what arrived, not a promise about the catalogue.
-- The index is a cache, not a mirror: `truncations` is where a source says it stopped before the end, and `modes` says which sources were walked to their end.
-
-## Development
-
-This repository is the published plugin: `index.js`, `lib/`, `client/`, the profile patch, `registry.json`, the two READMEs, `CHANGELOG.md` and the pictures. The test suites, render probes and build tooling live in the development workspace and are not part of this repository.
+GitHub main uses a compact publishing tree containing runtime code, READMEs, the changelog, and screenshots. Tests and image-generation tools remain in the development checkout. UI, counters, call-window behavior, and security fixes have regression checks. See [CHANGELOG.md](CHANGELOG.md) for changes.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Changes per release are in [CHANGELOG.md](CHANGELOG.md).
+[MIT](LICENSE). Marketplace entries and their contents retain their respective licenses.

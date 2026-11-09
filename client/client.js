@@ -59,7 +59,7 @@ window.__ModuleLoader__.load({
 		// probe also checks CHANGELOG.md's newest section is this version, since
 		// a release note that stops at an older build tells a reader what
 		// changed in code they are not running.
-		const CLIENT_VERSION = "1.0.3";
+		const CLIENT_VERSION = "1.0.4";
 		// Where 「点个 star」 points. A constant, not a config: it is this
 		// plugin's own repository, and a panel that could be pointed at another
 		// repository would be asking for a star it does not deserve.
@@ -205,6 +205,7 @@ window.__ModuleLoader__.load({
 			"codex-cli": "Codex CLI",
 			"gemini-cli": "Gemini CLI",
 			"manual": "手动添加",
+            "catalog:official-endpoint": "官方端点",
 			"catalog:official-registry": "官方 Registry",
 			"catalog:smithery": "Smithery",
 			"catalog:docker-catalog": "Docker MCP Catalog",
@@ -277,90 +278,45 @@ window.__ModuleLoader__.load({
 			cardBg: "var(--dsw-alias-bg-primary, #fff)",
 			soft: "rgba(128,128,128,0.08)",
 			soft2: "rgba(128,128,128,0.12)",
-			text: "var(--dsw-alias-text-primary, #1f2329)",
-			text2: "var(--dsw-alias-text-secondary, #4a5058)",
-			text3: "var(--dsw-alias-text-tertiary, #646a73)",
-			text4: "var(--dsw-alias-text-quaternary, #8f959e)",
-			line: "color-mix(in srgb, var(--dsw-alias-text-primary, #1f2329) 9%, var(--dsw-alias-bg-primary, #fff))",
-			line2: "color-mix(in srgb, var(--dsw-alias-text-primary, #1f2329) 6%, var(--dsw-alias-bg-primary, #fff))",
-			brand: "#5b7cfa",
-			green: "#5bb98a",
-			amber: "#e0b35a",
+			text: "var(--dsw-alias-text-primary, #18202e)",
+			text2: "var(--dsw-alias-text-secondary, #526071)",
+			text3: "var(--dsw-alias-text-tertiary, #667085)",
+			text4: "var(--dsw-alias-text-quaternary, #a9aeb8)",
+			line: "rgba(114,130,167,.24)",
+			line2: "rgba(114,130,167,.15)",
+			brand: "#4566e9",
+			green: "#00b42a",
+			amber: "#ff7d00",
 			blue: "#165dff",
 			red: "#f53f3f",
 		};
 
-		// The two spaces wear different colours: MCP borrows the product blue,
-		// Skill its own violet. Declared in JS rather than in the stylesheet
-		// because almost every box on this page is an inline style object — a
-		// `body.space-skill` rule cannot reach those, so the current space picks
-		// its accent here and the render passes it down.
-		const MCP_ACCENT = "#5b7cfa";
+		// Both resource types share the host's blue accent; status colors are
+		// reserved for health and outcomes, never used to distinguish tabs.
 		const MCP_SOFT = "#e8eefc";
-		const SKILL_ACCENT = "#8b8fd6";
-		const SKILL_INK = "#6a6eb8";
-		const SKILL_SOFT = "#f0eefc";
+		const SKILL_ACCENT = T.brand;
+		const SKILL_INK = T.brand;
+		const SKILL_SOFT = MCP_SOFT;
 		// The four upstreams, spelled the way each site spells itself.
-		const SKILL_MARKET_LABELS = { clawhub: "ClawHub", official: "anthropics", skillhub: "SkillHub", github: "GitHub" };
-		const SKILL_LINE = "#e3e0f6";
+		const SKILL_MARKET_LABELS = { clawhub: "ClawHub", official: "Anthropic 官方技能", skillhub: "SkillHub", github: "GitHub" };
+		const SKILL_LINE = "rgba(69,102,233,.18)";
 
 		const styles = {
-			// A centre-column panel owns its scrolling: the frame's centre column
-			// is `overflow:hidden`, and every built-in page is a
-			// `height:100%; overflow:auto` scroller (the plugin manager's own
-			// `.page` is exactly that). This page is the shell instead: it is
-			// `height:100%` with **no** scrolling of its own, and the scrolling
-			// lives one level down — the tab body for 已注册 (a long list) and,
-			// in MCP 市场, the card region alone, so the search box and the
-			// 分类/筛选 rows stay put while the cards move. The top padding
-			// repeats the frame's clearance variable so the first row clears the
-			// macOS traffic lights and the Windows title bar instead of hiding
-			// under them.
-			//
-			// The page adds no horizontal padding of its own: the market body
-			// inside it is already a 20px-padded plate, and a second gutter here
-			// would push the card grid's container below the 1100px three-column
-			// breakpoint (1140 available − 2×20 = 1100 exactly). The probe in
-			// tools/shot.mjs pins that contract on the grid's used column count.
+			smallPrimary: { padding: "6px 12px", minHeight: 30, fontSize: 13, lineHeight: 1.25, fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0, cursor: "pointer", fontWeight: 500, borderRadius: 7, border: `1px solid ${T.brand}`, background: T.brand, color: "#fff", boxShadow: "0 2px 4px rgba(69,102,233,.12)" },
+			smallBtn: { padding: "5px 10px", borderRadius: 7, fontSize: 13, fontFamily: "inherit", border: `1px solid ${T.line}`, background: T.cardBg, color: T.text2, cursor: "pointer", whiteSpace: "nowrap" },
+			emptyBox: { display: "grid", justifyItems: "center", gap: 10, padding: "36px 20px", border: `1px dashed ${T.line}`, borderRadius: 12, color: T.text3, textAlign: "center", fontSize: 14 },
+            // Center the shared content column inside the host pane. Each tab
+            // retains its own scroller inside the available height.
 			page: {
-				// A *column* flex container, not a grid. Two real bugs came from
-				// `display: grid` here, and both are fixed by the axis change:
-				//
-				// 1. A grid with `height: 100%` stretches its implicit rows over
-				//    the whole panel (`align-content: normal` = stretch). In the
-				//    loading state there is almost nothing to paint, so every row
-				//    was spread across a screenful of empty space: header, then
-				//    300px of nothing, then the tabs, then the search box. In a
-				//    column flex container the main axis packs at the start and
-				//    the leftover height stays at the bottom.
-				// 2. An item of a grid whose tracks are `auto` contributes its
-				//    *minimum* (min-content) to the track's base size, and a
-				//    multicol's min-content is one column per `column-count`,
-				//    each as wide as the widest card. On the real desktop window
-				//    that inflated the chain to a ~1891px wall inside a 1180px
-				//    page (cards 621px wide, third column off screen, page
-				//    scrollbar). In a column flex container the cross axis is
-				//    horizontal: items stretch to the container's width and no
-				//    horizontal automatic minimum exists at all.
-				display: "flex", flexDirection: "column", gap: 0,
-				fontFamily: 'system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif',
-				background: "radial-gradient(1200px 420px at 8% -10%, color-mix(in srgb, var(--omkt-accent) 6%, transparent), transparent 60%), linear-gradient(180deg, color-mix(in srgb, var(--omkt-accent) 3%, var(--dsw-alias-bg-primary, #fff)), color-mix(in srgb, var(--dsw-alias-bg-primary, #fff) 98%, var(--omkt-accent)) 42%)",
-				fontSize: 13.5, lineHeight: 1.55, color: T.text,
+				display: "flex", flexDirection: "column", gap: 12,
+				fontSize: 15, lineHeight: 1.5, color: T.text,
+				fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif",
+				background: "var(--dsw-alias-bg-base, #fff)",
 				height: "100%", boxSizing: "border-box", overflow: "hidden",
-				width: "100%", maxWidth: 1180, margin: "0 auto", minWidth: 0,
+				width: "100%", maxWidth: 1120, marginInline: "auto", minWidth: 0,
 				minHeight: 0,
-				// The page is a container too, so the grid is always measured
-				// against a box of our own — `gridHost` is nearer and wins, but
-				// a host or fixture that renders the page alone must still get
-				// the container query rather than the `@media`-free fallback.
 				containerType: "inline-size",
-				// 20px of side gutter, ours: the frame's centre column has no
-				// padding of its own (`.centerCol` in the layout bundle is a
-				// bare flex column), so a page that does not leave a margin
-				// sits flush against the rail and the right edge. v4's own
-				// shell is `1180 + 20px`, and border-box keeps the content box
-				// at 1140 — the width the grid's breakpoints were tuned for.
-				padding: "calc(22px + var(--dsh-frame-top-clearance, 0px)) 20px 20px",
+				padding: "calc(24px + var(--dsh-frame-top-clearance, 0px)) clamp(14px, 1.6vw, 24px) 24px",
 			},
 			// A tab's own body. It used to reuse `page`, which put a second
 			// 1180px box, a second scroller, a second container and a second
@@ -400,6 +356,13 @@ window.__ModuleLoader__.load({
 				minWidth: 0, paddingBottom: 4,
 			},
 			toolbar: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" },
+			sectionHead: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap", marginBottom: 2, minHeight: 34 },
+			sectionTitle: { fontSize: 24, fontWeight: 650, margin: 0, lineHeight: 1.35, letterSpacing: "-.025em" },
+			sectionHint: { fontSize: 15, color: T.text3, margin: 0, lineHeight: 1.5 },
+			menu: { position: "relative", flexShrink: 0 },
+			menuList: { position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 20, display: "grid", gap: 4, padding: 8, minWidth: 180, borderRadius: 10, border: `1px solid ${T.line}`, background: T.cardBg, boxShadow: "0 12px 32px rgba(20,26,40,.12)" },
+			listRow: { display: "flex", gap: 14, alignItems: "center", padding: "12px 16px", borderBottom: `1px solid ${T.line2}`, minWidth: 0, background: T.cardBg },
+			listMeta: { fontSize: 13, color: T.text3, minWidth: 0 },
 			// ---- page head, ported from the v4 prototype ----------------------
 			// Two rows: identity + actions, then the sub-line. The brand mark is
 			// the only illustration in the whole page; everything else is text.
@@ -419,17 +382,17 @@ window.__ModuleLoader__.load({
 			// panel the bare glyph reads as an icon floating in colour.
 			brandTile: {
 				display: "flex", alignItems: "center", justifyContent: "center",
-				width: 34, height: 34, borderRadius: 11, flexShrink: 0,
-				background: T.cardBg, border: "1px solid " + T.line2,
+				width: 30, height: 30, borderRadius: 10, flexShrink: 0,
+				background: T.cardBg, border: "1px solid rgba(128,128,128,0.10)",
 				boxShadow: "0 1px 2px rgba(20,22,28,0.05)",
 			},
 			// The wrapper that stacks the tinted panel over the ident line.
 			headWrap: {
-				display: "flex", flexDirection: "column", gap: 10, marginBottom: 16,
+				display: "flex", flexDirection: "column", gap: 8, marginBottom: 4,
 			},
 			pageHead: {
 				display: "flex", alignItems: "center", justifyContent: "space-between",
-				gap: 10, flexWrap: "wrap", minWidth: 0,
+				gap: 24, flexWrap: "nowrap", minWidth: 0,
 			},
 			// The ident line: build facts left, the two log controls right. Small
 			// and quiet on purpose — it answers "what am I looking at", not "what
@@ -446,7 +409,7 @@ window.__ModuleLoader__.load({
 			headCol: {
 				display: "flex", flexDirection: "row", gap: 8,
 				alignItems: "center", justifyContent: "flex-end",
-				flexShrink: 0, marginLeft: "auto", flexWrap: "wrap",
+				flexShrink: 0,
 			},
 			// Row B: the sub-line and the one outlined control that belongs with
 			// it, so the first row keeps a single filled button.
@@ -461,13 +424,10 @@ window.__ModuleLoader__.load({
 			titleRow: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", minWidth: 0 },
 			// The "&" between the two spaces, quiet enough to read as a join.
 			amp: { fontWeight: 400, color: T.text3, margin: "0 3px" },
-			pageTitle: {
-				fontSize: 18.5, fontWeight: 680, color: T.text, whiteSpace: "nowrap",
-				lineHeight: 1.2, letterSpacing: "-0.02em",
-			},
+			pageTitle: { fontSize: 28, fontWeight: 700, color: T.text, lineHeight: 1.2, letterSpacing: "-.035em" },
 			// v4 states the version as plain muted text beside the title, not as
 			// a chip: it is a fact about the page, not a status to decode.
-			versionChip: { fontSize: 12, color: T.text3, fontWeight: 500, whiteSpace: "nowrap" },
+			versionChip: { fontSize: 13, color: T.text3, fontWeight: 400, whiteSpace: "nowrap" },
 			// 「点个 star」: a capsule in the identity row. The resting look is
 			// inline so a renderer without the injected sheet still shows a
 			// proper pill; the hover motion lives in ensureStyles, because
@@ -475,8 +435,8 @@ window.__ModuleLoader__.load({
 			star: {
 				display: "inline-flex", alignItems: "center", gap: 5, height: 24,
 				padding: "0 10px", borderRadius: 999, overflow: "hidden",
-				border: "1px solid #f3e8d4", background: "#fffbf3",
-				color: "#a07a3a", fontSize: 12, fontWeight: 500, lineHeight: 1,
+				border: `1px solid ${T.line}`, background: "rgba(255,125,0,.06)",
+				color: T.text2, fontSize: 12, fontWeight: 500, lineHeight: 1,
 				textDecoration: "none", whiteSpace: "nowrap", position: "relative",
 				transition: "transform .16s ease, border-color .16s ease, background .16s ease, box-shadow .16s ease",
 			},
@@ -498,21 +458,15 @@ window.__ModuleLoader__.load({
 				cursor: "pointer", boxShadow: "0 1px 2px rgba(0,0,0,.04)",
 			},
 			spacer: { marginLeft: "auto" },
-			button: {
-				padding: "7px 13px", borderRadius: 10, cursor: "pointer", fontSize: 12.5,
-				fontWeight: 500,
-				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text,
-				// A CJK label breaks between characters, so a shrunk flex button
-				// has a one-glyph minimum: it would wrap inside a box too narrow
-				// for it and clip the second line (the app's 搜索 button was 38px
-				// wide for two characters). Buttons never shrink and never wrap.
-				flexShrink: 0, whiteSpace: "nowrap", boxSizing: "border-box",
-			},
-			// v5 gives host rescanning an ink button; installation uses the space accent.
-			primary: { background: "#2b3038", borderColor: "#2b3038", color: "#fff", fontWeight: 600 },
+			button: { padding: "8px 14px", minHeight: 36, borderRadius: 8, cursor: "pointer", fontSize: 14, fontFamily: "inherit", fontWeight: 500, border: `1px solid ${T.line}`, background: T.cardBg, color: T.text, flexShrink: 0, whiteSpace: "nowrap", boxSizing: "border-box" },
+			// v4's primary is INK, not accent: exactly one filled button per
+			// view, with the accent spent on links, tab rules and badges
+			// instead. `T.text` on `T.cardBg` is v4's own light/dark pair
+			// (#111/#fff ↔ #f2f2f2/#111) without needing a second rule.
+			primary: { background: T.brand, borderColor: T.brand, color: "#fff", fontWeight: 600 },
 		// Install and save wear the accent fill; the ink one belongs to
 		// "rescan the host", the only verb allowed to shout that loud.
-		accent: { background: "var(--omkt-accent-ink, #3d5fd9)", borderColor: "var(--omkt-accent-ink, #3d5fd9)", color: "#fff", fontWeight: 600 },
+			accent: { background: T.brand, borderColor: T.brand, color: "#fff", fontWeight: 600 },
 			// A row whose update is already queued or running: the row's own
 			// button is where a reader looks for its state, so it reports that
 			// state in place — muted and not clickable — instead of vanishing
@@ -524,23 +478,12 @@ window.__ModuleLoader__.load({
 			},
 			// v4's `.btn-text`: borderless and muted, so it never competes with
 			// the one filled control beside it.
-			textBtn: {
-				padding: "7px 4px", borderRadius: 8, cursor: "pointer", fontSize: 13,
-				fontWeight: 500, border: "none", background: "transparent", color: T.text3,
-				flexShrink: 0, whiteSpace: "nowrap",
-			},
+			textBtn: { padding: "6px 8px", borderRadius: 7, cursor: "pointer", fontSize: 14, fontFamily: "inherit", fontWeight: 500, border: "none", background: "transparent", color: T.text2, flexShrink: 0, whiteSpace: "nowrap" },
 			// v4's `.btn-outline`, used by 导出日志 alone.
-			outlineBtn: {
-				padding: "6px 12px", borderRadius: 8, cursor: "pointer", fontSize: 12.5,
-				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text2,
-				display: "inline-flex", alignItems: "center", gap: 6,
-			},
+			outlineBtn: { padding: "7px 12px", borderRadius: 8, cursor: "pointer", fontSize: 14, fontFamily: "inherit", border: `1px solid ${T.line}`, background: T.cardBg, color: T.text2, display: "inline-flex", alignItems: "center", gap: 8 },
 			// The user's own catalogue sources: a quiet box that only appears when
 			// its row is open, so the market's chrome stays three rows deep.
-			sourceBox: {
-				border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px 12px",
-				marginBottom: 14, background: T.soft, fontSize: 12.5, color: T.text2,
-			},
+			sourceBox: { border: `1px solid ${T.line}`, borderRadius: 10, padding: "8px 12px", background: T.cardBg, fontSize: 12, color: T.text2, marginBottom: 0 },
 			sourceHead: {
 				display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
 			},
@@ -554,81 +497,33 @@ window.__ModuleLoader__.load({
 				flex: "1 1 240px", minWidth: 0, padding: "6px 10px", fontSize: 12.5,
 				borderRadius: 8, border: `1px solid ${T.line}`, background: T.cardBg, color: T.text,
 			},
-			sourceMiniBtn: {
-				padding: "4px 10px", borderRadius: 8, cursor: "pointer", fontSize: 12,
-				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text2,
-				flexShrink: 0, whiteSpace: "nowrap",
-			},
+			sourceMiniBtn: { padding: "5px 10px", minHeight: 30, borderRadius: 7, cursor: "pointer", fontSize: 13, fontFamily: "inherit", border: `1px solid ${T.line}`, background: T.cardBg, color: T.text2, flexShrink: 0, whiteSpace: "nowrap" },
 			sourceMiniBtnDanger: { color: T.red },
 			// ---- the two spaces -------------------------------------------
 			// MCP and Skill are peers, not a filter over one list: each has its
-			// own items, its own actions and its own colour. The switcher is two
-			// wide pills that divide the row; a dropdown in the action area reads
-			// as a filter ("show me the ones matching this"), which is the one
-			// thing these are not.
-			spaceSwitch: {
-				display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8,
-				padding: 4, marginBottom: 14, borderRadius: 16,
-				border: `1px solid ${T.line}`, background: "color-mix(in srgb, var(--dsw-alias-text-primary, #1f2329) 6%, var(--dsw-alias-bg-primary, #fff))",
-			},
-			spacePill: {
-				display: "flex", gap: 12, alignItems: "center", minWidth: 0,
-				outline: "none",
-				padding: "12px 14px", borderRadius: 13, cursor: "pointer",
-				border: "1px solid transparent", background: "transparent",
-				color: T.text3, textAlign: "left", font: "inherit",
-			},
-			spacePillOn: {
-				background: T.cardBg, color: T.text,
-				boxShadow: "0 1px 2px rgba(0,0,0,0.06)",
-			},
-			spaceIco: {
-				width: 40, height: 40, borderRadius: 12, flexShrink: 0,
-				display: "grid", placeItems: "center", fontSize: 14, fontWeight: 700,
-				background: T.soft, border: `1px solid ${T.line2}`,
-			},
-			spaceBody: { display: "flex", flexDirection: "column", gap: 2, minWidth: 0 },
-			spaceLab: {
-				display: "flex", gap: 8, alignItems: "center",
-				fontSize: 14.5, fontWeight: 670, letterSpacing: "-0.2px", minWidth: 0,
-			},
-			spaceSub: {
-				fontSize: 12, color: T.text4, whiteSpace: "nowrap",
-				overflow: "hidden", textOverflow: "ellipsis",
-			},
-			spaceCount: {
-				fontSize: 11, fontWeight: 600, padding: "2px 7px", borderRadius: 999,
-				background: "rgba(128,128,128,0.11)", color: T.text2, flexShrink: 0,
-			},
+			// own items and actions. Keep this selector distinct from the view tabs.
+			spaceSwitch: { display: "flex", alignItems: "center", gap: 12, flex: "none", paddingInlineEnd: 14 },
+			spacePill: { minHeight: 34, padding: "4px 2px", borderRadius: 4, cursor: "pointer", border: 0, color: T.text2, font: "inherit", fontSize: 14, fontWeight: 600, whiteSpace: "nowrap" },
+			spacePillOn: { color: T.brand, fontWeight: 700 },
 			// ---- skill cards ----------------------------------------------
 			// A skill has no connection, no tools and no health: the card shows
 			// what a person can actually judge it by — what it does, where it
 			// came from, when it last changed, and the folder to open.
-			skillGrid: {
-				display: "grid", gap: 10, minWidth: 0, padding: "12px",
-				gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-			},
-			skillCard: {
-				display: "flex", gap: 12, padding: 14, borderRadius: 14,
-				border: `1px solid ${T.line}`, background: T.cardBg, minWidth: 0,
-				boxShadow: "0 1px 2px rgba(20,26,40,.03)", cursor: "pointer",
-			},
+			skillGrid: { display: "grid", gap: 16, minWidth: 0, gridTemplateColumns: "repeat(3,minmax(0,1fr))" },
+			skillCard: { display: "grid", gridTemplateColumns: "minmax(0,2.3fr) minmax(120px,1fr) minmax(140px,1fr) 110px", gap: 16, padding: "5px 20px", alignItems: "center", borderBottom: `1px solid ${T.line2}`, background: T.cardBg, minWidth: 0, minHeight: 47 },
 			skillAvatar: {
 				width: 40, height: 40, borderRadius: 12, flexShrink: 0,
 				display: "grid", placeItems: "center", fontSize: 15, fontWeight: 680,
 				background: SKILL_SOFT, color: SKILL_INK, border: `1px solid ${SKILL_LINE}`,
 			},
 			skillMain: {
-				display: "flex", flexDirection: "column", gap: 4,
+				display: "flex", flexDirection: "column", gap: 1,
 				minWidth: 0, flex: "1 1 auto",
 			},
 			skillHead: {
 				display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap", minWidth: 0,
 			},
-			skillName: {
-				fontSize: 13.5, fontWeight: 650, color: T.text, minWidth: 0,
-				overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-			},
+			skillName: { fontSize: 16, lineHeight: 1.2, fontWeight: 600, color: T.text, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
 			skillBadge: {
 				fontSize: 11, padding: "1px 7px", borderRadius: 999,
 				background: SKILL_SOFT, color: SKILL_INK,
@@ -636,16 +531,13 @@ window.__ModuleLoader__.load({
 			},
 			skillTags: { display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap", marginTop: 2 },
 			skillVer: { fontSize: 11.5, color: T.text3, whiteSpace: "nowrap" },
-			skillDesc: {
-				fontSize: 12.5, color: T.text2, display: "-webkit-box",
-				WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
-			},
+			skillDesc: { fontSize: 14, color: T.text2, lineHeight: 1.2, display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical", overflow: "hidden" },
 			skillMeta: {
 				fontSize: 11.5, color: T.text4,
 				fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
 				overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
 			},
-			skillActs: { display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 },
+			skillActs: { display: "flex", gap: 8, flexShrink: 0, alignItems: "center" },
 			skillRail: {
 				display: "flex", flexDirection: "column", gap: 2,
 				flexShrink: 0, width: 16, paddingTop: 2,
@@ -670,14 +562,8 @@ window.__ModuleLoader__.load({
 			// The search box, the filters and the count line stay at the top of the
 			// tab body while the cards scroll under them. `top: 0` is the scroll
 			// container's padding box, so it parks exactly at the tab edge.
-			smSticky: {
-				position: "sticky", top: 0, zIndex: 6,
-				display: "flex", flexDirection: "column", gap: 10,
-				paddingTop: 2, paddingBottom: 8,
-				background: "color-mix(in srgb, var(--omkt-accent, #8b8fd6) 3%, var(--dsw-alias-bg-primary, #fff))",
-				boxShadow: "0 8px 14px -12px rgba(20,22,28,0.45)",
-			},
-			smToolbar2: { display: "flex", alignItems: "center", gap: 8, margin: "0 0 10px", flexWrap: "wrap" },
+			smSticky: { display: "flex", flexDirection: "column", gap: 8, paddingBottom: 0, minWidth: 0 },
+			smToolbar2: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", margin: 0 },
 			// The 已注册 tabs keep their search and filter row by keeping it
 			// *outside* the scrolling box: the scrollbar then belongs to the list
 			// alone instead of running up beside the header. `regHeader` is that
@@ -695,47 +581,26 @@ window.__ModuleLoader__.load({
 				flex: "1 1 auto", flexShrink: 1, minHeight: 0, overflowY: "auto",
 				minWidth: 0, paddingBottom: 4,
 			},
-			smStat: {
-				display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
-				fontSize: 12.5, color: T.text3, margin: "2px 0 12px",
-			},
+			smStat: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, color: T.text3, margin: 0 },
 			smChips: { display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginLeft: "auto" },
 			smSrcPill: {
 				fontSize: 10.5, fontWeight: 620, padding: "2px 7px", borderRadius: 999,
 				background: "#f2f3f5", color: "#646a73", border: "1px solid transparent",
 				whiteSpace: "nowrap",
 			},
-			smSpotlight: {
-				display: "grid", gridTemplateColumns: "1.35fr 1fr", gap: 12, marginBottom: 16,
-			},
-			smHero: {
-				display: "flex", flexDirection: "column", gap: 10, padding: "18px 18px 16px",
-				minHeight: 148, borderRadius: 18, border: `1px solid ${T.line}`,
-				background: "radial-gradient(500px 180px at 100% 0%, color-mix(in srgb, var(--omkt-accent, #8b8fd6) 8%, transparent), transparent 55%), linear-gradient(135deg, var(--dsw-alias-bg-primary, #fff), color-mix(in srgb, var(--omkt-accent-soft, #f0eefc) 45%, var(--dsw-alias-bg-primary, #fff)))",
-				boxShadow: "0 1px 2px rgba(31,35,41,.03), 0 6px 16px rgba(31,35,41,.04)",
-				minWidth: 0,
-			},
-			smHeroAlt: {
-				border: "1px solid #f3e8d4",
-				background: "radial-gradient(420px 160px at 100% 0%, rgba(224,179,90,0.10), transparent 55%), linear-gradient(135deg, var(--dsw-alias-bg-primary, #fff), color-mix(in srgb, #e0b35a 5%, var(--dsw-alias-bg-primary, #fff)))",
-			},
-			smEyebrow: {
-				display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11,
-				fontWeight: 650, letterSpacing: "0.04em", color: "var(--omkt-accent-ink, #6a6eb8)",
-			},
-			smHTitle: { fontSize: 17, fontWeight: 700, letterSpacing: "-0.3px", color: T.text },
-			smHDesc: { fontSize: 12.5, color: T.text2, lineHeight: 1.6, maxWidth: "46ch", flex: 1 },
+			smSpotlight: { display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 16, marginBottom: 0 },
+			smHero: { display: "flex", flexDirection: "column", gap: 10, padding: "12px 18px", minHeight: 126, borderRadius: 12, border: "1px solid rgba(69,102,233,.12)", background: "linear-gradient(115deg, rgba(69,102,233,.10), rgba(69,102,233,.045))", minWidth: 0 },
+			smHeroAlt: { border: "1px solid rgba(69,102,233,.12)", background: "rgba(69,102,233,.055)" },
+			smEyebrow: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 15, fontWeight: 600, color: T.brand },
+			smHTitle: { fontSize: 20, lineHeight: 1.3, fontWeight: 650, color: T.text, letterSpacing: "-.02em" },
+			smHDesc: { fontSize: 14, color: T.text2, lineHeight: 1.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
 			smHFoot: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" },
-			smN: { fontSize: 11.5, color: T.text3 },
+			smN: { fontSize: 12, color: T.text3, whiteSpace: "nowrap" },
 			smBadge: {
 				fontSize: 11, fontWeight: 600, padding: "2px 7px", borderRadius: 6,
 				background: SKILL_SOFT, color: SKILL_INK, border: "1px solid #e3e0f6",
 			},
-			smCard: {
-				display: "flex", flexDirection: "column", gap: 10, padding: 14, minHeight: 168,
-				borderRadius: 14, background: T.cardBg, border: "1px solid " + T.line,
-				boxShadow: "0 1px 2px rgba(20,22,28,0.04)", minWidth: 0,
-			},
+			smCard: { display: "flex", flexDirection: "column", gap: 5, padding: "10px 16px", minHeight: 150, borderRadius: 12, background: T.cardBg, border: `1px solid ${T.line}`, boxShadow: "0 2px 4px rgba(20,26,40,.035)", minWidth: 0 },
 			smTop: { display: "flex", alignItems: "flex-start", gap: 10, minWidth: 0 },
 			smBox: { display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: "1 1 auto" },
 			smId: {
@@ -743,19 +608,10 @@ window.__ModuleLoader__.load({
 				width: 30, height: 30, borderRadius: 9, background: SKILL_SOFT,
 				color: SKILL_INK, fontWeight: 650, fontSize: 12.5,
 			},
-			smNm: {
-				fontSize: 13.5, fontWeight: 650, letterSpacing: "-0.15px", color: T.text,
-				overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-			},
-			smSrc: { fontSize: 11.5, color: T.text3, marginTop: 2 },
-			smDesc: {
-				fontSize: 12.5, color: T.text2, lineHeight: 1.6,
-				display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden",
-			},
-			smFoot: {
-				display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
-				marginTop: "auto", paddingTop: 2,
-			},
+			smNm: { fontSize: 18, fontWeight: 600, lineHeight: 1.3, color: T.text, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+			smSrc: { fontSize: 13, color: T.text3, marginTop: 2 },
+			smDesc: { fontSize: 15, lineHeight: 1.45, color: T.text2, height: "2.9em", margin: 0, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", overflowWrap: "anywhere" },
+			smFoot: { display: "flex", gap: 8, alignItems: "center", marginTop: "auto", flexWrap: "wrap" },
 			smAct: { marginLeft: "auto" },
 			smNote: {
 				marginTop: 14, padding: "11px 13px", borderRadius: 12,
@@ -785,15 +641,8 @@ window.__ModuleLoader__.load({
 			// came from, and that is the one question the page exists to answer.
 			skillPanel: { display: "flex", flexDirection: "column", gap: 10, minWidth: 0 },
 			skillHint: { fontSize: 12, color: T.text3 },
-			skillGroup: {
-				border: `1px solid ${T.line}`, borderRadius: 18, background: "color-mix(in srgb, var(--dsw-alias-bg-primary, #fff) 55%, transparent)",
-				overflow: "hidden", minWidth: 0,
-			},
-			skillGroupHead: {
-				display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap",
-				padding: "11px 16px", borderBottom: `1px solid ${T.line2}`,
-				background: "rgba(128,128,128,0.04)",
-			},
+			skillGroup: { display: "flex", flexDirection: "column", gap: 0, marginBottom: 12, border: `1px solid ${T.line}`, borderRadius: 12, background: T.cardBg },
+			skillGroupHead: { display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", borderBottom: `1px solid ${T.line2}`, fontSize: 12, color: T.text3, flexWrap: "wrap" },
 			skillGroupTitle: {
 				display: "flex", gap: 8, alignItems: "center",
 				fontSize: 13, fontWeight: 650, color: T.text,
@@ -811,12 +660,12 @@ window.__ModuleLoader__.load({
 			// a row and compare without losing their place.
 			scrim: {
 				position: "fixed", inset: 0, zIndex: 60, display: "flex",
-				justifyContent: "flex-end", background: "rgba(31,35,41,0.22)",
+				justifyContent: "flex-end", background: "rgba(15,18,24,0.30)",
 			},
 			drawer: {
 				width: "min(520px, 92vw)", height: "100%", display: "flex", flexDirection: "column",
 				background: T.cardBg, borderLeft: `1px solid ${T.line}`,
-				boxShadow: "-12px 0 28px rgba(31,35,41,.08)",
+				boxShadow: "-18px 0 40px rgba(0,0,0,0.12)",
 			},
 			drawerHead: {
 				display: "flex", gap: 12, alignItems: "flex-start", justifyContent: "space-between",
@@ -841,7 +690,9 @@ window.__ModuleLoader__.load({
 				display: "flex", gap: 8, justifyContent: "flex-end",
 				padding: "14px 18px", borderTop: `1px solid ${T.line}`,
 			},
-			// MCP and Skill details share the v5 right-hand drawer and fact rows.
+			// The skill card reuses the MCP detail sheet — same width, same
+			// centring, same fact rows — so the two never look like different
+			// products. Only the head layout is its own.
 			skillCardHead: { display: "flex", gap: 12, alignItems: "flex-start", justifyContent: "space-between", minWidth: 0 },
 			skillCardId: { display: "flex", gap: 10, alignItems: "center", minWidth: 0 },
 			skillCardNames: { display: "flex", flexDirection: "column", gap: 5, minWidth: 0 },
@@ -890,44 +741,25 @@ window.__ModuleLoader__.load({
 			// The one destructive-looking button on the page. Colour, not weight:
 			// it sits beside 取消 and must not read as the default action.
 			dangerBtn: { color: "#c4453b", borderColor: "#e7c3bf" },
-			// Underline tabs: the selected rule follows the current space accent. The rule is drawn by the injected sheet on
+			// Underline tabs: the label sits on a rule and the active rule is
+			// ink, not accent. The rule is drawn by the injected sheet on
 			// `.omkt-tab[aria-selected="true"]::after` rather than as an inline
 			// `border-bottom: 2px solid transparent` on the inactive tab: in the
 			// real app that transparent border painted *black* (the UA button
 			// border colour), so both tabs looked selected at once. A pseudo
 			// element that is transparent unless the tab is selected cannot do
 			// that, and `aria-selected` is also what a screen reader reads.
-			tabBar: {
-				display: "flex", gap: 2, alignItems: "center",
-				borderBottom: `1px solid ${T.line}`, marginBottom: 14, overflowX: "auto",
-			},
-			tab: {
-				padding: "8px 4px 11px", marginRight: 18, background: "transparent",
-				cursor: "pointer", fontSize: 13.5, fontWeight: 500, color: T.text3,
-				border: "none", whiteSpace: "nowrap", textDecoration: "none",
-			},
+			tabBar: { display: "flex", gap: 14, alignItems: "center", borderBottom: `1px solid ${T.line}`, marginBottom: 22, overflowX: "auto" },
+			tab: { padding: "8px 12px 10px", marginRight: 8, background: "transparent", cursor: "pointer", fontSize: 16, fontWeight: 500, color: T.text2, border: "none", lineHeight: 1.4, whiteSpace: "nowrap" },
 			tabActive: { color: T.text, fontWeight: 620 },
-			stats: { display: "flex", gap: 14, flexWrap: "wrap", fontSize: 12, color: T.text3 },
+			stats: { display: "flex", gap: 20, flexWrap: "wrap", fontSize: 14, color: T.text2, padding: "2px 0" },
 			// v4's market chrome is three rows, and each row has one job: a
 			// search pill, a chip row with the page's compact controls at its
 			// end, then a meta line of bold numbers. Five controls in one row
 			// is what made the old page read as a form.
-			searchWrap: {
-				display: "flex", gap: 10, alignItems: "center", width: "100%",
-				// `width: 100%` plus padding overflows its parent by exactly the
-				// padding unless the box is border-box, and the market body now
-				// clips (it owns the card scroller) — that combination is what cut
-				// the 搜索 button in half on the real desktop window. Every box
-				// that states a width AND has padding must say border-box.
-				boxSizing: "border-box", minWidth: 0,
-				padding: "10px 14px", borderRadius: 12,
-				border: "1px solid rgba(128,128,128,0.16)", background: T.cardBg, color: T.text3,
-			},
+			searchWrap: { display: "flex", gap: 10, alignItems: "center", width: "100%", height: 42, boxSizing: "border-box", minWidth: 0, padding: "0 12px", borderRadius: 9, border: `1px solid ${T.line}`, background: T.cardBg, color: T.text3 },
 			searchIcon: { fontSize: 13, lineHeight: 1, flexShrink: 0 },
-			searchInput: {
-				flex: 1, minWidth: 0, border: 0, outline: 0, background: "transparent",
-				fontSize: 13, color: T.text,
-			},
+			searchInput: { flex: 1, minWidth: 0, width: "100%", border: 0, outline: 0, background: "transparent", fontSize: 15, fontFamily: "inherit", lineHeight: 1.5, color: T.text, padding: 0 },
 			filters: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 0 },
 			// The taxonomy is a *dropdown*, not a scrolling chip row: twenty
 			// category chips either scrolled sideways (so half of them were
@@ -973,26 +805,13 @@ window.__ModuleLoader__.load({
 			metaB: { fontWeight: 600, color: T.text2 },
 			metaSort: { fontWeight: 600, color: T.text },
 			metaTail: { marginLeft: "auto" },
-			select: {
-				padding: "6px 10px", borderRadius: 8, fontSize: 13,
-				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text,
-			},
-			searchBox: {
-				flex: 1, minWidth: 180, padding: "7px 12px", borderRadius: 8, fontSize: 13,
-				border: `1px solid ${T.line}`, background: T.cardBg, color: T.text,
-			},
-			group: {
-				border: `1px solid ${T.line}`, borderRadius: 18, overflow: "hidden",
-				background: "rgba(255,255,255,0.55)",
-			},
-			groupHead: {
-				display: "flex", gap: 10, alignItems: "center", padding: "11px 16px",
-				background: "linear-gradient(180deg, rgba(255,255,255,.9), rgba(128,128,128,.06))",
-				fontSize: 12.5, color: T.text2,
-			},
+			select: { padding: "8px 12px", height: 40, borderRadius: 8, border: `1px solid ${T.line}`, background: T.cardBg, color: T.text, fontSize: 14, fontFamily: "inherit", maxWidth: "100%", minWidth: 0 },
+			searchBox: { flex: "1 1 240px", minWidth: 0, height: 40, padding: "8px 12px", borderRadius: 8, border: `1px solid ${T.line}`, background: T.cardBg, color: T.text, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" },
+			group: { border: `1px solid ${T.line}`, borderRadius: 12, background: T.cardBg, marginBottom: 12 },
+			groupHead: { display: "flex", alignItems: "center", gap: 8, padding: "9px 16px", borderBottom: `1px solid ${T.line2}`, background: T.soft, borderRadius: "12px 12px 0 0" },
 			groupTitle: { fontWeight: 600 },
 			badge: { fontSize: 11, padding: "1px 7px", borderRadius: 999, background: T.soft2, color: T.text2, fontWeight: 500 },
-			pager: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 },
+			pager: { display: "flex", alignItems: "center", gap: 8, paddingTop: 8, flexWrap: "wrap", fontSize: 13, minHeight: 46 },
 			updateBadge: {
 				fontSize: 12, padding: "1px 8px", borderRadius: 999,
 				background: "rgba(0,180,42,0.12)", color: T.green, fontWeight: 600,
@@ -1120,16 +939,16 @@ window.__ModuleLoader__.load({
 				background: T.soft2, color: T.text2, fontSize: 12.5, lineHeight: 1.7,
 				whiteSpace: "pre-wrap",
 			},
-			groupBody: { display: "grid", gap: 8, padding: 10, borderTop: `1px solid ${T.line2}` },
-			row: { display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap", padding: "13px 14px", borderRadius: 12, border: `1px solid ${T.line2}`, background: T.cardBg, boxShadow: "0 1px 2px rgba(20,26,40,.03)" },
+			groupBody: { display: "flex", flexDirection: "column" },
+			row: { display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", padding: "12px 16px", borderBottom: `1px solid ${T.line2}`, minWidth: 0 },
 			// The row's left half: the name, then the sentence explaining what
 			// this server is for, then the transport/state facts underneath it.
 			// The purpose line is what a reader is looking for here; the
 			// technical details are demoted to the smaller second line instead
 			// of being the only thing that follows the name.
-			rowMain: { display: "flex", alignItems: "flex-start", gap: 10, flex: "1 1 340px", minWidth: 0 },
-			rowText: { display: "flex", flexDirection: "column", gap: 2, flex: "1 1 auto", minWidth: 0 },
-			name: { fontWeight: 600, minWidth: 130, flexShrink: 0, lineHeight: 1.55 },
+			rowMain: { display: "flex", alignItems: "center", gap: 12, flex: "1 1 360px", minWidth: 0 },
+			rowText: { display: "flex", flexDirection: "column", gap: 3, flex: "1 1 180px", minWidth: 0 },
+			name: { fontSize: 14, fontWeight: 650, color: T.text, flex: "0 1 180px", minWidth: 80, overflowWrap: "anywhere" },
 			about: {
 				fontSize: 12.5, color: T.text2, lineHeight: 1.5, overflow: "hidden",
 				display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", wordBreak: "break-word",
@@ -1169,7 +988,7 @@ window.__ModuleLoader__.load({
 			// floating mid-card.
 			cardColumns: {
 				display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-				gap: 12, minWidth: 0,
+				gap: 14, minWidth: 0,
 			},
 			// The measurable box those queries read: its own inline size, not the
 			// window's. Also the reason the grid sits inside a wrapper at all.
@@ -1178,45 +997,20 @@ window.__ModuleLoader__.load({
 			// min-content (one column-width per column), which the auto tracks
 			// above then grew to fit.
 			gridHost: { containerType: "inline-size", minWidth: 0, width: "100%" },
-			card: {
-				// The wall's `gap` spaces the rows now; the old `marginBottom` was
-				// the multi-column era's way of opening a vertical gutter and
-				// would double every gap under the grid. `1fr auto` gives the body
-				// the row's slack so the footer sits on the card's bottom edge.
-				display: "grid", gridTemplateRows: "1fr auto auto", gap: 8,
-				padding: 14, borderRadius: 14, minHeight: 168, minWidth: 0,
-				border: `1px solid ${T.line}`, background: T.cardBg,
-				color: T.text, textAlign: "left", cursor: "pointer",
-				boxShadow: "0 1px 2px rgba(31,35,41,.03), 0 6px 16px rgba(31,35,41,.04)",
-			},
+			card: { display: "flex", flexDirection: "column", gap: 6, padding: 16, borderRadius: 12, border: `1px solid ${T.line}`, background: T.cardBg, color: T.text, minWidth: 0, minHeight: 166, boxShadow: "0 2px 4px rgba(20,26,40,.035)" },
 			// `minWidth: 0` is load-bearing: this is a *grid* item inside
 			// cardLeft's auto track, so its default `min-width:auto` resolves
 			// to min-content — and a `white-space:nowrap` title's min-content
 			// is its full text. Without it a long name widens the track past
 			// the card and shoves the install/detail buttons over the edge.
-			cardHead: {
-				display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap",
-				minWidth: 0, marginBottom: 8,
-			},
+			cardHead: { display: "flex", gap: 6, alignItems: "center", minWidth: 0 },
 			// Header split: identity column (grows) + action column (fixed).
-			cardHd: { display: "flex", gap: 12, alignItems: "flex-start" },
-			cardLeft: { display: "grid", gap: 0, flex: 1, minWidth: 0 },
+			cardHd: { display: "flex", gap: 12, alignItems: "center", minWidth: 0, minHeight: 44 },
+			cardLeft: { display: "flex", flexDirection: "column", gap: 4, flex: 1, minWidth: 0 },
 			cardCta: { display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end", flexShrink: 0 },
-			cardBody: {
-				display: "grid", gap: 10, flex: 1, minWidth: 0, outline: "none",
-				// The body absorbs a stretched row's slack (see `card`), and its
-				// own rows must keep their content height instead of spreading
-				// that slack between themselves.
-				alignContent: "start",
-			},
-			cardName: {
-				fontWeight: 650, fontSize: 13.5, letterSpacing: "-.15px", color: T.text, textDecoration: "none",
-				overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%",
-			},
-			cardAuthor: {
-				display: "flex", gap: 6, alignItems: "center", fontSize: 11.5,
-				color: T.text3, minWidth: 0, marginBottom: 0,
-			},
+			cardBody: { display: "flex", flexDirection: "column", gap: 10, flex: 1, minWidth: 0, outline: "none", cursor: "pointer" },
+			cardName: { fontWeight: 650, fontSize: 18, color: T.text, lineHeight: 1.3, textDecoration: "none", display: "block", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" },
+			cardAuthor: { display: "flex", gap: 6, alignItems: "center", fontSize: 13, color: T.text3, lineHeight: 1.35, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
 			// The author row's own tail: the separator and the version the
 			// source published, both muted so the author name stays the anchor.
 			cardDot: { color: T.text4 },
@@ -1232,25 +1026,12 @@ window.__ModuleLoader__.load({
 			stat: { display: "inline-flex", gap: 3, alignItems: "center", textDecoration: "none", color: "inherit" },
 			statB: { fontWeight: 600, color: T.text2 },
 			statSep: { color: T.text4 },
-			desc: {
-				fontSize: 12.5, lineHeight: 1.6, color: T.text2,
-				display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden",
-				// A URL is one unbreakable token: without this, a long one in a
-				// catalogue description is clipped by the 3-line clamp instead
-				// of wrapping. The probe in tools/shot.mjs injects one, and it
-				// measured this box's min-content at well under a column, so
-				// this is belt-and-braces for what a reader sees — the wall's
-				// own overflow is fixed by the `minWidth: 0` chain above.
-				overflowWrap: "anywhere",
-			},
+			desc: { fontSize: 15, lineHeight: 1.45, color: T.text2, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", height: "2.9em", overflow: "hidden", overflowWrap: "anywhere", margin: 0 },
 			tags: { display: "flex", gap: 6, flexWrap: "wrap" },
 			// v4's tag is an outline pill, not a filled one: the card already
 			// carries one filled element (its install button) and nothing else
 			// should read as a control.
-			tag: {
-				fontSize: 11.5, padding: "3px 9px", borderRadius: 999,
-				border: `1px solid ${T.line}`, background: "transparent", color: T.text2,
-			},
+			tag: { fontSize: 11, lineHeight: 1.4, padding: "3px 6px", borderRadius: 5, background: T.soft, color: T.text2, whiteSpace: "nowrap", maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", flexShrink: 0 },
 			// The two chips that answer questions (分类 / 安装方式) sit a shade
 			// darker than the upstream tags beside them, so the footer reads as
 			// "two facts, then whatever else the source said".
@@ -1263,11 +1044,11 @@ window.__ModuleLoader__.load({
 			},
 			verified: {
 				fontSize: 11, padding: "1px 7px", borderRadius: 999, fontWeight: 600,
-				background: "rgba(22,95,255,0.12)", color: T.blue,
+				background: "rgba(22,95,255,0.12)", color: T.blue, whiteSpace: "nowrap", flexShrink: 0,
 			},
 			deprecated: {
 				fontSize: 11, padding: "1px 7px", borderRadius: 999, fontWeight: 600,
-				background: "rgba(255,125,0,0.14)", color: T.amber,
+				background: "rgba(255,125,0,0.14)", color: T.amber, whiteSpace: "nowrap", flexShrink: 0,
 			},
 			warnLine: { fontSize: 11, lineHeight: 1.5, color: T.amber },
 			installed: {
@@ -1430,7 +1211,7 @@ window.__ModuleLoader__.load({
 				style: {
 					width: 38, height: 21, flexShrink: 0, cursor: disabled ? "default" : "pointer",
 					borderRadius: 999, border: "none", padding: 2, position: "relative",
-					background: on ? "#22a55b" : "rgba(128,128,128,0.45)", transition: "background 120ms ease",
+					background: on ? T.brand : "rgba(128,128,128,0.45)", transition: "background 120ms ease",
 				},
 			}, createElement("span", {
 				style: {
@@ -1509,6 +1290,191 @@ window.__ModuleLoader__.load({
 						});
 					}
 
+
+        function UiIcon({ name, size = 18 }) {
+            const paths = {
+                search: "m21 21-5-5 M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0",
+                refresh: "M20 8a8 8 0 1 0 0 8 M20 3v5h-5",
+                layers: "m12 3 10 5-10 5L2 8l10-5 M2 12l10 5 10-5 M2 16l10 5 10-5",
+                filter: "M3 5h18l-7 8v5l-4 2v-7z",
+                heart: "M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z",
+                more: "M4 12h.01 M12 12h.01 M20 12h.01",
+                diagnostics: "M6 3v5a4 4 0 0 0 8 0V3 M3 3h6 M11 3h6 M10 12v3a5 5 0 0 0 10 0v-3 M20 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4",
+                folder: "M3 6h7l2 2h9v12H3V6Z",
+                upload: "M12 16V3m-5 5 5-5 5 5 M4 15v5h16v-5",
+                info: "M12 11v5 M12 8h.01 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0",
+                database: "M20 6a8 3 0 1 1-16 0 8 3 0 0 1 16 0 M4 6v12a8 3 0 0 0 16 0V6 M4 12a8 3 0 0 0 16 0",
+                pen: "m4 16 12-12 4 4L8 20H4v-4 M14 6l4 4",
+                media: "M3 5h18v14H3z M10 9l5 3-5 3Z",
+                document: "M5 3h10l4 4v14H5z M8 10h8 M8 14h8 M8 17h5",
+                accessibility: "M12 4h.01 M5 8l7 2 7-2 M12 10v5m0 0-4 6m4-6 4 6",
+                code: "m8 6-6 6 6 6 M16 6l6 6-6 6 M14 3l-4 18",
+            };
+            return createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true, style: { display: "block", flexShrink: 0 } }, createElement("path", { d: paths[name] || paths.layers }));
+        }
+
+        // Known product glyphs supplement catalogue-provided icons. Unknown
+        // resources use the neutral connector glyph rather than random colors.
+        // Bounded 64px raster snapshots of publisher artwork. Runtime never visits those origins.
+        const MCP_PUBLISHER_ARTWORK = Object.freeze({
+            // https://0sand1s.co.uk/apple-icon.png?apple-icon.1ux5zn8vdq_zk.png
+            cis: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAvhSURBVHhezVtrbBTXFR4bP3iGl4EGe20v9q7t3TUG8y5JSFVFYMwrtA1Fbao0tKgEMH6t92XveleAVV4KCbSVmqQRbROegRABSpqoVaX+qCq14UejRFVImlfVVAW1iiDEwGm/c2fGszM7j/WucUb65N17984555t7zzn3zLUkeYJdUkP8lOQNjg7qQ8a2uwXYLdX1XJIaB0jyxTOjQYa+PU8o8CcMbXmFle6wm5nAl7qeEUFBfcjQpkVhg3W/3ficALtHmgArAwvqemiMRb/d+Jwx0gQIA8OGdrW/vofG+Kz7Cy3G54x8EGA1Re0NDFGRP2JodzpeuYe+zTHuBgFFfnMDMLbYkgAQZD5e+Y2+zTHyQQDWKAxNB9pCPH1LAlGSPEGSZreRdO9O8VdBeRtJle3pbcrvKnbxPUoCEfV+AumycvIRiBByPDR2moCVaIBxAkW+ME9TBXhieKpASWOECr09NL4pRo/2HKcf9J6mLdFTAjEBbpM/K31b+07Tum3Pk1TTTcW+MBUHxP0A3F+VJUPRJevZMBwCtLBco/U9JLk7qbQ+RMcvvknDucIHLvJMkGq7jfe3k+8Evr7clgCvcTMFarpoRnMfvfzGW3q7srqSR1+nEhCAZZSNfCfI1QeYOjEoW76Lln/7qN6erK+P//kfKlsYJ6m6kySvQ/lOoS4BCwKs1hUrENAogGk/p0uguoOn7+bOF2hw8LbeLkfX+x9dpcbWgyRVtJNUg1nVk0aCQX4GWOnviAArL6t4af4O46s6qMgbpBcvvEnb+s+SNGsHe/pv7DxG77z3L7ry4VW68uG/0/DeR1fp3Qxtf7z8ATWsPkCSq4Mkd5D83b3k+VEvSZVBkjyyblr5JrDSP2cC0hSY00WlniCduHRZfYKPhU+Q5O4iydVOpY1RmjCvl8bPi6mY1NxHM5YlOUpo2yfM7xVPrqqTSv0xqm/vpfWvpGjtuRTN2RIjqTrIM+GuEaCP7wCEI80dOzdKheir6qBnz/wpbQrj2vDE80yA5MWTSwfuM64pRlKtsQ8GjvFEKNCWoLXnk9RyPEktJ5JMgmtzjArdwgEK+UIfrX6O8gQzAlQjEef9ETXmciwORJh1AMInzu+lUnz3R3ia66/k0d+wA5s4v4+fuBaTF8SpbEm/oR2/nTivlyY09tFX9yVpzdkkrXpRYO35FDWF4lTijdK4uWK2YHYpOolcIaLmCEW+iHmOYEbAEBHWcRY3BgmSp5uXwJ//+rHefurZf4GkmTuE89LCIzZKk5rj6hPX90s1IVqyu5/WvKQh4OUUNezqJckV5KfO8nXRwan+eSGApzAIqLEgAM5QP94rpvBkhDgsjwz9Um2Ilu4xIaAyOCR/1AlAojJMAqZ82Qmw2o1BAXhwKwJCSGfNCPCHacqihDkBHnsCWL4pATa7SXsCrDMtVHPGz+vNiYCptgQkTQlQ5VsQYKV/XghAbMeuzcwJMgEmThBLYNrihPAhGfqxBJaZEeASBLD8fBKAMpY2hiK0KHEW3wEIBhD6ELLGYDl4g/SXt4wERA5eooLyXep2VgusXyRCvOXV9/siVNwQyUiAr72PCt1C/iTIl/VR9GPIeQp+o80LTAlQ4j4Gqft6jvUxJgGxdiwwN8aKY+3BeExhfB43N0qX3/5Ebz/Fn3qNSrw9NG1xP2M6sEQAxrtW7KHpixNqG/rxu6mL+mlKcz8tH0hRq4aANedSNLc7QeN8vXRPsywfGSTrEGP9oKfQWegPQpUagkIQ5wWZZoB+ClmlmiALiRD7AJMlwHv6mdvFOtfC081JyrQlSXkJ6PuDYgnsTaYRkJYHKPLlvYEemAWWm6WcCfBBgT7VCWZcAqZOMMhPZjoIMHGCBZ6wOQHsBGX5Jj7Adq9gR4DlDZCr+5DJyQTM6aK33/1Ubz/1HX5VOEHDeAcE1Ibpvn0wWibghSStv5Aif5fiBGX5o04Apqurnbb1v5Rm/N8/uUbNDz/J22TjFMcSCFsugUJvmLzfTdGq4/20+lSSWs+k6KFjSZr69TBvkVX5o04Ah64gSbO20/bkWTb+g39cI3/LfnY4Ul1QOCTFkQKBKG94Zi5L0Vg4W21fY5QjAwia1Jigmesi1Ho6SSt/LRvvEjNm1AkoVGeA3IalMHsnfT9ykuZteJIrQvDsUxfGyf3gAFU/uFcD8b1qxdBnbV/lA3toyqK4SJQqumnWhghNWzVkPGQa5GejP6AnYCgHEGECawxPThtflZjLMTYQ4S1tUYO89ZRL1lJlB/sEhKCKB/aQWzY0G4AI99cGaKacJ8AfwClCBsuC/MYoy+fQzUjPBfAb6K/YY8gFFALwilo1jg2R6/qBKMdXEf+jIv5jny7jngVxmr60n/9iV4eNDXL7KQsTnOGVLU2qxugNdALMBNf9e8QsWpRgiPvHVZnoQyhUdIKOAPRVdFbrBPpcAA8+qyWgS1URh1UnqHhypMWo5Ve0s5DZ9++m6ozTfC+3KwTp28XvB6gMThJLC2UwLoVpnKQqX6eb7BMM+uuhXwJ6WN5A7wSVinBVBx36xe9p485j7A/w1ODssKYBlwbctmJvWpvSXn7fbn6yUxcmOObXbI2R6ztR4QNkI0fdCaYpgKfkaqenf/kHjgLXb3xBa7Y+J1JOr9i4DJWpsIZDvLTKlqb4c1ofpqnsgyY3Jcj9eIzWnU9R65kklT8SFZVhvXy9fnb6A3kjQM4D9j37u7Q84PObg7RyyzNiSSihMi0PkBOhjHmAyAQbn0hxTRAFUc4FTifpKxsiJFWNdh6QIRV+54qxKJp46jWxF9CPd5IJesK0fH96UXTdKykKdA9lgiOaCjvbC1jXA8RmKFM9QD8D9P1yPcBsL6DdDFkQkPVmSImVYnss5wFm9YBAhLekVvWA6CGTeoAvzCEKmaBlPWDASEBaPQDyreoBah7gsB4Ao0UuMDL1AK4JGOoBQ23Kb5zUA2C8bT2gMcd6AAbr2xU4L4llqgcE5XpAv4kTRD2gJ2NFSLsEWL5JKmynf/4IGGZRtNgv1wRNnKCTomjea4LZ3AAKjGZVGFN5hKvC9u8F7F6M2BGQ63sB6xcjOb8XsH6zoiqQw6uxL/2bIasbQAF4XUcEZIjzuDd2daYvR2stXo7KBLD8kSZAmxtwuJSBJ4gnUFgXpEJPd8Y8gJfA7DY1DKlAjoF6wkLs58U2XN8/xhvOSADnAdViBo1rMj8fUNgwTAJUQzXnAPGXExTt+QCc+lDPB4Tpb+8bU2HT8wHz+/jpOzofcG6IAKTCTaGEo/MBCplq3HdKgBYYrG9T++pDVKqcBHXt4qRHe1377w1atukInxjjUyLYFLlk4HN1p8jOtO1KH6pKNSGqfSzBu8CWk2IjhE3RjNYI1wZU+Rl0c6J/XghQ9wogYXYb7f7J67Lx1+n+zUfFUVh3J3lX7iN/60HyrT6gIrDmEC3YeJh8LUNt3L72EFWs2MMkFHmjXAfA0ZjVJ1NcIOXtsF6+Caz0d0RAxqmj6UtTQK4GxQ+/Sg89/gxJM7ZzgSRy6BLduDlIt27focFbt21x5w7Rp1c/o9YfPieOyLmCVPW9GN37TbkgYiY/A6z0d0SAFTImGpgJ8pQvrg1S8oiYEcO5bnw+SOtxZhjLAeUwtwP52SAfBGQ874+wVN5GKx79md6mrC/4kTIkS+5OgxxT+U4Bu3MjwOKsridIJZ4g/fjnv9Xb5Pi6+cUt2tT+Kz6ClynWW8p3AnUG4IO+0wFwPjA9TxgKoThSX4DlUNlOu3/6ht422+uz6zdp445jPJMK6owx3lGct8NwCFCMU/bV2njL+YL2/wUQl6Ggt4eaHz5Mi7/1dBqWPHKElm06amgH6lr2i9OneE2mKZRo/19AyU8UXSwdXibk6gMAqzCjOim5aCreF2iANqxtfTtQ1eHIyVnJt0U+CLBi3S4XtzPQbrxyD32bY+TqBO1gZ4CdE7MbnzNGmgDAaoo6MdBqfM4YbQIA7AT1bdmMzwl3gwC7NYqIom/LZnxOYALqghelxr3G/6wG4CUB7Xf9b+xgM6bAZ/Pf4zbjDUjTt896/P/t/h9sx145ggw3bAAAAABJRU5ErkJggg==",
+            // https://0si.ai/static/favicon-96.png
+            disclosures: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAdJSURBVHhe7VppTFRXFB52mBlgZgSkIqACVsbilppqYqUtiRrFVg1tFduSWNc2GisKIkE2tf1hNS4oCkWWalG0prFYIzbqD9eIG0LVumCF/gDERmoMSzzNd+iMzp2dGRKWOcmXN/Peveee+717zzn33idRKAJKVaqB15TKgH4JiVIZcGfAgEBSqQb2S4CAa/ihVAb0SzgIcBDgIMBBgIMABwEOAhwE6D3oL+gzBMhkCvL2VnF6Kz4zhW4lwNfXj6RSX/LwkJO7u4xcXb0YLi6dV1dXqfaeBm5uMi7v5eVLPj4D9HSKQBvQPWbMeIqKGsckiGVMoVsIgFHoDDoSGhpOEye+SzNmfEjx8Z/TokXLaPnylZSYmERJSSmUmJhMK1Z8Q4sXL6P58xMoNnYWTZr0HoWFjSAvLx/WA31iG7BZLleSi4snJSR8Sbm5eyk8PJLviWVNwe4EwGhgypTptHdvPl2/foOePv2H2tvbyRJpb++gZ8+eUXV1DRUX/0ixsR/xKILO19vx9PTm+9nZm6iy8hpNmDCJCRftMQe7EoDhGxISxm+jpaVF7FuX5Pnz50xkcPAwHupoB6MiMDCYSkr2U1PTE4qJmUpOTu569lgCuxEA4zBsz5w5K/bBLnL69FkKDx9BEomERo9+m86fv0htba0UFzeXO69Q+OvZZAnsQgA8MDZVjh37VbTbrgL9c+fG0927f/L/pUu/5s77+nat84BdCIBXX7kyUbRXR27dqqacnFxaty6N1q5NZSQnr+NrSkoqpaaupz178rSdMyYvX77ka2pqGrdrSaQwBZsJwNsPChpCN29WibaydHR00JYtW9k3YO7ijTk7e+gB9/E8LOxNysvLF9XoyI4dOeTuLrfa4xuCzQQgDM2Z84lRL79t2w7uGAxGODM2V3G/M3xKmdTS0kOiKha0M2tWHEkkrlYnPYZgEwEwGsMwO3ujaCfL/fsPKCJCzdHB0jZQztnZk6KjYzgcGpKMjGwm3hiZ1sAmAjD/EI8LCgpFG1nKyg5zrLY2O0OdkJBh7DcMSWFhEXl4eNs8/wGbCZDJfI0O1/z8AjbUUCZnDLAFU0atHkWPH9eJKlkOHSrjdnsIAcbnKxIYZGeWEgA78PblcgXl5RWI6rRSVnaEZDJlzydg9+49Wucn1hWhUnVGFKS8W7duE1XpCAhABPD27uEE7Ny5izNEcwSgfXQIZTds+JbrIsWtr/9bVMnSqwhABDBHAJwk5n1aWgbXQ04RHf0BFRWViCpZDh/++X8CrHOuhtDNBOSQm5vUJAHoBEIaskJIRcUpDp3I+fftKxJVsvQZAtABZIFr1qylFy9e8NzHfdzDhgiWw4bkyJGjJJerei8BaA/1kPBgU6Suro6WLPmKXF1l2p0gOEMsdw1JLyJA3wmiLSRPnp4+nEFevnyFYmKmkUTipg1rnQT0gRGQk7NbhwBN6jxoUCi/3YqK3ykychQ5OXnopLV9iIBcLQEoixUf9gevXKmk8vLjTAQWP4b09gkCNIkQskH4goSEBdTU1ETHj/9Gfn5vMDmG2tb4AGME9JoosGtXLoczpdKfNm/+nu+dPHmKAgKCTG5gmhsBvYaA7dtzSK1+i8rLT/D/c+fOU3BwGI8GU22aiwI9joCDB8tEG1lqa2vp4cNa/n3hwiWKiIjkzot6REAvFkX79/8kqmTpUakwDD1woFS0UUdwNjBy5BjO+EQdhvBqZB0UVbGAcLSLcmJda2ETAZpjKYQ7Y3L79h0aN+4dTnrE+saAtwvdcJaGpHOfwbJVpjnYRACAtNXUjnBe3g8kkTjr1TMG2IKFUVTUWKqvrxfVsaSnZ1k8mszBZgIwAnAs1djYKNrJUlVVTUOHRlh0eIHn0IcVJDZTDElbWxvNnv1xzyEAnhjz0dSJ0NGjv9Dw4erXToNxFYGTYSkNGRLB0UOz/y8K9gkHDx7GPkK0pSuwmQCksVOnTqeGhgbRVh2prX1EhYXFtGnTd5SZuYHWr89kZGRk8f+srI08XcwdjGDlCLJEO7qKLhOAOsjrx44dT48e/cXG1dT8YfTN2UOwdvD3D7Lb2we6TADmamhoGFVWXmXj0tMzKShoKL/F7pCLFy+RWj1ae0JsL1hNAMoiS8Mm5okTJ6mhoZHi47/gYalxTDizf/KkWexDl6S1tY0zQkuTKGthNQFweojTOAy5evU6RwCJBCe0ftqNDnjxyZPf5/ygpqaGmpubqbW1VeybQcEUamn5l+7de0DFxSU0c+Zs1mlq7WALrCJAs6xNTk7hhQrCm6EjKk2ChEMRHIrik5e4uE9pwYJF/HnMqlVraPXqJP5MBjkE7uGoe+HCJbxinDYtlr8F6PxERsqkW2qjtbCKABiCoThv3mekUgXyzo6puiCmc0RImSjxRFj3dPjVb0wnhFZ7ZHrmYBUBAMpKpQrekLCmXk+F1QT0NTgIcBDgIMBBgIMABwEOAhwE6D3oL5Aolf43+jUBCoV/VX8m4D++lILL1E+B7AAAAABJRU5ErkJggg==",
+            // https://3dtexel.com/wp-content/uploads/2026/10/3dtexel-favicon-v2-192x192.png
+            texel: "data:image/png;base64,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",
+            // https://www.4everland.org/icons/64x64-icon.png
+            hosting: "data:image/png;base64,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",
+            // https://1325.ai/favicon.png
+            business: "data:image/png;base64,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",
+            // https://ssl.gstatic.com/ui/v1/icons/mail/rfr/gmail.ico
+            gmail: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAy6SURBVHhe7Zp5UBRXHsdbpj1ybA41xgOYnkMFVJCZPgZkGKePAQ3mAAaMxto/sqns5trNVkyZSgzJRkbwSirZpOImm8TNGg7FAzSKgBhARcGIidnKtWviCczFwMAAc/y2XgMuaUYD0UTNzrfqWz3MdP+a3+e93+v33gyGhRRSSCGFFFJIIQVRo1Y7ulouH4eMXks/vx4FgI2CYmxMoAi76VQ1Nq46B8Ol5/yoAMNG1RHEzEMK+ZKDqshn6lWRzxxWEdmHlcrp0nOvJwU+xsb27scZX2XYw74qfEXvfvyp7v2ye9y7sMnScy+piqipE+oUkUuPKOUffqqSNzQqif80KIlTTSriSIOKeO+wUr64Rj35Lul111pQPSYqUB32dKAG3xGolX3mP4Cf9tfiX/vrZAe8B0a96qmQzUc9Q3rdD7QrMvLOGhXxSL0y8niTmoDP1QpoUhFwXEXASbUCGtUEHFURx+uVkctrFIoZxRgmk8b4pRUox27p+nhckv/A6L8GamTn4TAOcAQHOIjDwGtfjczXW4nv9OyR8VB9iZLIwbCwWkWEcJCQNzSqiMCnagKOqORQr+y3ioAGNQHos3qFvOWQUvG3Q0rlvI/V6rHSWL+UAkW3jfdVhGX7qvC9/gN4F9ThAJ/gEKjGIbC/74j+RjD81Xivt0L2oaccU6ASl8bC9kRFTjmsJFYeVRKdqOUPKeVQ1++D/Uf0XoOKgE/VCjimIpwN0xV7v4yPXubgtbdL4/3casmMUXe9PvEFXwXe5K+T9cAhHOAADt5KHLwVPzz6EYhjOPhr8H95K2WZF8qxW6TxsEpVpKZeEbm5USX3oQRr+xOXGoE4rCLE0jgRpYIzuthGh0A+Z+OZaGnMn0ONmHb0eZ3O4FykfdObG/491IwBOBIG/qpBiUtdgQMcxSFQh1/o3Y+/GHRQ/IQIT65XRpY2KuXeYyriYstfyjVEJHwWowZbUjy08VSzS6DfOsdq9BcEYSjdq6QLQsKkVj2ZbU/W7XLdQ3rgJQIC+8aAr2bU0KQlhnoc/LW4tadStqFrFyaXxu4HIC8bCYCGKBWcnTcX3AID7Sa6y8FT5a0ss9jFUROk8a9EkIOFtRgTVVaeWuFgyZMuI+PtSKPA/YIcvHtHDx9ADW717pdtgAosUnoPrE4Roa9XykfUA45GqeBUYiw4eRq6UxOgQ6B7bBx5wsYxK1sMOrX0Hj9VrUYq2cqR77Tx1JkOngG3MQHsC7TQ9nwk9I4UQJVsfVAA9YqJ+iPEtBEBQD0AAWjhKLDxDHQKDHSZGGgX6O+dHP1W63zSAFcwgzyfNPeuZo5a6hKYHS6B7uhJ0UEbx0BrMgOtqRpwjRBAoEZmDVSNCg6gTjFF3yifVNokv9t7XBkxbADfJcZCK0eBlafFo52nwZOiA5dAe5wctdtuIrMvCLGTpPe7nADDws5y1Aw7Ry9v46mmDoGBThMDVo6CVpYSAVhTNdA+IgBhEKjFLg3gvcQM/Z65SaVH1Cpvk2IaHCamwUFl5JDEfwzAAAS3SYdKwuvkyZMOXruixahRoVqW3lcqiIkZYzeSiTZeu9HJU83tAhNwCQxY+b7YIwXgq5QBVIaJADo+GWv9au/49bWlU4YCuGflF/o/PrKtdOOCP3trZsXDsWl3Qj0x9ZIQLgcAlQSCgEqiw0SDi6fOWDnyXVQS0vsO1r955e3NLPmQjSX3uAXaiVpdTL4/5kgB+MXkRwFUYXC6bjy8Xz7L+miJYb12k3kogDmvB/SGfF/pkhWfe1dnvwZlcfOgIeIuaIiYAIcV4VCnJIYNYAACOrYJNPSm6NC40OHk6VIHRy39NkhJnOfjox0maoVLYBpcAg3dKToR4sXERwgAqsLExHsrZdC4926w7EuA1O33WWcWLl5/56ZlQwGwue36pHWB0qRXA960VXZYvux9KNTdC7UqBTRGTIQj8ikjAjDYqAVRa7abGDRnOGFn6WdbDPHqaoMBhzTtzS1GMtHJU2+28cyFLhMaP5ghMYYLQGz1qr5Wt1fcBHt2y+GxbcnAlC6GmK1LrXFFmeu1xWlBALzcrjfm9ZSy6wJewwYAdlUH/O7xKnibfxSqZ0SLvaFePhUOKfpKYiQA+j6nxMRQTTs4qqXVSL7RzOl4u5HKsrFkWRtPdaHBDj1SxcHuUr4MgIEu768aBaf3/QbeLYuB9C0pMLfADHE7l4KmJMtKFmWs1xYHKQEEgLN4SoU1Pi+7HmDemgAYVndD9vITsCpjNeyKTYDG8IlwVH43HFJEjBgA6sooMQRBHNFZ2nbBSH3abKS+sHGUpytFJyYvvW6IgwIIg4DY8hj4q8KgYc8keGkHBXxxGswuzIJZBVlAlj4IdIl5eACEtQFgc92QtCYAiWsB0l48C8t/uwk2J6SLgyIaIA9GTIaGKDWcSowbFoAB980ZaECt7THpAHX5Nh6N8kHqPZgHARiYB0At1t/lx8Gu3QQ8UaIHqjAdZhYshrhCM5CFGWIJUCMCsKpDhDB/tQfmrQUwWjrhkccrxJKonDkb6qdOhCb1NPguYY74jw0XwGDb+i19/7IeBKDz+XCAfWHgrx0F35XfBn8vjYbMLSaYU5AFMQVZoC3MEJP/aQBy+wCIECwe0Of7IHl1D2Q9+wVYHsiFslkMHJ8eDucSZotJ/BQAP8ksBdZkBpwLNNC7Mhy6y0fD8f0T4C87KJhffK+YfGyhGbSFmReTv2IA6DWCkLTGD8n5Pkh78Qw8/dAHgW3zzXBOT4Kb04DjciP31TRLgXO+DnrSNND6wnQo3amEx3bNA6YoHWIKsiG2ACWfAdSg5K8CgP/ZkNcDCesA2FxX4MnHdttqFy055jTObek2kdDRP10dVi2P0M39kyu01uiYT4N9ofabohz6s6xivjt2W6ZY7/GFmUMSv+oAkNF4kPwaoEHy5AtP7FjebNTkdRnnHHcJtK/TpAPHcAe0ERhNjtCTop2nO7oM5L7P0+hnFrx9/9ro4ixX3PbsIQlLfVUBsLmdYEIA8vxNcZaAqUl4YFJXUvQyO0fXunjG4zYxIoTLPs+HaRtPgRMljyZRAm2zs/RmD6Odv+wNboJqZ9aTc4vN7fTOawAgdQN6MnSfmLMGeHS9jVbfZjNpBSdPbXLxlAMtXdE/fiUQUPJoLdGVwkAbR31tF5iX7QZyNmAGHIOcMbO2Z/6JLMroYHZcAwApaLZo8XzGW9wLsRy4uNV8jtVorByV6xbok6gnoG6LahfVsDTBSxmVT5vAgLj+56keB09Wt3CaP5w1kRED94nbft8ddGH6s9ccgNHiXqjdCD/Y9DhloCZbWe2jTo78BC2CEASUkDRRqfsmSZQ4SersS77ZxmkL7Cy5oNogHzf4HggAWZS+/LoEgHTKYBjXzGoFG6f5yMnTNjEhgRYTlCY+YNRTXOKOEuN38tQ3razWYmPpGLRoksa/7gEgoS9UmznNHCdHvdQm0F+hWm43BYcw8IhzCFTAKdAHWln64TOGOeHSmAO6IQAMyJZKh1t57e8dPLnfyVM9Ym0LzMVxAc0f0Hsunmqxc9SHVpZcdNIQc6s0zmDdUACQvk5Vj21lyQUOjvwI1bY7pW+A7Nv1oX1OnvrSxpF5zSwTK702mG44AEiols8n0TFWTpvr4qlvelJ13naB6XFyVF2rUfPItwkJaKdo6Pd2QXRDAhiQjY2b5uDIx9yCrqSNp9+3srpFpwxxd0jPu5xuaABIp3W68Wf1ZKLDSMcVm80j/pr9hgdwpQoBCAEIAbi6AIyvtCezq3vKfs0AyBKzTVuU/mr8P9OH/j5A/4oj2bi6p4xf4/P9agFsN9vI4vQNQQEYVllJLr93s7DW7zOhLa/+XeHgvvEA6HYvAWp7VjNZnJ6jefuBKdJ4WGpu+11sXvezfH5v24I3AEzrAYS1l/bCNwH4PO+X7OrOReack5f//d3PoJh3TOPJrZnPUSXm3sTypYAgBPXOxcDsehASyx8CemvWcbIwfZF2Y9rN0nii9DluDZvb+QG/xn/KtA7auHxvJ5ff28nled0/dG+n6TVfN5/vO8pZPKnXAsCct+65U1tifpreltXKlC32UCVm9xBvNXdS27Lc9I7Fdnpr5udUQcbK2R8tulsa66IMBsDZnPYYztL9FJff+y5n8RQYLZ0FRot7iNm8rh1srmcN9xd3vCGnesh6/edW7D+EW1BrkkWZ72uLMrZpCjIKpNYWZRSSWzI301vMr5NF6dmaD4N0/WDiLK4JBotHbcjtjjLktgd3jn22/hWPwpDTciuGwbAWMFdVkBOmK8ocTxXcPyPug4xZ2s3pUVLHF9wfTRZlzmQK7iMQMGmIkEIKKaSQQgoppJD+n/Vfv7Qu+QQF8bUAAAAASUVORK5CYII=",
+            // https://ssl.gstatic.com/docs/spreadsheets/favicon3.ico
+            sheets: "data:image/png;base64,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",
+        });
+        function ProductIcon({ item, size = 44, repositoryAvatar }) {
+            const name = String(item?.title || item?.name || "").toLowerCase();
+            const tile = { width: size, height: size, flexShrink: 0, borderRadius: Math.round(size / 4), display: "grid", placeItems: "center", background: T.cardBg, border: `1px solid ${T.line2}`, color: T.brand, boxShadow: "0 2px 4px rgba(20,26,40,.06)" };
+            let glyph;
+            if (/context.?7/.test(name)) glyph = createElement("strong", { style: { fontSize: size * .48, fontStyle: "italic", color: "#3c73f7", letterSpacing: "-.12em", paddingRight: 4 } }, "C7");
+            else if (/^(github|github-mcp|github_mcp)/.test(name)) glyph = createElement("span", { style: { color: "#171b22" } }, githubMark(size * .65));
+            else if (/brave/.test(name)) glyph = createElement("svg", { width: size * .72, height: size * .72, viewBox: "0 0 32 32", "aria-hidden": true }, [
+                createElement("path", { key: "mane", fill: "#ff6328", d: "M6 3 11 1h10l5 2 4 7-3 15-11 6L5 25 2 10Z" }),
+                createElement("path", { key: "face", fill: "white", d: "m7 8 5-3 4 3 4-3 5 3-2 8-7 9-7-9Z" }),
+                createElement("path", { key: "eyes", fill: "#ff6328", d: "m9 10 5 2-3 3Zm14 0-5 2 3 3Zm-10 7h6l-3 5Z" }),
+            ]);
+            else if (/atlassian/.test(name)) glyph = createElement("svg", { width: size * .7, height: size * .7, viewBox: "0 0 32 32", "aria-hidden": true }, [
+                createElement("path", { key: "a", fill: "#1679f7", d: "M18 2 31 30H18L11 15Z" }),
+                createElement("path", { key: "b", fill: "#47afff", d: "m10 13 8 17H1Z" }),
+            ]);
+            else if (/anki/.test(name)) glyph = createElement("svg", { width: size * .78, height: size * .78, viewBox: "0 0 32 32", "aria-hidden": true }, [
+                createElement("rect", { key: "bg", width: 32, height: 32, rx: 7, fill: "#4f92ff" }),
+                createElement("path", { key: "star", fill: "white", d: "m16 4 3.5 8.2 8.5 1-6.5 6 1.8 8.8-7.3-4.6-7.3 4.6 1.8-8.8-6.5-6 8.5-1Z" }),
+            ]);
+            else if (/tavily/.test(name)) glyph = createElement("svg", { width: size * .7, height: size * .7, viewBox: "0 0 32 32", "aria-hidden": true }, [
+                createElement("path", { key: "b", fill: "#476cff", d: "M18 1c0 11-2 13-13 13 11 0 13 2 13 13 0-11 2-13 13-13C20 14 18 12 18 1Z" }),
+                createElement("path", { key: "r", fill: "#f53960", d: "M7 18c0 5-1 6-6 6 5 0 6 1 6 6 0-5 1-6 6-6-5 0-6-1-6-6Z" }),
+            ]);
+            const fallback = glyph ? createElement("span", { style: tile, "aria-hidden": true }, glyph) : null;
+            return createElement(Avatar, { item, src: item?.icon, size, fallback, repositoryAvatar, artwork: Object.hasOwn(MCP_PUBLISHER_ARTWORK, item?.artworkKey) ? MCP_PUBLISHER_ARTWORK[item.artworkKey] : undefined });
+        }
+
+        function SearchField({ value, onChange, label, placeholder, style }) {
+            return createElement("label", { className: "omkt-search", style: { ...styles.searchWrap, ...style } }, [
+                createElement(UiIcon, { key: "icon", name: "search", size: 18 }),
+                createElement("input", { key: "input", type: "search", className: "omkt-input", style: styles.searchInput, value, placeholder, "aria-label": label, onChange: event => onChange(event.target.value) }),
+            ]);
+        }
+
+        function SkillIcon({ item, size = 48, initial = false }) {
+            const name = item.title || item.name || "";
+            const category = skillCategoryOf(item);
+            const palette = {
+                dev: ["code", "#5c52de", "rgba(98,79,240,.10)"],
+                office: ["document", "#0079ca", "rgba(0,129,226,.09)"],
+                content: [/视频|video/.test(name) ? "media" : "pen", "#2063df", "rgba(45,104,240,.09)"],
+                knowledge: ["layers", "#128143", "rgba(32,168,90,.10)"],
+                data: ["database", "#087a88", "rgba(0,144,160,.09)"],
+            };
+            const [glyph, color, background] = /accessib/.test(name)
+                ? ["accessibility", "#6647db", "rgba(98,79,240,.10)"]
+                : palette[category] ?? ["layers", T.brand, "rgba(69,102,233,.10)"];
+            const fallback = createElement("span", { "aria-hidden": true, style: { width: size, height: size, flexShrink: 0, display: "grid", placeItems: "center", borderRadius: 8, background: initial ? MCP_SOFT : background, color: initial ? T.brand : color, fontWeight: 650, fontSize: item.emoji ? Math.round(size * .58) : 17 } },
+                item.emoji || (initial ? Array.from(name.trim())[0]?.toUpperCase() || "·" : createElement(UiIcon, { name: glyph, size: Math.round(size * .6) })));
+            return createElement(Avatar, { item, src: item.icon, size, fallback });
+        }
+
+        function MarketToolbar({ query, onQuery, onSearch, busy, skill = false, source, onSource, sources, category, onCategory, categories, sort, onSort, sorts, onRefresh, favOnly, onFavorite }) {
+            const allCategory = categories[0]?.[0] ?? "";
+            const preferred = skill ? ["开发编程", "内容创作", "设计与媒体", "办公与文档", "知识与笔记"] : ["搜索与知识", "开发工具", "办公协作", "数据与存储", "多媒体创作"];
+            const quick = categories.slice(1).slice().sort((a, b) => {
+                const left = preferred.indexOf(a[1]), right = preferred.indexOf(b[1]);
+                return (left < 0 ? 99 : left) - (right < 0 ? 99 : right);
+            }).slice(0, 5);
+            return createElement("div", { style: { display: "grid", gap: 12 } }, [
+                createElement("form", { key: "search", className: "omkt-market-search", style: { gridTemplateColumns: onFavorite ? "minmax(0,1fr) 188px 188px 56px 56px" : "minmax(0,1fr) 188px 188px 56px" }, onSubmit: event => { event.preventDefault(); onSearch(); } }, [
+                    createElement("div", { key: "searchbox", className: "omkt-search", style: styles.searchWrap }, [
+                        createElement("button", { key: "submit", type: "submit", style: { ...styles.textBtn, padding: 0, color: T.text3 }, disabled: busy, "aria-label": "搜索" }, createElement(UiIcon, { name: "search", size: 18 })),
+                        createElement("input", { key: "input", type: "search", className: "omkt-input", style: styles.searchInput, value: query, placeholder: skill ? "搜索 Skill 名称、用途或作者…" : "搜索名称、用途或开发者…", "aria-label": "搜索市场", onChange: event => onQuery(event.target.value) }),
+                    ]),
+                    createElement("select", { key: "category", className: "omkt-select", style: { ...styles.select, height: 42, width: "100%" }, value: category, "aria-label": "按分类筛选市场", onChange: event => onCategory(event.target.value) }, categories.map(([value, label]) => createElement("option", { key: value, value }, label))),
+                    createElement("select", { key: "source", className: "omkt-select", style: { ...styles.select, height: 42, width: "100%" }, value: source, "aria-label": "按来源筛选市场", onChange: event => onSource(event.target.value) }, sources.map(([value, label]) => createElement("option", { key: value, value }, label))),
+                    onFavorite ? createElement("button", { key: "favorite", type: "button", style: { ...styles.button, height: 42, padding: "0 12px", color: favOnly ? T.brand : T.text2, background: favOnly ? MCP_SOFT : T.cardBg }, "aria-label": "仅看收藏", "aria-pressed": Boolean(favOnly), title: "仅看收藏", onClick: onFavorite }, createElement(UiIcon, { name: "filter" })) : null,
+                    createElement("button", { key: "refresh", type: "button", style: { ...styles.button, height: 42, padding: "0 12px" }, "aria-label": "刷新市场", title: "刷新市场", disabled: busy, onClick: onRefresh }, createElement(UiIcon, { name: "refresh" })),
+                ]),
+                createElement("div", { key: "quick", className: "omkt-market-categories" }, [
+                    createElement("button", { key: "all", type: "button", style: { ...styles.textBtn, fontSize: 15, fontWeight: 600, borderRadius: 18, padding: "5px 16px", ...(category === allCategory ? { background: MCP_SOFT, color: T.brand } : {}) }, "aria-pressed": category === allCategory, onClick: () => onCategory(allCategory) }, "全部"),
+                    ...quick.map(([value, label]) => createElement("button", { key: value, type: "button", style: { ...styles.textBtn, fontSize: 15, padding: "5px 10px", ...(category === value ? { background: MCP_SOFT, color: T.brand, borderRadius: 18 } : {}) }, title: label, "aria-pressed": category === value, onClick: () => onCategory(value) }, label)),
+                    onSort ? createElement("select", { key: "sort", className: `omkt-select${sort !== "default" ? " omkt-select-on" : ""}`, style: { ...styles.select, marginLeft: "auto", background: sort !== "default" ? MCP_SOFT : "transparent", border: 0, height: 34, padding: "0 4px", color: sort !== "default" ? T.brand : T.text2, maxWidth: 180 }, value: sort, "aria-label": "市场排序", onChange: event => onSort(event.target.value) }, sorts.map(([value, label]) => createElement("option", { key: value, value }, label))) : null,
+                ]),
+            ]);
+        }
+
+        function PageFooter({ page, pageCount, pageSize, onPage, onPageSize, note }) {
+            const pages = [...new Set([0, page - 1, page, page + 1, pageCount - 1])].filter(value => value >= 0 && value < pageCount).sort((a, b) => a - b);
+            return createElement("div", { key: "pager", style: styles.pager }, [
+                onPageSize ? createElement("select", { key: "size", className: "omkt-select", style: { ...styles.select, height: 36 }, value: pageSize, "aria-label": "每页条数", onChange: event => onPageSize(Number(event.target.value)) }, [20, 50, 100].map(value => createElement("option", { key: value, value }, `每页 ${value} 条`))) : null,
+                note ? createElement("span", { key: "note", style: { fontSize: onPageSize ? 13 : 14, color: T.text3, marginLeft: onPageSize ? 20 : 0 } }, note) : null,
+                createElement("span", { key: "spacer", style: styles.spacer }),
+                createElement("button", { key: "previous", type: "button", style: { ...styles.button, minHeight: 36, fontSize: 13 }, disabled: page <= 0, onClick: () => onPage(page - 1) }, "‹ 上一页"),
+                ...pages.flatMap((value, index) => [index > 0 && value > pages[index - 1] + 1 ? createElement("span", { key: `gap-${value}`, style: { color: T.text3 } }, "…") : null,
+                    createElement("button", { key: `page-${value}`, type: "button", "aria-current": value === page ? "page" : undefined, "aria-label": `第 ${value + 1} 页`, onClick: () => onPage(value), style: { ...styles.textBtn, minWidth: 32, height: 34, padding: "0 8px", ...(value === page ? { ...styles.primary } : {}) } }, String(value + 1))]),
+                createElement("button", { key: "next", type: "button", style: { ...styles.button, minHeight: 36, fontSize: 13 }, disabled: page >= pageCount - 1, onClick: () => onPage(page + 1) }, "下一页 ›"),
+            ]);
+        }
+
+        function PageHeading({ title, hint, actions }) {
+            return createElement("div", { style: styles.sectionHead }, [
+                createElement("div", { key: "heading-text", style: { display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap", minWidth: 0 } }, [
+                    createElement("h2", { key: "title", className: "omkt-section-title", style: styles.sectionTitle }, title),
+                    hint ? createElement("p", { key: "hint", style: styles.sectionHint }, hint) : null,
+                ]),
+                actions ? createElement("div", { key: "actions", style: styles.toolbar }, actions) : null,
+            ]);
+        }
+
+        // Native disclosure provides Enter/Space support. Clicking an action
+        // closes the menu before starting work; Escape closes it and returns focus.
+        function ActionMenu({ label = "更多操作", children }) {
+            const close = (details, focus = false) => {
+                const menu = details.querySelector('[popover]');
+                if (menu.matches(':popover-open')) menu.hidePopover();
+                details.open = false;
+                if (focus) details.querySelector('summary').focus();
+            };
+            return createElement("details", {
+                className: "omkt-menu", style: styles.menu,
+                onKeyDown: event => {
+                    if (event.key === "Escape") { event.preventDefault(); close(event.currentTarget, true); }
+                },
+            }, [
+                createElement("summary", {
+                    key: "toggle", style: { ...styles.textBtn, padding: "3px 6px", fontSize: 20, lineHeight: 1, minWidth: 26 }, "aria-label": label, title: label,
+                    onClick: event => {
+                        event.preventDefault();
+                        const details = event.currentTarget.parentElement;
+                        const menu = details.querySelector('[popover]');
+                        if (menu.matches(':popover-open')) { close(details); return; }
+                        details.open = true;
+                        // React's host version only wires native toggle events
+                        // for details. Listen on the popover itself so outside
+                        // clicks and Escape also keep the disclosure in sync.
+                        menu.ontoggle = () => { if (!menu.matches(':popover-open')) details.open = false; };
+                        menu.showPopover();
+                        const anchor = event.currentTarget.getBoundingClientRect();
+                        const box = menu.getBoundingClientRect();
+                        // Placement is native UI geometry; it carries no product
+                        // state and must not participate in the row's layout.
+                        Object.assign(menu.style, { position: "fixed", top: Math.max(8, Math.min(anchor.bottom + box.height + 6 <= window.innerHeight - 8 ? anchor.bottom + 6 : anchor.top - box.height - 6, window.innerHeight - box.height - 8)) + "px", left: Math.max(8, Math.min(anchor.right - box.width, window.innerWidth - box.width - 8)) + "px", right: "auto", bottom: "auto" });
+                    },
+                }, "⋯"),
+                createElement("div", {
+                    key: "items", popover: "auto", style: { ...styles.menuList, margin: 0, maxHeight: "calc(100vh - 16px)", maxWidth: "calc(100vw - 16px)", overflowY: "auto" },
+                    onClick: event => { if (event.target.closest("button,a")) close(event.currentTarget.parentElement); },
+                }, children),
+            ]);
+        }
+
 		function ServerRow({ server, busy, checking, hinting, job, onToggle, onRemove, onUpdate, onConfigure, onHealth }) {
 			const enabled = server.enabled !== false;
 			const provided = server.providedExternally === true;
@@ -1575,40 +1541,38 @@ window.__ModuleLoader__.load({
 			// select on: they are the only way to tell the purpose line from the
 			// facts line once the styles are inlined as attributes, and they are
 			// what proves in a real engine that the line clamp survived.
-			return createElement("div", { className: "omkt-srow", style: styles.row }, [
-				createElement("div", { key: "main", className: "omkt-srow-main", style: styles.rowMain }, [
-					createElement("span", { key: "dot", style: { ...styles.dot(state), marginTop: 7 } }),
-					createElement("span", { key: "name", className: "omkt-sname", style: styles.name }, server.name),
-					createElement("div", { key: "text", style: styles.rowText }, [
-						about
-							? createElement("div", {
-									key: "about", className: "omkt-sabout", style: styles.about,
-									// 译文在行上，原始措辞留在 tooltip：读者看到的是能读懂的
-									// 那句，需要核对原文时仍拿得到服务器自己写的那句。
-									title: [server.aboutLabel, about.original].filter(Boolean).join("\n\n") || undefined,
-								}, about.text)
-							: null,
-						createElement("div", { key: "meta", className: "omkt-smeta", style: styles.meta },
-							[server.transport, status, toolCount, prefix, pkg].filter(Boolean).join(" · ")),
-						server.health
-							? createElement("div", {
-								key: "health", className: "omkt-shealth",
-								style: { ...styles.meta, color: server.health.ok ? "#2f7d32" : "#b3261e", whiteSpace: "normal" },
-								title: (server.health.checks || []).map((c) => `${c.ok ? "✓" : "✗"} ${c.detail}`).join("\n") || undefined,
-							}, healthLine(server.health))
-							: null,
-						// 旧装法的行（`@smithery/cli run …`）握手不会完成，原因不是慢：
-						// CLI 把记录解析成远程端点，拉起 mcp-remote 等浏览器登录。0.11.1
-						// 起按来源装成远程 http，但改不了已经装下的行——所以这里给出唯一
-						// 有效的下一步，而不是让它一直红着。
-						server.health && !server.health.ok && server.channel === "cli-json"
-							? createElement("div", {
-								key: "legacycli",
-								style: { ...styles.meta, color: "#8a5a00", whiteSpace: "normal" },
-							}, "这是旧装法（Smithery CLI 解析成远程端点，要浏览器登录）。移除后重新安装，会按它自己托管的方式装成远程 http。")
-							: null,
-					]),
-				]),
+            const hasConfig = Boolean(server.config || server.channel === "cli-json");
+            const healthAction = createElement("button", { key: "health", type: "button", style: { ...styles.textBtn, color: T.brand, padding: "4px 0", fontSize: 14 }, disabled: busy || checking, title: "检查挂载、握手、工具与声明的要求", onClick: () => onHealth(server) }, checking ? "检查中…" : "检查");
+            const configAction = hasConfig ? createElement("button", { key: "cfg", type: "button", style: needsConfig ? { ...styles.smallPrimary } : { ...styles.textBtn, color: T.brand, padding: "4px 0", fontSize: 14 }, disabled: busy || checking || hinting, title: needsConfig ? `填写 ${configMissing.join("、") || "必填项"}` : "查看或修改配置", onClick: () => onConfigure(server) }, hinting ? "确认中…" : "配置") : null;
+            const updateAction = newVersion && !settled ? createElement("button", { key: "update", type: "button", style: { ...styles.smallPrimary, ...(rowStatus ? styles.buttonBusy : {}) }, disabled: busy || checking || rowStatus !== null, title: rowStatus === "running" ? "这一台正在更新" : rowStatus === "pending" ? "已排队，轮到时自动开始" : undefined, onClick: () => onUpdate(server) }, rowStatus === "running" ? "更新中…" : rowStatus === "pending" ? "等待中" : "更新") : null;
+            const source = sourceLabel(server.source);
+            return createElement("div", { className: "omkt-srow", style: { borderBottom: `1px solid ${T.line2}` } }, [
+                createElement("div", { key: "main", className: "omkt-srow-main omkt-reg-columns" }, [
+                    createElement("div", { key: "identity", style: { display: "flex", alignItems: "center", gap: 12, minWidth: 0 } }, [
+                        createElement(ProductIcon, { key: "icon", item: server, size: 34 }),
+                        createElement("div", { key: "text", style: { minWidth: 0 } }, [
+                            createElement("div", { key: "name", className: "omkt-sname", style: { fontSize: 17, lineHeight: 1.15, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, server.name),
+                            about ? createElement("div", { key: "about", className: "omkt-sabout", style: { ...styles.about, fontSize: 14, lineHeight: 1.2, color: T.text3, display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }, title: [server.aboutLabel, about.original].filter(Boolean).join("\n\n") || undefined }, about.text) : null,
+                            createElement("div", { key: "mobile-meta", className: "omkt-reg-mobile", style: { fontSize: 12, color: T.text3 } }, `${source} · ${status}`),
+                        ]),
+                    ]),
+                    createElement("span", { key: "source", className: "omkt-reg-source", style: { fontSize: 15, color: T.text2 } }, source),
+                    createElement("div", { key: "status", className: "omkt-reg-status", style: { display: "flex", gap: 7, alignItems: "center", fontSize: 15, color: failed || unhealthy ? T.red : T.text2 }, title: status }, [
+                        createElement("span", { key: "dot", style: styles.dot(state) }),
+                        createElement("span", { key: "label" }, failed ? "连接异常" : unhealthy ? "检查未通过" : starting ? "正在连接" : provided ? "外部提供" : status),
+                    ]),
+                    createElement(Switch, { key: "enabled", on: enabled, disabled: busy || checking, title: provided ? "只影响本插件记录；工具由其他插件提供" : enabled ? "停用连接器" : "启用连接器", onToggle: () => onToggle(server, !enabled) }),
+                    createElement("div", { key: "actions", "data-omkt": "server-actions", style: { display: "flex", gap: 12, alignItems: "center", justifyContent: "flex-start" } }, [
+                        updateAction || configAction || healthAction,
+                        createElement(ActionMenu, { key: "more", label: `${server.name} 更多操作` }, [
+                            configAction || updateAction ? healthAction : null,
+                            updateAction ? configAction : null,
+                            createElement("div", { key: "meta", className: "omkt-smeta", title: [server.transport, prefix, pkg, toolCount].filter(Boolean).join(" · "), style: { fontSize: 12, color: T.text3, padding: 6, overflowWrap: "anywhere" } }, [server.transport, prefix, pkg, toolCount].filter(Boolean).join(" · ")),
+                            createElement("button", { key: "remove", type: "button", style: styles.textBtn, disabled: busy || checking, title: provided ? "只移除本插件记录，工具仍由其他插件提供" : undefined, onClick: () => onRemove(server) }, "移除"),
+                        ]),
+                    ]),
+                ]),
+                createElement("div", { key: "notices", style: { display: "flex", gap: 8, flexWrap: "wrap", padding: needsConfig || badge || orphan || checkFailed || didUpdate || server.health || failed ? "0 20px 10px 66px" : 0 } }, [
 				needsConfig
 					? createElement("span", {
 						key: "needcfg", style: styles.configBadge,
@@ -1637,72 +1601,26 @@ window.__ModuleLoader__.load({
 							: didUpdate
 							? createElement("span", { key: "newv", style: styles.jobOutcome }, `✓ 已更新到 ${didUpdate}`)
 							: null,
-				createElement("span", { key: "actions", style: { display: "flex", gap: 6, alignItems: "center", ...styles.spacer } }, [
-					createElement("button", {
-						key: "health", type: "button",
-						style: styles.button,
-						// The click must say it is working: a healthy check can take
-						// 12s+, and a button that looks untouched for that long reads
-						// as a dead button — the user clicked it again, which started
-						// a second check on the same row.
-						disabled: busy || checking,
-						title: checking
-							? "正在等握手返回（首次运行可能在下载，最多约 40 秒）"
-							: "查这台服务器能不能用：挂载、握手、已注册的工具、声明的要求",
-						onClick: () => onHealth(server),
-					}, checking ? "检查中…" : "检查"),
-					// Any row with a declared field, plus any row whose launch takes
-					// its settings on the command line (a Smithery row can need a key
-					// before its schema has ever been fetched — the channel is the
-					// promise that there is something to fill in).
-					server.config || server.channel === "cli-json"
-						? createElement("button", {
-							key: "cfg", type: "button",
-							// A row that cannot work yet gets the primary style: the
-							// action that unbreaks it is the one to click.
-							style: needsConfig ? { ...styles.button, ...styles.primary } : styles.button,
-							// Opening the sheet can first have to ask the source what the
-							// row takes (up to 8 s). A button that says nothing for that
-							// long reads as broken, so it says what it is doing — and it
-							// cannot be clicked twice into two hint requests.
-							disabled: busy || checking || hinting,
-							title: hinting
-								? "正在向来源确认这台服务器要填什么"
-								: needsConfig
-									? `填写 ${configMissing.join("、") || "必填项"}`
-									: "查看或修改这台服务器的配置",
-							onClick: () => onConfigure(server),
-						}, hinting ? "确认中…" : "配置")
-						: null,
-					newVersion && !settled
-						? createElement("button", {
-								key: "update", type: "button",
-								style: rowStatus
-									? { ...styles.button, ...styles.buttonBusy }
-									: { ...styles.button, ...styles.primary },
-								disabled: busy || checking || rowStatus !== null,
-								title: rowStatus === "running" ? "这一台正在更新"
-									: rowStatus === "pending" ? "已排队，轮到时自动开始"
-										: undefined,
-								onClick: () => onUpdate(server),
-							}, rowStatus === "running" ? "更新中…" : rowStatus === "pending" ? "等待中" : "更新")
-						: null,
-					createElement("button", {
-						key: "toggle", type: "button", style: styles.button, disabled: busy || checking,
-						// A row another mount already provides owns no fiber here, so
-						// 「停用」 cannot stop its tools — say that on the button itself
-						// rather than only in the toast after the click.
-						title: provided ? "这条记录由另一个插件挂载提供，本插件的停用不会让它的工具消失" : undefined,
-						onClick: () => onToggle(server, !enabled),
-					}, enabled ? "停用" : "启用"),
-					createElement("button", {
-						key: "remove", type: "button", style: styles.button, disabled: busy || checking,
-						title: provided ? "只移除本插件的注册表记录；那些工具仍由另一个插件提供"
-							: orphan ? "这条记录来自的配置里已经没有它了（可一次清理全部同类记录）" : undefined,
-						onClick: () => onRemove(server),
-					}, "移除"),
-				]),
-			]);
+                    failed ? createElement("div", { key: "error", role: "alert", style: { fontSize: 13, color: T.red, overflowWrap: "anywhere", width: "100%" } }, status) : null,
+						server.health
+							? createElement("div", {
+								key: "health", className: "omkt-shealth",
+								style: { ...styles.meta, color: server.health.ok ? "#2f7d32" : "#b3261e", whiteSpace: "normal" },
+								title: (server.health.checks || []).map((c) => `${c.ok ? "✓" : "✗"} ${c.detail}`).join("\n") || undefined,
+							}, healthLine(server.health))
+							: null,
+						// 旧装法的行（`@smithery/cli run …`）握手不会完成，原因不是慢：
+						// CLI 把记录解析成远程端点，拉起 mcp-remote 等浏览器登录。0.11.1
+						// 起按来源装成远程 http，但改不了已经装下的行——所以这里给出唯一
+						// 有效的下一步，而不是让它一直红着。
+						server.health && !server.health.ok && server.channel === "cli-json"
+							? createElement("div", {
+								key: "legacycli",
+								style: { ...styles.meta, color: "#8a5a00", whiteSpace: "normal" },
+							}, "这是旧装法（Smithery CLI 解析成远程端点，要浏览器登录）。移除后重新安装，会按它自己托管的方式装成远程 http。")
+							: null,
+                ]),
+            ]);
 		}
 
 		/**
@@ -2146,9 +2064,9 @@ window.__ModuleLoader__.load({
 			]);
 		}
 
-		function SourceGroup({ source, servers, busy, checkingKeys, hintingKey, jobOf, collapsed, onToggleCollapsed, onToggleSource, onToggleServer, onRemove, onUpdate, onConfigure, onHealth }) {
-			const enabledCount = servers.filter((s) => s.enabled !== false).length;
-			const allOn = enabledCount === servers.length && servers.length > 0;
+		function SourceGroup({ source, servers, allServers = servers, busy, checkingKeys, hintingKey, jobOf, collapsed, onToggleCollapsed, onToggleSource, onToggleServer, onRemove, onUpdate, onConfigure, onHealth }) {
+			const enabledCount = allServers.filter((s) => s.enabled !== false).length;
+			const allOn = enabledCount === allServers.length && allServers.length > 0;
 			return createElement("div", { style: styles.group }, [
 				createElement("div", {
 					key: "head", style: { ...styles.groupHead, cursor: "pointer" },
@@ -2157,7 +2075,7 @@ window.__ModuleLoader__.load({
 					createElement("span", { key: "chev", style: styles.meta }, collapsed ? "▸" : "▾"),
 					createElement("span", { key: "title", style: styles.groupTitle }, sourceLabel(source)),
 					createElement("span", { key: "count", style: styles.badge },
-						`${servers.length} 个 · ${enabledCount} 已启用`),
+						`${servers.length < allServers.length ? `本页 ${servers.length} 个 · 共 ` : ""}${allServers.length} 个 · ${enabledCount} 已启用`),
 					createElement("span", { key: "switch", style: { ...styles.spacer, display: "flex", alignItems: "center", gap: 8 } }, [
 						createElement("span", { key: "label", style: styles.meta }, allOn ? "全部停用" : "全部启用"),
 						createElement(Switch, {
@@ -2190,25 +2108,49 @@ window.__ModuleLoader__.load({
 			const el = document.createElement("style");
 			el.id = "omkt-styles";
 			el.textContent = [
-                ".omkt-page,.omkt-page *{box-sizing:border-box}",
-                ".omkt-page button,.omkt-page input,.omkt-page select{font-family:inherit}",
-                ".omkt-page button:focus-visible,.omkt-page [role=button]:focus-visible{outline:2px solid var(--omkt-accent,#5b7cfa);outline-offset:2px}",
-                ".omkt-page .omkt-primary{background:var(--omkt-accent-ink,#3d5fd9);border-color:var(--omkt-accent-ink,#3d5fd9)}",
-                ".omkt-spotlight{display:grid;grid-template-columns:1.35fr 1fr;gap:12px;grid-column:1/-1;min-width:0;margin-bottom:4px}",
-                ".omkt-spotlight:has(> :only-child){grid-template-columns:1fr}",
-                ".omkt-capgrid{display:grid}",
-                ".omkt-scopes{display:flex;gap:6px;flex-wrap:wrap}",
-                ".omkt-letterrail{flex:0 0 36px;position:sticky;top:12px;display:flex;flex-direction:column;gap:2px;padding-top:4px}",
-                ".omkt-letterrail a{width:28px;height:22px;border-radius:6px;display:grid;place-items:center;font-size:10.5px;font-weight:620;color:#8f959e;text-decoration:none}",
-                ".omkt-letterrail a:hover,.omkt-letterrail a:focus-visible{background:#f0eefc;color:#6a6eb8}",
-                "@container(max-width:980px){.omkt-letterrail{display:none}}",
-                "@keyframes omkt-drawer-in{from{opacity:0;transform:translateX(12px)}to{opacity:1;transform:translateX(0)}}",
-                ".omkt-panel.omkt-drawer{animation:omkt-drawer-in .2s ease;font:13.5px/1.55 system-ui,-apple-system,Segoe UI,Microsoft YaHei,sans-serif}.omkt-drawer>*{flex-shrink:0}.omkt-drawer button{font-family:inherit}",
-                "@container (max-width:980px){.omkt-capgrid{grid-template-columns:1fr!important}.omkt-spotlight{grid-template-columns:1fr}}",
-                "@container (max-width:600px){.omkt-spaceswitch{grid-template-columns:1fr!important}.omkt-pagehead{gap:12px}}",
-                ".omkt-srow{transition:transform .15s,box-shadow .15s,border-color .15s}",
-                ".omkt-srow:hover{transform:translateY(-1px);box-shadow:0 1px 2px rgba(31,35,41,.03),0 6px 16px rgba(31,35,41,.04)}",
-                "@media(prefers-reduced-motion:reduce){.omkt-page *{animation:none!important;transition:none!important;scroll-behavior:auto!important}}",
+                ".omkt-navigation{display:flex;align-items:center;gap:12px;overflow-x:auto;scrollbar-width:thin}",
+                ".omkt-navigation>.omkt-tabbar{border-bottom:0!important;flex:1 0 auto;overflow:visible!important}",
+                ".omkt-navigation .omkt-tab{font-size:14px!important;margin:0!important;padding:9px 4px 10px!important}",
+                "@container(max-width:560px){.omkt-navigation{gap:8px}.omkt-navigation .omkt-spaceswitch{gap:8px!important;padding-inline-end:8px!important}.omkt-navigation .omkt-tabbar{gap:6px!important}.omkt-navigation .omkt-tab,.omkt-navigation .omkt-spacep{font-size:13px!important}.omkt-directory-label{display:none}}",
+                ".omkt-market-search{display:grid;gap:20px;align-items:center;margin:0;min-width:0}",
+                ".omkt-market-search>button,.omkt-reg-filters>button{display:inline-flex;align-items:center;justify-content:center;gap:8px}",
+                ".omkt-reg-filters>select{flex:0 1 218px;min-width:128px}",
+                ".omkt-skill-alphabet{display:flex;flex-direction:column;align-items:center;flex:0 0 24px}",
+                ".omkt-call-ranges>button{white-space:nowrap}",
+                ".omkt-call-detail{scroll-margin-block:8px}",
+                ".omkt-call-kind{width:190px}",
+                ".omkt-call-facts{grid-template-columns:repeat(2,minmax(0,1fr))}",
+                "@container(max-width:950px){.omkt-reg-filters>select{flex-basis:140px}.omkt-call-kind{width:auto}.omkt-skill-alphabet{display:none}}",
+                "@container(max-width:540px){.omkt-reg-filters>select{flex:1 1 120px}.omkt-call-facts{grid-template-columns:minmax(0,1fr)}}",
+                ".omkt-market-categories{display:flex;align-items:center;gap:12px;flex-wrap:wrap;min-height:36px;margin-bottom:8px}",
+                ".omkt-featured{height:128px;flex-shrink:0}",
+                ".omkt-index-toggle{font-size:13px;color:"+T.brand+";cursor:pointer}",
+                ".omkt-index-details:not([open]){display:none}",
+                ".omkt-reg-mobile{display:none}.omkt-srow .omkt-reg-columns{border-bottom:0}",
+                ".omkt-reg-table{border:1px solid "+T.line+";border-radius:12px;background:"+T.cardBg+"}",
+                ".omkt-reg-columns{display:grid;grid-template-columns:minmax(0,2.2fr) minmax(110px,1.1fr) minmax(110px,1fr) minmax(48px,.65fr) 132px;gap:16px;align-items:center;padding:8px 20px;border-bottom:1px solid "+T.line2+"}",
+                ".omkt-reg-head{font-size:13px;color:"+T.text3+";background:"+T.soft+";border-radius:12px 12px 0 0}",
+                ".omkt-skill-columns{display:grid;grid-template-columns:minmax(0,2.3fr) minmax(120px,1fr) minmax(140px,1fr) 110px;gap:16px;align-items:center;padding:8px 20px}",
+                "@container(max-width:1000px){.omkt-market-search{grid-template-columns:minmax(0,1fr) 145px 145px 42px 42px!important;gap:10px}.omkt-market-search:has(>button:only-of-type){grid-template-columns:minmax(0,1fr) 145px 145px 42px!important}.omkt-reg-columns{grid-template-columns:minmax(0,1fr) 120px 120px 48px 96px;gap:10px;padding:12px}.omkt-skill-columns{grid-template-columns:minmax(0,1fr) 110px 110px 88px!important;gap:10px!important;padding:12px!important}}",
+                "@container(max-width:719px){.omkt-navigation>button{font-size:12px!important;padding:4px!important}.omkt-market-search{grid-template-columns:minmax(0,1fr) 42px 42px!important;gap:8px}.omkt-market-search:has(>button:only-of-type){grid-template-columns:minmax(0,1fr) 42px!important}.omkt-market-search>.omkt-search{grid-column:1/-1}.omkt-market-search>select{grid-row:2;max-width:100%}.omkt-market-search>select:first-of-type{grid-column:1}.omkt-market-search>select:nth-of-type(2){grid-row:3;grid-column:1/-1}.omkt-reg-columns{grid-template-columns:minmax(0,1fr) 48px 90px}.omkt-reg-source,.omkt-reg-status{display:none!important}.omkt-reg-mobile{display:block}.omkt-listmeta{display:none}.omkt-skill-columns{grid-template-columns:minmax(0,1fr) 80px!important}.omkt-market-categories{gap:4px}.omkt-skillhero{min-height:128px}}",
+
+				".omkt-menu>summary{list-style:none;cursor:pointer;white-space:nowrap}.omkt-menu>summary::-webkit-details-marker{display:none}",
+				".omkt-menu[open]>summary{color:#4566e9;background:rgba(69,102,233,.08)}",
+				".omkt-menu button{text-align:left}.omkt-menu button:hover{background:rgba(69,102,233,.08)}",
+				".omkt-page button:focus-visible,.omkt-page summary:focus-visible,.omkt-page [role=tab]:focus-visible{outline:2px solid #4566e9;outline-offset:3px}",
+				".omkt-page button:disabled{cursor:not-allowed;opacity:.55}.omkt-page h2{overflow-wrap:anywhere}",
+				".omkt-page .omkt-skill-list{display:flex;flex-direction:column;border:1px solid rgba(128,128,128,.18);border-radius:12px;overflow:hidden}",
+				".omkt-listrow{transition:background .15s ease}.omkt-listrow:hover{background:rgba(69,102,233,.025)!important}",
+				".omkt-listrow:last-child{border-bottom:0!important}",
+				".omkt-callrow{display:grid;grid-template-columns:130px minmax(0,1fr) 155px 105px 32px;gap:12px;align-items:center}",
+				".omkt-callfilter{display:none}.omkt-callmeta{display:none}",
+                "@container(max-width:760px){.omkt-callmeta{display:block}}",
+                ".omkt-callrow-skill{grid-template-columns:26px 90px minmax(0,1fr) 130px 110px 94px}.omkt-callrow-skill>.omkt-calltoggle,.omkt-callrow-skill>.omkt-callspacer{order:-1}",
+                "@container(max-width:1000px){.omkt-callrow{grid-template-columns:90px minmax(0,1fr) 100px 85px 26px;gap:8px}.omkt-callrow-skill{grid-template-columns:24px 76px minmax(0,1fr) 104px 78px 65px}}",
+                "@container(max-width:760px){.omkt-callrow-skill .omkt-eventtype{display:none}}",
+				"@container(max-width:760px){.omkt-callrow{grid-template-columns:68px minmax(0,1fr) 74px 60px 26px;gap:6px}.omkt-callrow-skill{grid-template-columns:24px 68px minmax(0,1fr) 76px 60px}.omkt-pagehead{flex-wrap:wrap!important}.omkt-page .omkt-callrail{flex-basis:150px!important}}",
+				"@container(max-width:540px){.omkt-callrow{grid-template-columns:58px minmax(0,1fr) 62px 26px}.omkt-callrow-skill{grid-template-columns:24px 58px minmax(0,1fr) 72px}.omkt-callduration{display:none}.omkt-callfilter{display:block}.omkt-page .omkt-callrail{display:none}.omkt-page .omkt-calllayout{display:block!important;overflow:auto}.omkt-page .omkt-callsummary{gap:0!important}.omkt-page .omkt-callstat{min-width:0!important;padding:12px!important}}",
+				"@media(prefers-reduced-motion:reduce){.omkt-page *{animation:none!important;transition:none!important}}",
 				// Cards lift on hover; the border takes the accent so the lift
 				// reads as "this is the thing under your cursor" and not as a
 				// shadow the layout did not ask for.
@@ -2224,7 +2166,7 @@ window.__ModuleLoader__.load({
 				// The two wide spotlight cards at the top of the skill market. The
 				// class is also the probe's handle for "how many heroes rendered",
 				// so it exists even though the paint lives in inline styles.
-				".omkt-skillhero{display:flex;flex-direction:column;gap:10px;min-width:0}",
+				".omkt-skillhero{display:flex;flex-direction:column;gap:8px;min-width:0}",
 				".omkt-skillcard{transition:border-color .18s ease,box-shadow .18s ease,transform .18s ease}",
 				".omkt-skillcard:hover{border-color:#d9dde6;box-shadow:0 2px 6px rgba(20,26,40,.04),"
 					+ "0 10px 24px rgba(20,26,40,.06);transform:translateY(-2px)}",
@@ -2248,16 +2190,9 @@ window.__ModuleLoader__.load({
 					+ "border-radius:6px;padding:3px 9px;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}"
 					+ ".omkt-calltoggle:hover{border-color:#cfd1d6;background:#fafbfc}"
 					+ ".omkt-calltoggle:focus-visible{outline:2px solid #5b7cfa;outline-offset:1px}",
-				// The pills are plain <div role="tab">: nothing inside can take focus,
-				// so the shell has no element to frame. The tablist is the tab stop
-				// and draws the ring; arrow keys switch spaces.
 				".omkt-spaceswitch:focus{outline:none!important}"
-				+ ".omkt-spaceswitch:focus-visible{outline:2px solid rgba(91,124,250,0.55)!important;outline-offset:2px}"
-				// The pill rules stay as a belt-and-braces guard: a future render
-				// that brings a focusable pill back still gets the space ring.
-				+ ".omkt-spacep:focus-visible{outline:2px solid rgba(91,124,250,0.55)!important;outline-offset:2px}"
-				+ ".omkt-spacep-skill:focus-visible{outline:2px solid rgba(139,143,214,0.62)!important}"
-				+ ".omkt-spaceswitch-skill:focus-visible{outline:2px solid rgba(139,143,214,0.62)!important}",
+				+ ".omkt-spaceswitch:focus-visible{outline:2px solid rgba(69,102,233,0.62)!important;outline-offset:2px}"
+				+ ".omkt-spacep:focus-visible{outline:2px solid rgba(69,102,233,0.62)!important;outline-offset:2px}",
 				".omkt-title{color:inherit;text-decoration:none}",
 				".omkt-title:hover{color:#4d6bfe}",
 				".omkt-btn,.omkt-link{transition:border-color .12s ease,background .12s ease,color .12s ease}",
@@ -2275,18 +2210,13 @@ window.__ModuleLoader__.load({
 				// there for a future third one: keep its scrollbar out of the
 				// layout either way.
 				".omkt-tabbar{scrollbar-width:none}",
-			// The space you are in has a colour; the header and the tab
-			// underline borrow it, so the page reads as one place.
-			".omkt-pagehead{padding:14px 16px;margin:0 -4px;border-radius:18px;" +
-				"border:1px solid rgba(91,124,250,.14);" +
-				"background:linear-gradient(90deg,rgba(91,124,250,.07),rgba(91,124,250,0) 55%);" +
-				"transition:background .28s,border-color .28s}",
-			".omkt-pagehead-skill{border-color:rgba(139,143,214,.2);" +
-				"background:linear-gradient(90deg,rgba(139,143,214,.09),rgba(139,143,214,0) 55%)}",
-			".omkt-spaceswitch{background:rgba(128,128,128,0.085)}",
-			".omkt-spacep[aria-selected=\"false\"]:hover{background:rgba(128,128,128,.16)}",
-			".omkt-tabbar-mcp .omkt-tab[aria-selected=\"true\"]::after{background:#5b7cfa}",
-			".omkt-tabbar-skill .omkt-tab[aria-selected=\"true\"]::after{background:#8b8fd6}",
+
+                ".omkt-pagehead{padding:0 0 8px;min-height:40px}",
+                ".omkt-pagehead-skill{color:inherit}",
+                ".omkt-spacep{background:transparent;transition:background .12s ease,color .12s ease}",
+                ".omkt-spacep[aria-selected=\"false\"]:hover{background:rgba(69,102,233,.05)}",
+                ".omkt-tabbar .omkt-tab[aria-selected=\"true\"]{color:#4566e9!important}",
+                ".omkt-tabbar .omkt-tab[aria-selected=\"true\"]::after{background:#4566e9}",
 				".omkt-select{cursor:pointer;transition:border-color .12s ease}",
 				// These need `!important`: every one of these controls carries its
 				// border inline (so it can flip with the theme), and an inline
@@ -2361,9 +2291,8 @@ window.__ModuleLoader__.load({
 				// at its item's min-content, which is how a single long URL used
 				// to widen the whole wall.
 				".omkt-grid{grid-template-columns:repeat(2,minmax(0,1fr))}",
-				"@container (max-width:719px){.omkt-grid{grid-template-columns:repeat(1,minmax(0,1fr))!important}}",
-				"@container (min-width:720px) and (max-width:1099px){.omkt-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}}",
-				"@container (min-width:1100px){.omkt-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important}}",
+				"@container (width < 720px){.omkt-grid{grid-template-columns:minmax(0,1fr)!important}}",
+				"@container (width >= 920px){.omkt-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important}}",
 				".omkt-icon:hover{background:rgba(128,128,128,.14)}",
 				// The GitHub mark beside a card title: inked on hover only, so a
 				// list of cards stays quiet but the repo is always one click away.
@@ -2560,7 +2489,7 @@ window.__ModuleLoader__.load({
 			}
 
 		/**
-		 * One marketplace entry, rendered as a compact v5 capability card.
+		 * One marketplace entry, rendered as a dsh-market-style card (v4).
 		 *
 		 * The whole card is the detail entry point, and the NAME is the front
 		 * door: a real anchor that navigates to the repository / upstream site /
@@ -2575,367 +2504,65 @@ function itemKeyOf(item) {
 	return `${item?.source ?? ""}:${item?.id ?? item?.title ?? ""}`;
 }
 
-		/** Highlights are drawn only from this page's usable, current entries. */
-		function marketSpotlights(items, { enabled, stats } = {}) {
-			if (!enabled) return [];
-			const eligible = items.filter((item) => item.installable && !item.deprecated);
-			const official = eligible.find((item) => item.official);
-			const popular = eligible.filter((item) => item !== official && (usageOf(item).value > 0 || starCountOf(item, stats) > 0))
-				.sort((a, b) => (usageOf(b).value ?? starCountOf(b, stats) ?? 0) - (usageOf(a).value ?? starCountOf(a, stats) ?? 0))[0];
-			return [...(official ? [{ item: official, kind: "official" }] : []), ...(popular ? [{ item: popular, kind: "popular" }] : [])];
-		}
-function MarketCard({ item, stats, media, busy, installing, rank, usageSort, featured, onInstall, onOpen, onToggleFavorite }) {
-			const repo = repoKeyOf(item);
-			const enriched = repo ? (stats ?? {})[repo] : null;
-			const stars = starCountOf(item, stats);
-			const author = enriched?.author ?? item.author;
-			const description = item.description || enriched?.description || "（无描述）";
-			// Upstream tags are *labels the source chose*, and the sources label
-			// very different things with them (Smithery writes 「托管」/「本地」,
-			// the official registry writes the package manager, awesome lists
-			// write their own `###` heading plus legend flags). The footer leads
-			// with the two answers a reader actually wants — which functional
-			// group this is, and how it gets installed — and only then shows the
-			// upstream tags that say something the two chips do not.
-			// The 分类 chip is always present. Both Smithery and the official
-			// registry publish no category at all (checked against their live
-			// payloads: neither carries a category/keywords field), so those
-			// entries are honestly labelled 未分类 — the same bucket the 分类
-			// filter puts them in. Leaving the chip off instead made the footer
-			// read "only an install method", which is what the user reported as
-			// 「要有这个MCP的分类」.
-			const groupChip = (item.group && item.group !== "__none__")
-				? item.group
-				: (item.category || "未分类");
-			// An inferred group says so on the chip itself, not only in its
-			// tooltip. The two registries publish no category at all, so for
-			// their entries this chip is *our* reading of the name and
-			// description; a reader comparing the panel with the source's own
-			// page should not have to hover to find that out.
-			const groupChipText = item.groupSource === "inferred" ? `${groupChip}（推断）` : groupChip;
-			const groupTitle = [item.group, item.category].filter(Boolean)
-				.filter((v, i, arr) => arr.indexOf(v) === i).join(" · ");
-			const runnerOf = (command) => {
-				const cmd = String(command ?? "");
-				if (/(^|[\\/ ])npx(\.cmd)?\b/i.test(cmd)) return "npx";
-				if (/(^|[\\/ ])uvx(\.exe)?\b/i.test(cmd)) return "uvx";
-				if (/(^|[\\/ ])(python[0-9.]*|py)(\.exe)?\b/i.test(cmd)) return "python";
-				if (/(^|[\\/ ])node(\.exe)?\b/i.test(cmd)) return "node";
-				if (/(^|[\\/ ])docker(\.exe)?\b/i.test(cmd)) return "docker";
-				return null;
-			};
-			const installTransport = item.install?.transport ?? item.transport ?? null;
-			const installRunner = item.install ? runnerOf(item.install.command) : null;
-			const installChip = !item.install
-				? (item.installable ? "可一键安装" : "需手动配置")
-				: installTransport === "stdio"
-					? `stdio · ${installRunner ?? "本地命令"}`
-					// A hosted row states its transport but not its endpoint — the
-					// detail endpoint is asked at install time. Saying 「免安装」
-					// would promise a click that still has one network step in it.
-					: item.install.deferred === true ? "远程 · 装时取端点" : "远程 · 免安装";
-			const installTitle = item.install
-				? [installTransport, item.install.command, item.install.url, item.installSource?.text].filter(Boolean).join(" · ")
-				: installChip;
-			const CHIP_ALREADY_SHOWN = new Set(["托管", "本地", "npm", "pypi"]);
-			const tags = [...(item.tags ?? []), ...((enriched?.topics ?? []).slice(0, 3))]
-				.filter((t, i, arr) => t && arr.indexOf(t) === i)
-				// `groupChip` already says the group, and `category` is its
-				// tooltip: repeating either one as an upstream tag would print the
-				// same word twice in a two-inch row.
-				.filter((t) => !CHIP_ALREADY_SHOWN.has(t) && t !== item.category && t !== groupChip)
-				.slice(0, 3);
-			// Smithery's repository field is its own listing when the upstream
-			// project is unknown, so that listing is the honest front door too.
-			const registryPage = item.source === "smithery" && item.qualifiedName
-				? `https://smithery.ai/servers/${item.qualifiedName}`
-				: null;
-			const homepage = enriched?.homepage || item.homepage || null;
-			const titleHref = item.repository
-				|| (homepage && homepage !== item.repository ? homepage : null)
-				|| registryPage
-				|| null;
-			// Transport is a fact like any other: the card states how this
-			// server reaches the machine, because "local process" and "remote
-			// endpoint" are different trust decisions.
-			const transport = item.transport && item.transport !== "unknown"
-				? item.transport === "stdio" ? "本地进程（stdio）" : "远程端点（streamable-http）"
-				: null;
-			const updatedAt = enriched?.pushedAt ?? item.updatedAt ?? null;
-			// v4's compatibility chip: the transport in three words, in the slot
-			// where the card used to print an entire shell command.
-			const transportChip = item.transport && item.transport !== "unknown"
-				? item.transport === "stdio" ? "MCP · stdio" : "MCP · remote"
-				: "MCP";
+function MarketCard({ item, stats, busy, installing, rank, usageSort, onInstall, onOpen, onToggleFavorite, featured }) {
+            const repo = repoKeyOf(item);
+            const enriched = repo ? stats?.[repo] : null;
+            const author = enriched?.author ?? item.author;
+            const stars = starCountOf(item, stats);
+            const group = item.group && item.group !== "__none__" ? item.group : item.category || "未分类";
+            const href = item.repository || enriched?.homepage || item.homepage || (item.source === "smithery" && item.qualifiedName ? `https://smithery.ai/servers/${item.qualifiedName}` : null);
+            const command = String(item.install?.command ?? "");
+            const runner = /npx/i.test(command) ? "npx" : /uvx/i.test(command) ? "uvx" : /docker/i.test(command) ? "docker" : "本地命令";
+            const method = !item.install ? item.installable ? "可一键安装" : "需手动配置" : item.install.transport === "stdio" ? `stdio · ${runner}` : item.install.deferred ? "远程 · 装时取端点" : "远程 · 免安装";
+            const source = SOURCE_LABELS[`catalog:${item.source}`] ?? item.source;
+            const metric = typeof item.installs === "number" ? `${compact(item.installs)} ${item.installsLabel || "次使用"}` : typeof stars === "number" ? `★ ${compact(stars)}` : item.localInstalls > 0 ? `${item.localInstalls} 次本机安装` : "";
+            const info = [source, method, item.statsAt ? `来源统计时间 ${new Date(item.statsAt).toLocaleString()}` : "", enriched?.fetchedAt ? `仓库统计时间 ${new Date(enriched.fetchedAt).toLocaleString()}` : "", enriched?.stale ? "仓库统计更新失败，保留旧值" : "", item.statsStale ? "来源读取失败，保留旧统计" : "", typeof stars === "number" ? `GitHub Star ${stars}` : "", item.localInstalls > 0 ? `从本市场安装过 ${item.localInstalls} 次` : ""].filter(Boolean).join(" · ");
+            const open = () => onOpen(item);
+            const action = item.installed ? createElement("span", { key: "installed", style: { ...styles.sourceMiniBtn, display: "inline-flex", gap: 4, alignItems: "center", color: T.text, background: T.cardBg, cursor: "default" } }, "✓ 已安装")
+                : item.installable ? createElement("button", { key: "install", type: "button", className: "omkt-primary", style: styles.smallPrimary, disabled: busy || installing, onClick: () => onInstall(item) }, installing ? "安装中…" : item.deprecated ? "仍要安装" : "安装")
+                    : createElement("button", { key: "manual", type: "button", style: { ...styles.textBtn, fontSize: 13, padding: 0 }, onClick: open }, "需手动配置");
+            const title = createElement("div", { key: "title", style: styles.cardHead }, [
+                href ? createElement("a", { key: "name", href, target: "_blank", rel: "noreferrer", className: "omkt-title", "data-omkt": "card-title", style: featured ? { ...styles.cardName, fontSize: 20 } : styles.cardName, title: item.title, onClick: event => { event.stopPropagation(); openExternal(event, href); } }, item.title)
+                    : createElement("span", { key: "name", "data-omkt": "card-title", style: featured ? { ...styles.cardName, fontSize: 20 } : styles.cardName, title: item.title }, item.title),
+                item.verified && !featured ? createElement("span", { key: "verified", "data-omkt": "card-verified", style: styles.verified }, "✓ 认证") : null,
+                item.deprecated ? createElement("span", { key: "deprecated", style: styles.deprecated, title: item.statusMessage }, "已废弃") : null,
+            ]);
+            return createElement("article", { className: featured ? "omkt-card omkt-featured" : "omkt-card", style: featured ? { ...styles.smHero, height: 128, boxSizing: "border-box" } : styles.card, title: `${item.title}${author ? ` · ${author}` : ""}` }, featured ? [
+                createElement("div", { key: "featured", style: styles.smEyebrow }, item.official ? "♛ 官方精选" : "推荐连接器"),
+                createElement("div", { key: "feature-main", style: { display: "flex", alignItems: "center", gap: 14, minWidth: 0, flex: 1 } }, [
+                    createElement(ProductIcon, { key: "icon", item, size: 54, repositoryAvatar: enriched?.avatar }),
+                    createElement("div", { key: "body", style: { ...styles.cardLeft, cursor: "pointer" } }, [
+                        title,
+                        createElement("button", { key: "desc", type: "button", "data-omkt": "desc", "aria-label": `查看 ${item.title} 详情`, onClick: open, style: { ...styles.textBtn, ...styles.smHDesc, display: "block", padding: 0, textAlign: "left", width: "100%" }, title: plainText(item.description || enriched?.description) }, plainText(item.description || enriched?.description || "来源未提供描述")),
+                        createElement("span", { key: "source", style: { fontSize: 14, color: T.text3, display: "flex", alignItems: "center", gap: 6 }, title: info }, [createElement(UiIcon, { key: "source-icon", name: "layers", size: 15 }), source]),
+                    ]),
+                    createElement("div", { key: "cta", "data-omkt": "card-cta", style: { flexShrink: 0 } }, action),
+                ]),
+            ] : [
+                createElement("div", { key: "head", style: styles.cardHd }, [
+                    createElement(ProductIcon, { key: "icon", item, size: 48, repositoryAvatar: enriched?.avatar }),
+                    createElement("div", { key: "identity", style: styles.cardLeft }, [title, createElement("div", { key: "author", style: styles.cardAuthor }, author || "作者未标注")]),
+                    createElement("div", { key: "secondary", style: { display: "flex", gap: 4, alignSelf: "flex-start", flexShrink: 0 } }, [
+                        createElement("button", { key: "fav", type: "button", className: item.favorite ? "omkt-icon omkt-icon-on" : "omkt-icon", style: { ...styles.iconBtn, width: 24, height: 26, padding: 3, color: item.favorite ? T.brand : T.text2 }, "aria-label": item.favorite ? "取消收藏" : "收藏", "aria-pressed": Boolean(item.favorite), onClick: () => onToggleFavorite(item) }, createElement(UiIcon, { name: "heart", size: 17 })),
+                        createElement("button", { key: "detail", type: "button", style: { ...styles.textBtn, padding: "3px 0", color: T.text2 }, "aria-label": `查看 ${item.title} 详情`, onClick: open }, createElement(UiIcon, { name: "more", size: 19 })),
+                    ]),
+                ]),
+                createElement("div", { key: "body", style: { ...styles.cardBody, gap: 0 }, role: "button", tabIndex: 0, "aria-label": `查看 ${item.title} 详情`, onClick: open, onKeyDown: event => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); open(); } } },
+                    createElement("div", { "data-omkt": "desc", style: styles.desc, title: item.statusMessage || undefined }, plainText(item.description || enriched?.description || "来源未提供描述"))),
+                createElement("div", { key: "ft", style: { display: "flex", alignItems: "center", gap: 8, marginTop: "auto", minWidth: 0 } }, [
+                    rank ? createElement("span", { key: "rank", style: { fontSize: 12, color: T.text3 } }, `#${rank}`) : null,
+                    createElement("span", { key: "category", style: styles.tag, title: "分类：" + group }, group),
+                    createElement("span", { key: "source", style: { fontSize: 12, color: T.text3, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: info }, source),
+                    metric ? createElement("span", { key: "metric", style: { fontSize: 12, color: T.text2, whiteSpace: "nowrap" }, title: info }, metric) : usageSort ? createElement("span", { key: "nouse", style: { fontSize: 12, color: T.text3 }, title: "按使用量排序时它排在后面：来源未公布使用量" }, "无使用量数据") : null,
+                    createElement("div", { key: "cta", "data-omkt": "card-cta", style: { marginLeft: "auto", flexShrink: 0 } }, action),
+                ]),
+            ]);
+        }
 
-			const installCmd = item.install
-				? item.install.transport === "stdio"
-					? [item.install.command, ...(item.install.args ?? [])].join(" ")
-					: item.install.url
-				: null;
-
-			return createElement("article", {
-				className: `omkt-card${featured ? " omkt-mcphero" : ""}`,
-				style: featured ? { ...styles.card, ...styles.smHero, ...(featured === "popular" ? styles.smHeroAlt : {}) } : styles.card,
-				title: `${item.title}${author ? ` · @${author}` : ""}`,
-			}, [
-				// The clickable surface. It is a `div role=button` rather than a
-				// `<button>`: HTML forbids interactive content inside a button,
-				// and that nesting is what once made the card's own links race
-				// its click handler and "not go anywhere". Everything a click
-				// can act on stops propagation; keyboard activation belongs only to
-				// the focused body, leaving nested links and buttons their native action.
-				createElement("div", {
-					key: "body", style: styles.cardBody, role: "button", tabIndex: 0,
-					onClick: () => onOpen(item),
-					onKeyDown: (e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onOpen(item); } },
-				}, [
-					featured ? createElement("div", { key: "eyebrow", style: { ...styles.smEyebrow, color: featured === "popular" ? "#a07a3a" : "var(--omkt-accent-ink, #3d5fd9)" } }, featured === "official" ? "★ 官方精选" : "热门连接器") : null,
-					// 1. header: identity on the left, the two things you came
-					//    for on the right.
-					createElement("div", { key: "hd", style: styles.cardHd }, [
-						createElement("span", { key: "avatar", style: { ...styles.skillAvatar, background: MCP_SOFT, color: "#3d5fd9", borderColor: "#d5e0f8" }, "aria-hidden": true }, skillInitial(item.title)),
-						createElement("div", { key: "left", style: styles.cardLeft }, [
-							// name row: the title is the anchor; the source tag
-							// names where the entry came from, because five
-							// catalogs feed one list.
-							createElement("div", { key: "head", style: styles.cardHead }, [
-								titleHref
-						? createElement("a", {
-							key: "t", className: "omkt-title", href: titleHref,
-							target: "_blank", rel: "noreferrer", title: titleHref,
-							style: featured ? { ...styles.cardName, fontSize: 17, fontWeight: 700 } : styles.cardName,
-							onClick: (e) => { e.stopPropagation(); openExternal(e, titleHref); },
-						}, item.title)
-						: createElement("span", { key: "t", "data-omkt": "card-title", style: featured ? { ...styles.cardName, fontSize: 17, fontWeight: 700 } : styles.cardName, title: item.title }, item.title),
-					// The repository, one click from the card itself. Only for
-					// entries whose repository really is a GitHub repo: for
-					// Smithery that field points at its own listing, which is
-					// not what a GitHub mark promises.
-					repo && item.repository
-						? createElement("a", {
-							key: "gh", className: "omkt-gh", href: item.repository,
-							target: "_blank", rel: "noreferrer", title: `GitHub 仓库：${repo}`,
-							"aria-label": `GitHub 仓库：${repo}`, style: styles.ghIcon,
-							onClick: (e) => { e.stopPropagation(); openExternal(e, item.repository); },
-						}, githubMark(14))
-						: null,
-					item.verified ? createElement("span", { key: "v", style: styles.verified, title: "上游已认证" }, "✓ 认证") : null,
-					item.official ? createElement("span", { key: "o", style: styles.badge }, "官方") : null,
-					item.installed ? createElement("span", { key: "inst", style: styles.installed }, "已安装") : null,
-					// A lifecycle flag the upstream actually published. Only
-					// `deprecated` is stated; an absent status is NOT shown as
-					// active, because for two of the five sources nobody scanned.
-					item.deprecated
-						? createElement("span", { key: "dep", style: styles.deprecated, title: item.statusMessage || "上游已标记为废弃" }, "已废弃")
-						: null,
-				].filter(Boolean)),
-
-				// 2. author row — and, when the source published one, the
-				//    version. It rides here rather than in the stat row because
-				//    "whose is this and which build" is one thought.
-				createElement("div", { key: "author", style: styles.cardAuthor }, [
-
-					// v4 writes the author bare: the avatar already says
-					// "account", and an @ on every card is one glyph of noise.
-					createElement("span", { key: "n", title: author ? `@${author}` : undefined },
-						author || "作者未标注"),
-					item.version
-						? [
-							createElement("span", { key: "d", style: styles.cardDot }, "·"),
-							createElement("span", { key: "v", style: styles.cardVer, title: `版本 ${item.version}` },
-								`v${item.version}`),
-						]
-						: null,
-				].filter(Boolean)),
-
-				// 3. stat row — every number is a link when it has one, so a
-				//    figure is never a dead end. Separators are part of the list
-				//    rather than CSS margins, so the row can wrap without the
-				//    dots ending up stranded at a line start. The catalogue's own
-				//    name ends the row: it answers "where did this come from",
-				//    which is a footnote, not a badge.
-
-					]), // left column (name / author / stats)
-					// Right column: the primary action plus a shortcut into the
-					// detail panel. Buttons, not links — nothing navigates here.
-					createElement("div", { key: "cta", style: styles.cardCta }, [
-						item.installed
-							? createElement("span", { key: "i", style: styles.installed }, "已安装")
-							: item.installable
-								? createElement("button", {
-									key: "install", type: "button", className: "omkt-btn omkt-btn-primary",
-									style: { ...styles.button, ...styles.accent, padding: "5px 10px", fontSize: 12, fontWeight: 600 },
-									disabled: busy || installing,
-									onClick: (e) => { e.stopPropagation(); onInstall(item); },
-								}, installing ? "处理中…" : item.deprecated ? "仍要安装" : "安装")
-								: createElement("span", { key: "m", style: styles.hint }, "需手动配置"),
-						createElement("button", {
-							key: "detail", type: "button", className: "omkt-btn omkt-btn-text",
-							style: { ...styles.textBtn, fontSize: 12 },
-							onClick: (e) => { e.stopPropagation(); onOpen(item); },
-						}, "详情"),
-					]),
-				]), // header
-
-				// 4. description, clamped to three lines so every card in a
-				//    column keeps the same silhouette. `data-omkt` is the hook
-				//    the frame probe in tools/shot.mjs uses to inject an
-				//    unbreakable URL and prove the column still fits.
-				createElement("div", { key: "desc", "data-omkt": "desc", style: styles.desc },
-					plainText(description).replace(/\s+/g, " ").trim().slice(0, 160)),
-
-				// The upstream's own words, when it deprecated this entry.
-				item.deprecated && item.statusMessage
-					? createElement("div", { key: "why", style: styles.warnLine }, `上游说明：${item.statusMessage}`)
-					: null,
-
-				// Repository screenshots are shown in the detail drawer; v5 cards stay compact.
-
-				// 6. the compatibility chip: what kind of thing this is, in the
-				//    shape v4 gives it. The command it would run is one hover
-				//    away and spelled out in the detail panel.
-				createElement("div", { key: "compat", style: styles.compat },
-					createElement("code", {
-						key: "c", style: styles.compatCode,
-						title: [transport, installCmd].filter(Boolean).join(" · ") || "该来源未公布安装方式",
-					}, transportChip)),
-				]), // body (clickable surface)
-
-				// 7. footer: what this entry *is* and how it installs, then the
-				//    actions a card can decide by itself on the right. It sits
-				//    OUTSIDE the role=button body so starring or ⋯ never also
-				//    opens the detail panel.
-				(() => {
-					const cells = [
-						typeof item.installs === "number"
-							? createElement("span", { key: "in", style: styles.stat, title: item.installsLabel || "使用量" }, [
-								createElement("span", { key: "g" }, "↓"),
-								createElement("b", { key: "n", style: styles.statB }, compact(item.installs)),
-								item.installsLabel
-									? createElement("span", { key: "l", style: styles.statSep }, ` ${item.installsLabel}`)
-									: null,
-							])
-							: null,
-						// Installs made from this panel. A *second* series on
-						// purpose: the figure above is the source's own count
-						// (Smithery's 次启动 / Docker's 次拉取, and the three
-						// other sources publish none at all), while this one is
-						// this machine's. Only the 使用量 ordering adds them up.
-						item.localInstalls > 0
-							? createElement("span", {
-								key: "li", style: styles.stat,
-								title: item.localInstallLastAt
-									? `从本市场安装过 ${item.localInstalls} 次（最近 ${item.localInstallLastAt.slice(0, 10)}）`
-									: `从本市场安装过 ${item.localInstalls} 次`,
-							}, [
-								createElement("span", { key: "g" }, "⤓"),
-								createElement("b", { key: "n", style: styles.statB }, String(item.localInstalls)),
-								createElement("span", { key: "l", style: styles.statSep }, " 本市场"),
-							])
-							: null,
-						// Under 使用量 ordering an entry with no number at all is
-						// not "zero uses": no source published one, and this
-						// machine never installed it from this market. It sorts
-						// last (see compareMarket) — which looks arbitrary unless
-						// the card says why it is there.
-						usageSort && !usageOf(item).hasData
-							? createElement("span", {
-								key: "nouse", style: { ...styles.stat, color: T.text3 },
-								title: "这个来源没有发布使用量，本机也没有从本市场安装过它：按使用量排序时它排在后面（回头按质量分比较）",
-							}, "无使用量数据")
-							: null,
-						typeof stars === "number"
-							? createElement("a", {
-								key: "st", className: "omkt-link", style: styles.stat, href: item.repository || "#",
-								target: "_blank", rel: "noreferrer", title: "GitHub Star",
-								onClick: (e) => { e.stopPropagation(); openExternal(e, item.repository); },
-							}, [
-								createElement("span", { key: "g" }, "★"),
-								createElement("b", { key: "n", style: styles.statB }, compact(stars)),
-							])
-							: null,
-						// Fork / issue / language come from the enrichment pass when it
-						// ran; the GitHub search source already carries them on the row
-						// itself, so fall back to those instead of showing nothing.
-						typeof (enriched?.forks ?? item.forks) === "number"
-							? createElement("span", { key: "fk", style: styles.stat, title: "GitHub Fork" }, [
-								createElement("span", { key: "g" }, "⑂"),
-								createElement("b", { key: "n", style: styles.statB }, compact(enriched?.forks ?? item.forks)),
-							])
-							: null,
-						enriched?.license
-							? createElement("span", { key: "lic", style: styles.stat, title: "开源许可证" }, enriched.license)
-							: null,
-						updatedAt
-							? createElement("span", { key: "up", style: styles.stat,
-								// GitHub's own push time. It shares no clock with
-								// 「列表读取于」 in the market's meta line, so the two
-								// must not both read 「更新于」.
-								title: "上游更新时间：仓库最近一次 push（来源自己的时间），不是本面板读取目录的时间" },
-								`上游更新于 ${String(updatedAt).slice(0, 10)}`)
-							: null,
-						createElement("span", { key: "src", style: styles.stat },
-							SOURCE_LABELS[`catalog:${item.source}`] ?? item.source),
-					].filter(Boolean);
-					if (!cells.length) return null;
-					return createElement("div", { key: "stats", style: styles.statRow },
-						cells.flatMap((cell, i) => (i === 0 ? [cell] : [
-							createElement("span", { key: `s${i}`, style: styles.statSep }, "·"),
-							cell,
-						])));
-				})(),
-				createElement("div", { key: "ft", style: styles.cardFt }, [
-					createElement("div", { key: "tags", style: { ...styles.tags, flex: 1, minWidth: 0 } }, [
-						rank
-							? createElement("span", {
-								key: "rank", style: { ...styles.tag, ...styles.rank },
-								title: `当前排序下的名次：第 ${rank} 名`,
-							}, `#${rank}`)
-							: null,
-						createElement("span", {
-							key: "group", style: { ...styles.tag, ...styles.tagKind },
-							// A group read out of the entry's own words is labelled as
-							// such: the two registries publish no category, and a
-							// guess must never be presented as the source's fact.
-							title: item.groupSource === "inferred"
-								? `分类（按名称与描述推断）：${groupChip}`
-								: groupTitle
-									? `分类：${groupTitle}`
-									: "分类：该来源未发布功能分类，同上方的「未分类」筛选",
-						}, groupChipText),
-						createElement("span", {
-							key: "install", style: { ...styles.tag, ...styles.tagKind },
-							title: `安装方式：${installTitle}`,
-						}, installChip),
-						...tags.map((t) => createElement("span", {
-							key: t, style: styles.tag, title: `上游标签：${t}`,
-						}, t)),
-					].filter(Boolean)),
-					createElement("span", { key: "acts", style: { display: "flex", gap: 4, flexShrink: 0 } }, [
-						createElement("button", {
-							key: "fav", type: "button",
-							className: `omkt-icon${item.favorite ? " omkt-icon-on" : ""}`,
-							style: styles.iconBtn,
-							title: item.favorite ? "取消收藏" : "收藏",
-							"aria-pressed": item.favorite ? "true" : "false",
-							onClick: (e) => { e.stopPropagation(); onToggleFavorite(item); },
-						}, item.favorite ? "♥" : "♡"),
-						createElement("button", {
-							key: "more", type: "button", className: "omkt-icon",
-							style: styles.iconBtn, title: "查看详情",
-							onClick: (e) => { e.stopPropagation(); onOpen(item); },
-						}, "⋯"),
-					]),
-				]),
-			]);
-		}
-
-
-		/** `owner/repo` for a GitHub-backed card, else null (enrichment key). */
+		/** GitHub enrichment key; non-GitHub directory links have no repo key. */
 		function repoKeyOf(item) {
-			const m = String(item?.repository ?? "").match(/^https?:\/\/(?:www\.)?github\.com\/([^/\s]+)\/([^/\s#?]+)/i);
-			return m ? `${m[1]}/${m[2].replace(/\.git$/i, "")}` : null;
+			const match = String(item?.repository ?? "").match(/^https?:\/\/(?:www\.)?github\.com\/([^/\s]+)\/([^/\s#?]+)/i);
+			return match ? `${match[1]}/${match[2].replace(/\.git$/i, "")}` : null;
 		}
 
 		/**
@@ -2966,7 +2593,9 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, fea
 		function starCountOf(item, stats) {
 			const repo = repoKeyOf(item);
 			const enriched = repo ? stats?.[repo] : null;
-			return enriched?.stars ?? item.stars;
+            // A catalog/index read time is not an individual Star measurement.
+            // Keep a directly measured value until its next measurement succeeds.
+            return enriched?.stars ?? item.stars;
 		}
 
 		/**
@@ -3155,28 +2784,62 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, fea
 		 * the same colour across renders and across page opens — a random hue
 		 * per render would make the mosaic shimmer for no reason.
 		 */
-		function Avatar({ item, author, src, size = 36 }) {
-			const [failed, setFailed] = useState(false);
-			const label = String(item.title || author || "?").replace(/[^A-Za-z0-9\u4e00-\u9fa5]/g, "").slice(0, 1).toUpperCase() || "?";
+		const failedRemoteIcons = new Map();
+		function avatarSource(value) {
+			if (typeof value !== "string") return null;
+			if (value.length < 88000 && /^data:image\/(?:png|webp|jpeg|gif);base64,[A-Za-z0-9+/]+={0,2}$/.test(value)) return value;
+			if (value.length > 2048 || !/^https:\/\//i.test(value)) return null;
+			try {
+				const url = new URL(value);
+				if (url.username || url.password || url.port || url.hash) return null;
+				// Only dedicated GitHub avatar routes. Catalog metadata cannot make
+				// the desktop contact an arbitrary publisher domain or path.
+				if (url.hostname === "github.com" && /^\/[a-z0-9][a-z0-9-]{0,38}\.png$/i.test(url.pathname) && /^\?size=\d{1,3}$/.test(url.search)) return url.href;
+				if (url.hostname === "avatars.githubusercontent.com" && /^\/(?:u|in)\/\d+$/.test(url.pathname) && /^(?:\?(?:(?:v|s|size)=\d{1,4})(?:&(?:v|s|size)=\d{1,4})*)?$/.test(url.search)) return url.href;
+				return null;
+			} catch {
+				return null;
+			}
+		}
+
+		function Avatar({ item, author, src, size = 36, fallback = null, artwork, repositoryAvatar }) {
+			const [failed, setFailed] = useState(() => new Set());
+			const name = item.title || item.name || author || "?";
+			const label = (Array.from(String(name).match(/[\p{L}\p{N}]/u)?.[0] ?? "")[0] || "·").toUpperCase();
 			const box = {
 				width: size, height: size, borderRadius: Math.max(6, Math.round(size / 4)),
-				flexShrink: 0, objectFit: "cover", background: "rgba(128,128,128,0.15)",
+				flexShrink: 0, objectFit: "contain", background: "rgba(128,128,128,0.08)",
 			};
-			if (src && !failed) {
+			const secondary = Array.isArray(item.iconCandidates) ? item.iconCandidates.slice(0, 3) : [];
+			const candidates = [...new Set([artwork, src, repositoryAvatar, ...secondary].map(avatarSource).filter(Boolean))];
+			const imageSrc = candidates.find(value => !failed.has(value) && (failedRemoteIcons.get(value) ?? 0) <= Date.now());
+			if (imageSrc) {
 				return createElement("img", {
-					src, alt: "", width: size, height: size, loading: "lazy",
-					onError: () => setFailed(true), style: box,
+					key: imageSrc, src: imageSrc, title: item.iconIssue || undefined, alt: "", width: size, height: size, loading: "lazy", decoding: "async",
+					referrerPolicy: "no-referrer", crossOrigin: imageSrc.startsWith("https:") ? "anonymous" : undefined,
+					onError: () => {
+						if (imageSrc.startsWith("https:")) {
+							if (failedRemoteIcons.size >= 512) failedRemoteIcons.delete(failedRemoteIcons.keys().next().value);
+							failedRemoteIcons.set(imageSrc, Date.now() + 15 * 60_000);
+						}
+						console.warn("[overall-mcp] 图标来源加载失败", name, imageSrc.startsWith("https:") ? new URL(imageSrc).hostname : "local");
+						setFailed(previous => new Set([...previous, imageSrc]));
+					}, style: box,
 				});
 			}
+			const note = item.iconIssue || (candidates.length ? "来源图标加载失败" : src || secondary.length ? "来源图标不在自动加载的信任范围内" : "发布方未提供可用图标");
+			if (fallback) return createElement("span", { title: note, style: { display: "inline-flex", flexShrink: 0 } }, fallback);
 			let hash = 0;
-			for (const ch of String(item.title ?? "")) hash = (hash * 31 + ch.codePointAt(0)) % 360;
+			for (const ch of String(name)) hash = (hash * 31 + ch.codePointAt(0)) % 360;
 			return createElement("div", {
+				"aria-hidden": true,
+				title: note,
 				style: {
 					...box, display: "grid", placeItems: "center",
 					fontWeight: 700, fontSize: Math.round(size * 0.42), color: "#fff",
 					background: `hsl(${hash} 52% 46%)`,
 				},
-			}, label);
+			}, item.emoji || label);
 		}
 
 		// One row of the registry, addressed by position. Two rows can carry the
@@ -3383,14 +3046,14 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, fea
 			const titleHref = item.repository || homepage || registryPage || null;
 
 			return createElement("div", {
-				style: styles.scrim,
+				style: styles.overlay,
 				onClick: (e) => { if (e.target === e.currentTarget) onClose(); },
 			}, [
-				createElement("div", { key: "panel", role: "dialog", "aria-modal": true, "aria-label": `MCP ${item.title}`, className: "omkt-panel omkt-drawer", style: { ...styles.detailPanel, ...styles.drawer, padding: "16px 18px 22px", borderRadius: 0, overflowY: "auto" } }, [
+				createElement("div", { key: "panel", className: "omkt-panel", style: styles.detailPanel, role: "dialog", "aria-modal": true, "aria-label": `${item.title} 详情` }, [
 					// ---- header: identity + provenance, and the way out ----
 					createElement("div", { key: "head", style: styles.detailHead }, [
 						createElement("div", { key: "id", style: styles.detailIdentity }, [
-							createElement(Avatar, { key: "av", item, author, size: 44, src: item.icon ?? enriched?.avatar }),
+							createElement(ProductIcon, { key: "av", item, size: 44, repositoryAvatar: enriched?.avatar }),
 							createElement("div", { key: "t", style: { minWidth: 0, flex: 1 } }, [
 								// v4 puts the badges beside the name, not pushed to
 								// the far edge: they qualify the title, and the
@@ -3689,71 +3352,32 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, fea
 			return /^v/i.test(text) ? text : `v${text}`;
 		}
 
-		const skillAnchor = (skill) => `omkt-skill-${encodeURIComponent(skill.id ?? `${skill.root}:${skill.dir ?? skill.name}`)}`;
+        function RegistryColumns({ skill = false }) {
+            const labels = skill ? ["名称与用途", "来源", "文件", "操作"] : ["连接器", "来源", "状态", "启用", "操作"];
+            return createElement("div", { className: (skill ? "omkt-skill-columns" : "omkt-reg-columns") + " omkt-reg-head" }, labels.map((label, index) => createElement("span", { key: label, className: index === 1 ? skill ? "omkt-listmeta" : "omkt-reg-source" : index === 2 ? skill ? "omkt-listmeta" : "omkt-reg-status" : undefined }, label)));
+        }
 
-		function SkillCard({ skill, busy, onOpen, onReveal, onRemove }) {
-			const meta = [
-				Number.isFinite(skill.files) ? `${skill.files} 个文件` : "",
-				skill.bytes ? byteText(skill.bytes) : "",
-				skill.modifiedAt ? shortDay(skill.modifiedAt) : "",
-			].filter(Boolean).join(" · ");
-			const origin = String(skill.origin ?? "").trim();
-			return createElement("div", { id: skillAnchor(skill), className: "omkt-skillcard", style: styles.skillCard, role: "button", tabIndex: 0,
-				onClick: () => onOpen(skill),
-				onKeyDown: (event) => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onOpen(skill); } },
-			}, [
-				createElement("div", { key: "a", style: styles.skillAvatar }, skillInitial(skill.name)),
-				createElement("div", { key: "m", style: styles.skillMain }, [
-					createElement("div", { key: "h", style: styles.skillHead }, [
-						createElement("span", { key: "n", style: styles.skillName, title: skill.name }, skill.name),
-						skill.version
-							? createElement("span", { key: "v", style: styles.skillVer }, versionText(skill.version))
-							: null,
-					]),
-					skill.description
-						? createElement("div", { key: "d", style: styles.skillDesc }, skill.description)
-						: null,
-					origin
-						? createElement("div", { key: "o", style: styles.skillTags }, [
-							createElement("span", {
-								key: "b",
-								style: styles.skillBadge,
-								// Long contributor strings are real (`Health1 Super
-								// Speciality Hospitals — contributed by …`), so the
-								// badge keeps the first clause and the title keeps all.
-								title: origin,
-							}, origin.length > 16 ? `${origin.slice(0, 15)}…` : origin),
-						])
-						: null,
-					skill.dir ? createElement("code", { key: "path", style: styles.skillMeta, title: skill.dir }, skill.dir) : null,
-					createElement("div", { key: "x", style: styles.skillMeta, title: skill.dir ?? "" },
-						meta || skill.dir || ""),
-				]),
-				createElement("div", { key: "b", style: styles.skillActs, onClick: (event) => event.stopPropagation() }, [
-					createElement("button", {
-						key: "o", type: "button", className: "omkt-btn omkt-btn-text",
-						style: styles.sourceMiniBtn, onClick: () => onOpen(skill),
-					}, "查看"),
-					createElement("button", {
-						key: "r", type: "button", className: "omkt-btn omkt-btn-text",
-						style: styles.sourceMiniBtn, disabled: busy,
-						title: skill.dir ? `在文件管理器里打开 ${skill.dir}` : undefined,
-						onClick: () => onReveal(skill),
-					}, "打开目录"),
-					// Named 移除 rather than 删除 on purpose: the host moves the
-					// folder into `skills-trash/`, it does not delete it, and the
-					// button should not promise something it cannot do.
-					onRemove
-						? createElement("button", {
-							key: "x", type: "button", className: "omkt-btn omkt-btn-text",
-							style: { ...styles.sourceMiniBtn, ...styles.dangerBtn }, disabled: busy,
-							title: skill.dir ? `把 ${skill.dir} 移到回收目录` : undefined,
-							onClick: () => onRemove(skill),
-						}, "移除")
-						: null,
-				]),
-			]);
-		}
+        function SkillCard({ skill, busy, onOpen, onReveal, onRemove, rootLabel }) {
+            const meta = [Number.isFinite(skill.files) ? `${skill.files} 个文件` : "", byteText(skill.bytes)].filter(Boolean).join(" · ");
+            return createElement("div", { className: "omkt-skillcard omkt-listrow omkt-skill-columns", style: styles.skillCard }, [
+                createElement("div", { key: "identity", style: { display: "flex", gap: 12, alignItems: "center", minWidth: 0 } }, [
+                createElement(SkillIcon, { key: "icon", item: skill, size: 36, initial: true }),
+                createElement("div", { key: "main", style: styles.skillMain }, [
+                    createElement("button", { key: "name", type: "button", style: { ...styles.textBtn, ...styles.skillName, padding: 0, textAlign: "left" }, onClick: () => onOpen(skill) }, skill.name),
+                    skill.description ? createElement("div", { key: "desc", style: styles.skillDesc, title: skill.description }, skill.description) : null,
+                ]),
+                ]),
+                createElement("span", { key: "source", className: "omkt-listmeta", style: { ...styles.listMeta, fontSize: 14 } }, createElement("span", { style: { padding: "3px 9px", borderRadius: 6, background: MCP_SOFT, display: "inline-block" } }, rootLabel || skill.origin || skill.root)),
+                createElement("span", { key: "files", className: "omkt-listmeta", style: styles.listMeta, title: skill.dir }, meta),
+                createElement("div", { key: "actions", style: styles.skillActs }, [
+                    createElement("button", { key: "open", type: "button", className: "omkt-btn omkt-btn-text", style: { ...styles.textBtn, color: T.brand }, onClick: () => onOpen(skill) }, "查看"),
+                    createElement(ActionMenu, { key: "more", label: `${skill.name} 更多操作` }, [
+                        createElement("button", { key: "reveal", type: "button", style: styles.textBtn, disabled: busy, onClick: () => onReveal(skill) }, "打开目录"),
+                        onRemove ? createElement("button", { key: "remove", type: "button", style: { ...styles.textBtn, color: T.red }, disabled: busy, onClick: () => onRemove(skill) }, "移除") : null,
+                    ]),
+                ]),
+            ]);
+        }
 
 		function SkillDrawer({ skill, rootLabel, onClose, onReveal, onRemove }) {
 			const [closing, setClosing] = useState(false);
@@ -3770,21 +3394,16 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, fea
 				: null);
 			const size = Number.isFinite(skill.files) ? `${skill.files} 个 · ${byteText(skill.bytes)}` : "";
 			const sub = [rootLabel, skill.origin, size].filter(Boolean).join(" · ");
-			useEffect(() => {
-				const onKey = (event) => { if (event.key === "Escape") onClose(); };
-				window.addEventListener("keydown", onKey);
-				return () => window.removeEventListener("keydown", onKey);
-			}, [onClose]);
 			const dirName = typeof skill.dir === "string"
 				? skill.dir.split(/[\\/]/).filter(Boolean).pop() || ""
 				: "";
 			return createElement("div", {
-				style: styles.scrim,
+				style: styles.overlay,
 				onClick: (event) => { if (event.target === event.currentTarget) close(); },
 			}, [
 				createElement("div", {
-					key: "c", className: "omkt-panel omkt-drawer", style: { ...styles.detailPanel, ...styles.drawer, padding: "16px 18px 22px", borderRadius: 0, overflowY: "auto" },
-					role: "dialog", "aria-modal": true, "aria-label": `skill ${skill.name}`,
+					key: "c", className: "omkt-panel", style: styles.detailPanel,
+					role: "dialog", "aria-label": `skill ${skill.name}`,
 				}, [
 					// The head is the MCP detail head: portrait tile, name, badges,
 					// then the one line that says where the folder lives. Both cards
@@ -3814,6 +3433,7 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, fea
 						row("许可", skill.license),
 						row("来源", skill.origin),
 						row("目录", skill.dir),
+						row("图标读取问题", skill.iconIssue),
 						row("主页", skill.homepage),
 						row("更新", skill.modifiedAt ? String(skill.modifiedAt).slice(0, 10) : ""),
 					]),
@@ -3863,8 +3483,8 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, fea
 		 */
 		function SkillMarketCard({ item, installed, installing, onInstall }) {
 			const name = item.title ?? item.name ?? "未命名";
-			const downloads = Number(item.downloads);
-			const stars = Number(item.stars);
+			const downloads = typeof item.downloads === "number" ? item.downloads : NaN;
+			const stars = typeof item.stars === "number" ? item.stars : NaN;
 			const installable = item.installable !== false;
 			const action = installed
 				? createElement("span", { key: "i", style: styles.smBadge }, "已安装")
@@ -3880,34 +3500,27 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, fea
 					}, installing ? "安装中…" : "安装");
 			return createElement("div", { className: "omkt-skillcard", style: styles.smCard }, [
 				createElement("div", { key: "t", style: styles.smTop }, [
-					createElement("span", { key: "a", style: styles.skillAvatar }, skillInitial(name)),
+					createElement(SkillIcon, { key: "a", item, size: 48 }),
 					createElement("div", { key: "m", style: styles.smBox }, [
 						createElement("div", { key: "n", style: styles.smNm, title: name }, name),
 						createElement("div", { key: "s", style: styles.smSrc }, [
-							createElement("span", { key: "p", style: { ...styles.smSrcPill, ...skillSourceTint(item.source) } },
-								skillSourceOrigin(item.source)),
-							[item.version ? versionText(item.version) : "", item.category ? item.category : ""]
-								.filter(Boolean).map((bit) => " · " + bit).join(""),
+							createElement("span", { key: "p", title: [skillSourceOrigin(item.source), versionText(item.version), item.category].filter(Boolean).join(" · ") }, item.author || skillSourceOrigin(item.source)),
 						]),
 					]),
-					createElement("div", { key: "x", style: styles.smAct }, [action]),
+                    createElement(ActionMenu, { key: "detail", label: `查看 ${name} 详情` }, [
+                        createElement("strong", { key: "name", style: { overflowWrap: "anywhere", maxWidth: 280 } }, name),
+                        createElement("div", { key: "about", style: { maxWidth: 280, fontSize: 14, color: T.text2, overflowWrap: "anywhere" } }, item.summary || "来源未提供描述"),
+                        createElement("div", { key: "facts", style: { fontSize: 13, color: T.text3 } }, [skillSourceOrigin(item.source), versionText(item.version)].filter(Boolean).join(" · ")),
+                    ]),
 				]),
 				createElement("p", { key: "d", style: styles.smDesc }, item.summary || "这个来源没给描述。"),
 				createElement("div", { key: "f", style: styles.smFoot }, [
-					Number.isFinite(downloads) && downloads > 0
-						? createElement("span", { key: "n", style: styles.smN }, "↓ " + compactCount(downloads) + " 次下载")
-						: null,
-					Number.isFinite(stars) && stars > 0
-						? createElement("span", { key: "st", style: styles.smN }, "★ " + compactCount(stars))
-						: null,
-				].filter(Boolean).length ? [
-					Number.isFinite(downloads) && downloads > 0
-						? createElement("span", { key: "n", style: styles.smN }, "↓ " + compactCount(downloads) + " 次下载")
-						: null,
-					Number.isFinite(stars) && stars > 0
-						? createElement("span", { key: "st", style: styles.smN }, "★ " + compactCount(stars))
-						: null,
-				] : ["—"]),
+                    createElement("span", { key: "category", style: styles.tag }, SKILL_CATEGORY_LABELS[skillCategoryOf(item)]),
+                    createElement("span", { key: "source", style: styles.smN, title: skillSourceOrigin(item.source) }, skillSourceLabel(item.source)),
+                    Number.isFinite(downloads) && downloads >= 0 ? createElement("span", { key: "downloads", style: styles.smN, title: item.metrics?.error || (item.metrics?.at ? `统计时间 ${new Date(item.metrics.at).toLocaleString()}` : "收录时的统计") }, `↓ ${compactCount(downloads)} 次下载`) : null,
+                    !(Number.isFinite(downloads) && downloads >= 0) && Number.isFinite(stars) && stars >= 0 ? createElement("span", { key: "stars", style: styles.smN, title: item.metrics?.error || (item.metrics?.at ? `统计时间 ${new Date(item.metrics.at).toLocaleString()}` : "收录时的统计") }, `★ ${compactCount(stars)}`) : null,
+                    createElement("span", { key: "action", style: { marginLeft: "auto" } }, action),
+                ]),
 			]);
 		}
 
@@ -3915,14 +3528,41 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, fea
 		// 四个上游里只有三个会报总数（ClawHub 的 /api/v1/skills 是游标分页，
 		// 只有 items + nextCursor），所以「N 个可用 Skill」只在四家都报数时才敢写；
 		// 否则退回「本页列了几条」，并用 + 标出哪几个源是按页给的。
-		const SKILL_SRC_TINT = {
-			official: { background: "#eef1fe", color: "#3d5fd9", borderColor: "#dbe3fb" },
-			skillhub: { background: "#f3effd", color: "#6b5bd2", borderColor: "#e6ddfa" },
-			clawhub: { background: "#f3f4f6", color: "#5f6672", borderColor: "#e8eaee" },
-			github: { background: "#fdf2e8", color: "#9a5a24", borderColor: "#f6e3cf" },
-		};
-		const skillSourceTint = (id) => SKILL_SRC_TINT[id] ?? SKILL_SRC_TINT.clawhub;
+        const skillSourceTint = () => ({ background: T.soft, color: T.text3, borderColor: T.line2 });
+
 		const skillSourceLabel = (id) => SKILL_MARKET_LABELS[id] ?? id;
+        // Interpret the error for readers without changing the stored diagnostic.
+        // In particular, a plain 403 is not evidence of rate limiting.
+        function skillSourceErrorMessage(row) {
+            const raw = String(row?.error ?? "");
+            const github = row?.id === "official" || row?.id === "github";
+            if (github && /secondary rate limit|abuse detection/i.test(raw)) {
+                return "GitHub 请求过于频繁，已被暂时限制。请暂停刷新，稍后再试。";
+            }
+            if (github && /API rate limit exceeded/i.test(raw)) {
+                return "GitHub 的访问次数已用完。请稍后重试；也可在「MCP → 已注册 → GitHub 访问」中检测本机登录或配置 Token。";
+            }
+            if (/\b401\b|bad credentials/i.test(raw)) {
+                return "身份验证未通过。请检查该来源的登录状态或访问凭据。";
+            }
+            if (/\b429\b|too many requests|rate limit/i.test(raw)) {
+                return "请求过于频繁，来源暂时限制了访问。请稍后再试。";
+            }
+            if (/\b403\b/.test(raw)) {
+                return "来源拒绝了本次访问。请检查访问权限，或稍后重试。";
+            }
+            if (/\b5\d{2}\b/.test(raw)) {
+                return "来源服务器暂时异常，请稍后重试。";
+            }
+            if (/timeout|timed out|超时/i.test(raw)) {
+                return "连接来源超时，请检查网络后重试。";
+            }
+            if (/fetch failed|ENOTFOUND|ECONN|EAI_AGAIN|network|网络/i.test(raw)) {
+                return "暂时无法连接来源，请检查网络或代理设置后重试。";
+            }
+            return "获取技能列表失败，请稍后重试；可展开查看原始错误。";
+        }
+
 		// Where a source actually comes from. The short label above is fine inside a
 		// chip ("官方 19"); on a card the reader wants to know *which* official list.
 		const SKILL_SRC_ORIGIN = {
@@ -3950,44 +3590,7 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, fea
 			["other", "其他"],
 		];
 		const SKILL_CATEGORY_LABELS = Object.fromEntries(SKILL_CATEGORIES);
-		const SKILLHUB_CATEGORY = {
-			"dev-programming": "dev", "it-ops-security": "dev",
-			"ai-agent": "agent",
-			"office-efficiency": "office", "business-ops": "office", "professional": "office",
-			"content-creation": "content", "design-media": "content",
-			"data-analysis": "data",
-			"knowledge-management": "knowledge", "education": "knowledge",
-			"life-service": "other",
-		};
-		const SKILL_CATEGORY_WORDS = [
-			["search", ["search", "web", "browser", "crawl", "scrape", "news", "rss", "research"]],
-			["office", ["pdf", "docx", "word", "xlsx", "excel", "sheet", "slide", "pptx", "powerpoint", "office", "document", "invoice"]],
-			["content", ["image", "video", "audio", "music", "design", "art", "brand", "copy", "writing", "article", "translate", "subtitle", "poster"]],
-			["data", ["data", "analytic", "sql", "database", "chart", "metric", "statistic", "pandas", "csv"]],
-			["knowledge", ["note", "memory", "knowledge", "wiki", "obsidian", "notion", "learning"]],
-			["agent", ["agent", "automation", "workflow", "mcp", "llm", "prompt", "orchestrat", "schedul"]],
-			["dev", ["code", "coding", "develop", "git", "github", "typescript", "python", "rust", "java", "api", "cli", "debug", "deploy", "docker", "refactor", "security"]],
-		];
-		/**
-		 * The bucket one listing belongs to.
-		 *
-		 * Order matters: a real category beats tags, tags beat keywords, and a
-		 * listing we cannot place says so ("其他") instead of guessing.
-		 */
-		const skillCategoryOf = (item) => {
-			const id = item?.source;
-			if (id === "skillhub" && item.category) {
-				const mapped = SKILLHUB_CATEGORY[String(item.category).toLowerCase()];
-				if (mapped) return mapped;
-			}
-			const haystack = [(Array.isArray(item?.topics) ? item.topics.join(" ") : ""), item?.name, item?.summary]
-				.filter(Boolean).join(" ").toLowerCase();
-			if (!haystack) return "other";
-			for (const [bucket, words] of SKILL_CATEGORY_WORDS) {
-				if (words.some((word) => haystack.includes(word))) return bucket;
-			}
-			return "other";
-		};
+		const skillCategoryOf = item => Object.hasOwn(SKILL_CATEGORY_LABELS, item?.marketCategory) ? item.marketCategory : "other";
 		/**
 		 * One source's count, and whether it is a real total.
 		 *
@@ -3996,7 +3599,7 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, fea
 		 */
 		function skillMarketSourceSize(row) {
 			if (!row) return { text: "?", exact: false };
-			if (row.error) return { text: "取不到", exact: false };
+			if (row.error) return { text: "暂不可用", exact: false };
 			// The upstream total and our own row count are two facts, not one:
 			// `total` is the population (when the source publishes it), `indexed`
 			// is what the local index holds. Printing the second as the first is
@@ -4037,43 +3640,26 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, fea
 		};
 
 		/**
-		 * The two wide cards at the top: one official pick, one most-downloaded
-		 * pick from the rest. Both are real rows from the same list, not a second
+		 * The wide cards highlight the first two ranked rows from the same list, not a second
 		 * request — the tab has one budget and this spends no extra.
 		 */
-		function SkillMarketHero({ item, alt, installed, installing, onInstall }) {
-			const name = item.title ?? item.name ?? "未命名";
-			const downloads = Number(item.downloads);
-			const bits = [];
-			const stars = Number(item.stars);
-			if (Number.isFinite(downloads) && downloads > 0) bits.push("↓ " + compactCount(downloads));
-			if (Number.isFinite(stars) && stars > 0) bits.push("★ " + compactCount(stars));
-			if (item.version) bits.push(versionText(item.version));
-			const installable = item.installable !== false;
-			return createElement("div", {
-				className: "omkt-skillhero",
-				style: alt ? { ...styles.smHero, ...styles.smHeroAlt } : styles.smHero,
-			}, [
-				createElement("div", { key: "e", style: styles.smEyebrow }, alt ? "🔥 热门" : "★ anthropics 精选"),
-				createElement("div", { key: "h", style: styles.smHTitle }, name),
-				createElement("div", { key: "d", style: styles.smHDesc }, item.summary || "这个来源没给描述。"),
-				createElement("div", { key: "f", style: styles.smHFoot }, [
-					createElement("span", { key: "p", style: { ...styles.smSrcPill, ...skillSourceTint(item.source) } },
-						skillSourceOrigin(item.source)),
-					bits.length ? createElement("span", { key: "n", style: styles.smN }, bits.join(" · ")) : null,
-					installed
-						? createElement("span", { key: "i", style: { ...styles.smBadge, marginLeft: "auto" } }, "已安装")
-						: !installable
-							? createElement("span", { key: "i", style: { ...styles.smN, marginLeft: "auto" } },
-								item.installNote ?? "只提供索引")
-							: createElement("button", {
-								key: "i", type: "button", className: "omkt-primary",
-								style: { ...styles.smallPrimary, marginLeft: "auto" },
-								disabled: installing, onClick: () => onInstall(item),
-							}, installing ? "安装中…" : "安装到本插件"),
-				]),
-			]);
-		}
+        function SkillMarketHero({ item, alt, installed, installing, onInstall }) {
+            const name = item.title ?? item.name ?? "未命名";
+            return createElement("div", { className: "omkt-skillhero", style: { ...styles.smHero, height: 128, boxSizing: "border-box" } }, [
+                createElement("div", { key: "eyebrow", style: styles.smEyebrow }, alt ? "推荐技能" : "♛ 精选技能"),
+                createElement("div", { key: "main", style: { display: "flex", gap: 14, alignItems: "center", minWidth: 0, flex: 1 } }, [
+                    createElement(SkillIcon, { key: "icon", item, size: 54 }),
+                    createElement("div", { key: "text", style: { flex: 1, minWidth: 0 } }, [
+                        createElement("div", { key: "name", style: { ...styles.smHTitle, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }, title: name }, name),
+                        createElement("div", { key: "summary", style: styles.smHDesc, title: item.summary }, item.summary || "来源未提供描述"),
+                        createElement("span", { key: "source", title: [skillSourceOrigin(item.source), item.version && `v${item.version}`].filter(Boolean).join(" · "), style: { fontSize: 14, color: T.text3, display: "flex", alignItems: "center", gap: 6 } }, [createElement(UiIcon, { key: "source-icon", name: "layers", size: 15 }), skillSourceLabel(item.source)]),
+                    ]),
+                    installed ? createElement("span", { key: "installed", style: styles.smBadge }, "已安装")
+                        : item.installable === false ? createElement("span", { key: "index", style: styles.smN, title: item.installNote }, "只提供索引")
+                            : createElement("button", { key: "install", type: "button", className: "omkt-primary", style: styles.smallPrimary, disabled: installing, onClick: () => onInstall(item) }, installing ? "安装中…" : "安装"),
+                ]),
+            ]);
+        }
 
 		/**
 		 * The Skill 市场 tab: four upstreams behind one search box.
@@ -4082,49 +3668,22 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, fea
 		 * chip instead of an empty page — that distinction is the point of asking
 		 * four places at all.
 		 */
-		function SkillMarket({ data, error, busy, query, onQuery, onSearch, onRefresh, installing, installed, onInstall, source, onSource, category, onCategory, page, pageSize, onPage, onPageSize, index, walk, walkBusy, fullSel, onFullSel, onWalk }) {
+		function SkillMarket({ data, error, busy, query, appliedQuery, onQuery, onSearch, onRefresh, installing, installed, onInstall, source, onSource, category, onCategory, page, pageSize, onPage, onPageSize, index, walk, walkBusy, fullSel, onFullSel, onWalk, sort = "default", onSort }) {
 			// Per-source slice vs full, as recorded by the walk that wrote the file.
-			const modes = (index && index.modes) || {};
+			const [indexDetailsOpen, setIndexDetailsOpen] = useState(false);
+            const modes = (index && index.modes) || {};
+            const toggleIndex = () => setIndexDetailsOpen(value => !value);
 			const totals = skillMarketTotals(data);
 			const { sources, items, sizes, exact, count } = totals;
-			// With a local index the host pages the file, so what is on screen is the
-			// page it sent and the page count comes from its `matched`. Without one
-			// this stays the client-side slicing it always was: one screen per source
-			// is all there is to slice.
-			const paging = data && data.paging && data.paging.mode === "index" ? data.paging : null;
-			const visible = category && category !== "all" ? items.filter((item) => skillCategoryOf(item) === category) : items;
-			// Counts are of what arrived, not of the whole catalogue — the same
-			// honesty the heading applies to the total.
-			const byCategory = new Map();
-			for (const item of items) {
-				const bucket = skillCategoryOf(item);
-				byCategory.set(bucket, (byCategory.get(bucket) ?? 0) + 1);
-			}
+			const paging = data?.paging;
+			const indexed = paging?.mode === "index";
 			const installedIds = Array.isArray(installed) ? installed : [];
-			const official = visible.find((item) => item.source === "official");
-			const popular = visible
-				.filter((item) => item !== official)
-				.slice()
-				.sort((a, b) => (Number(b.downloads) || 0) - (Number(a.downloads) || 0))[0];
-			// A search result page has no "★ 精选 / 🔥 热门": the two wide cards
-			// are a browsing aid, and above a filtered list they would push the
-			// matches below the fold (which is exactly how a one-row search once
-			// looked like "nothing happened").
-			const searching = String(query ?? "").trim().length > 0;
-			const heroes = searching ? [] : [official, popular].filter(Boolean);
-			const rest = visible.filter((item) => heroes.indexOf(item) < 0);
-			// When the query matched nothing anywhere, say so instead of leaving an
-			// empty page under the search box.
-			const emptySearch = searching && items.length === 0;
-			// Paged like the MCP market: one grid holding the current page and a pager
-			// under it. The page number itself lives in Section, because a component
-			// inside this tree may not own hook state (see the note on Section's
-			// market state) — here it is only math over props.
-			const pageCount = paging
-				? Math.max(1, Math.ceil((Number(paging.matched) || 0) / pageSize))
-				: Math.max(1, Math.ceil(rest.length / pageSize));
-			const safePage = paging ? Math.max(0, page) : Math.min(page, pageCount - 1);
-			const pageRows = paging ? rest : rest.slice(safePage * pageSize, safePage * pageSize + pageSize);
+			const searching = String(appliedQuery ?? "").trim().length > 0;
+			const pageCount = Math.max(1, Math.ceil((paging?.matched ?? items.length) / pageSize));
+			const safePage = paging ? Math.floor(paging.offset / paging.limit) : Math.min(page, pageCount - 1);
+			const rows = busy || error ? [] : paging ? items : items.slice(safePage * pageSize, (safePage + 1) * pageSize);
+			const heroes = safePage === 0 && !searching && category === "all" && sort !== "name" ? rows.slice(0, 2) : [];
+			const pageRows = rows.slice(heroes.length);
 			const cardFor = (item) => createElement(SkillMarketCard, {
 				key: item.id,
 				item,
@@ -4132,72 +3691,32 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, fea
 				installing: installing === item.id,
 				onInstall,
 			});
-			return createElement("div", { className: "omkt-skillpanel", style: styles.skillPanel }, [
+			return createElement("div", { className: "omkt-skillpanel", style: styles.market }, [
+                createElement(PageHeading, { key: "heading", title: "发现 Skill", hint: paging ? `${compactCount(paging.matched)} 个匹配${indexed ? " · 本地索引" : " · 实时样本"}` : data ? `${items.length} 个已列出技能` : `浏览 ${sources.length} 个技能来源`, actions: [
+                    createElement("button", { key: "manage", type: "button", style: { ...styles.textBtn, display: "inline-flex", gap: 8, alignItems: "center", color: T.brand }, disabled: Boolean(walk), "aria-expanded": indexDetailsOpen || Boolean(walk), onClick: toggleIndex }, [createElement(UiIcon, { key: "icon", name: "database" }), "管理来源"]),
+                ] }),
 				createElement("div", { key: "stick", style: styles.smSticky }, [
-				createElement("div", { key: "warn", style: styles.smHintRow }, [
-					createElement("span", { key: "c", style: styles.smHintChip }, "需重启 DSH"),
-					createElement("span", { key: "t" }, "安装默认写入本插件目录；装完后出现在「已注册 → 本插件」。"),
-				]),
-				createElement("form", {
-					key: "bar", className: "omkt-toolbar", style: styles.toolbar,
-					onSubmit: (event) => {
-						if (event && typeof event.preventDefault === "function") event.preventDefault();
-						onSearch();
-					},
-				}, [
-					createElement("div", { key: "q", className: "omkt-search", style: { ...styles.searchWrap, flex: "1 1 260px", width: "auto" } }, [
-						createElement("span", { key: "i", style: styles.searchIcon }, "⌕"),
-						createElement("input", {
-							key: "in", className: "omkt-input",
-							style: styles.searchInput,
-							value: query, placeholder: "搜索 skill 名称或用途",
-							onChange: (event) => onQuery(event.target.value),
-							"aria-label": "搜索 skill 市场",
-						}),
-					]),
-					createElement("button", { key: "go", type: "submit", className: "omkt-primary", style: styles.smallPrimary, disabled: busy }, busy ? "查询中…" : "搜索"),
-				]),
-				createElement("div", { key: "bar2", style: styles.smToolbar2 }, [
-					createElement("select", {
-						key: "src", className: "omkt-select", style: styles.select,
-						value: source || "all",
-						// No `onPage(0)` here: a source change refetches anyway, and a
-						// reset plus a refetch is two POSTs racing with the old source
-						// still in the first one.
-						onChange: (event) => onSource(event.target.value),
-						"aria-label": "按来源筛选市场",
-					}, [
-						createElement("option", { key: "all", value: "all" }, "全部来源"),
-						...sources.map((row) => createElement("option", { key: row.id, value: row.id }, skillSourceLabel(row.id))),
-					]),
-					createElement("select", {
-						key: "cat", className: "omkt-select", style: styles.select,
-						value: category || "all",
-						// 分类 filters rows already here, so it must not spend a request:
-						// `onCategory` only rewinds the page number.
-						onChange: (event) => onCategory(event.target.value),
-						"aria-label": "按分类筛选市场",
-					}, [
-						createElement("option", { key: "all", value: "all" }, "全部分类"),
-						...SKILL_CATEGORIES
-							.filter(([id]) => id === "other" || byCategory.get(id))
-							.map(([id, label]) => createElement("option", { key: id, value: id },
-								label + (byCategory.get(id) ? " " + byCategory.get(id) : ""))),
-					]),
-					createElement("button", {
-						key: "r", type: "button", className: "omkt-btn omkt-btn-outline",
-						style: { ...styles.outlineBtn, marginLeft: "auto" }, disabled: busy, onClick: onRefresh,
-					}, "刷新"),
-				]),
+                    createElement(MarketToolbar, { key: "toolbar", skill: true, query, onQuery, onSearch, busy,
+                        source: source || "all", sources: [["all", "全部来源"], ...Object.keys(SKILL_MARKET_LABELS).map(id => [id, skillSourceLabel(id)])], onSource,
+                        category: category || "all", categories: [["all", "全部分类"], ...SKILL_CATEGORIES], onCategory,
+                        sort, onSort, sorts: [["default", "热门排序（默认）"], ["name", "名称 A–Z"]], onRefresh,
+                    }),
+                    createElement("div", { key: "warn", style: { display: "flex", gap: 12, alignItems: "center", padding: "3px 8px", borderTop: `1px solid ${T.line2}`, flexWrap: "wrap", color: T.text2, fontSize: 14 } }, [
+                        createElement(UiIcon, { key: "info", name: "info", size: 16 }),
+                        createElement("span", { key: "text" }, "安装到本插件目录；重启 DSH 后在新会话中加载。"),
+                        createElement("button", { key: "coverage", type: "button", style: { ...styles.textBtn, color: T.brand, marginLeft: "auto" }, "aria-expanded": indexDetailsOpen || Boolean(walk), disabled: Boolean(walk), onClick: toggleIndex }, "来源与索引详情"),
+                    ]),
 				error ? createElement("div", { key: "e", style: styles.error }, error) : null,
-				createElement("div", { key: "s", style: styles.smStat }, [
+				createElement("details", { key: "metadata", "data-omkt": "index-details", className: "omkt-index-details", style: styles.sourceBox, open: Boolean(walk) || indexDetailsOpen }, [
+                    createElement("summary", { key: "summary", style: { cursor: walk ? "default" : "pointer", color: T.text2 }, onClick: event => { event.preventDefault(); if (!walk) setIndexDetailsOpen(false); } }, `来源与本地索引 · ${sources.length} 个来源${index?.stale ? " · 索引已过期" : ""}${walk ? " · 正在收录" : ""}`),
+                    createElement("div", { key: "s", style: { ...styles.smStat, paddingTop: 8 } }, [
 					createElement("span", { key: "n" }, !data
 						? "还没读过市场"
-						: paging
+						: indexed
 							? compactCount(Number(paging.matched) || 0) + " 行匹配（本地索引 " + compactCount(Number(paging.rows) || 0) + " 行）"
 							: exact
 								? compactCount(count) + " 个可用 Skill"
-								: count + " 个已列出（各源首屏）"),
+								: (paging?.matched ?? count) + " 个已列出（各源首屏）"),
 					// The pager's range is the fetched window, not the catalog the tab
 					// counts. Spell that out or the numbers look like a bug.
 					createElement("span", { key: "p" }, !paging && count && items.length
@@ -4218,7 +3737,7 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, fea
 								style: row.error
 									? { ...styles.smSrcPill, ...styles.marketChipBad }
 									: { ...styles.smSrcPill, ...skillSourceTint(row.id) },
-								title: row.error || (row.total
+								title: row.error ? skillSourceErrorMessage(row) : (row.total
 									? (Number.isFinite(Number(row.minStars))
 										? "上游报的总数（只算 ≥" + row.minStars + " 星的仓库）"
 										: "上游报的总数")
@@ -4280,10 +3799,19 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, fea
 							+ (fullSel.length > 1 ? " · 一次跑不完会接着续跑" : "")
 						: " · 按切片收录（点上面带圈出的来源可选全量）"),
 				]),
+                ]),
 				]),
-				busy && !items.length ? createElement("div", { key: "l", style: styles.message }, "正在问四个来源…") : null,
+				...sources.filter((row) => row.error).map((row) => createElement("div", { key: `source-error:${row.id}`, style: { ...styles.error, overflowWrap: "anywhere", margin: "6px 0" } }, [
+                    createElement("div", { key: "message", role: "alert" }, `${skillSourceLabel(row.id)}暂时无法更新：${skillSourceErrorMessage(row)}`),
+                    createElement("details", { key: "diagnostic", style: { color: T.text2, marginTop: 4 } }, [
+                        createElement("summary", { key: "summary", style: { cursor: "pointer", fontSize: 12 } }, "查看原始错误"),
+                        createElement("pre", { key: "raw", style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: 120, overflow: "auto", fontSize: 12, margin: "6px 0" } }, String(row.error)),
+                    ]),
+                ])),
+                busy ? createElement("div", { key: "l", style: styles.message }, "正在加载技能…") : null,
+                createElement("div", { key: "scroll", "data-omkt": "scroller", style: styles.marketScroll }, [
 				heroes.length
-					? createElement("div", { key: "h", className: "omkt-spotlight", style: styles.smSpotlight },
+					? createElement("div", { key: "h", style: { ...styles.smSpotlight, marginBottom: 16 } },
 						heroes.map((item, index) => createElement(SkillMarketHero, {
 							key: item.id,
 							item,
@@ -4293,43 +3821,23 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, fea
 							onInstall,
 						})))
 					: null,
-				emptySearch && !busy
+				!busy && !error && paging?.deferredSkillHub ? createElement("div", { key: "skillhub-deferred", style: styles.message }, [
+					createElement("span", { key: "text" }, `当前混排未显示 ${compactCount(paging.deferredSkillHub)} 条 SkillHub 结果。`),
+					createElement("button", { key: "view", type: "button", style: styles.textBtn, onClick: () => onSource("skillhub") }, "查看 SkillHub"),
+				]) : null,
+				data && !items.length && !busy && !error && !paging?.deferredSkillHub
 					? createElement("div", { key: "nores", style: styles.message },
-						`没有匹配「${String(query).trim()}」的 skill。四个来源都问过了；换个词，或者点「刷新」重问一次。`)
+						searching ? `没有匹配「${String(appliedQuery).trim()}」的 Skill，试试换个关键词或筛选条件。` : "当前筛选没有匹配的 Skill。")
 					: null,
-				createElement("div", { key: "g", className: "omkt-grid", style: styles.cardColumns }, pageRows.map(cardFor)),
+				createElement("div", { key: "g", className: "omkt-grid", style: styles.skillGrid }, pageRows.map(cardFor)),
+                ]),
 				// With a local index each page arrives already paged, so `rest` is
 				// never longer than one page — gating the pager on `rest.length` hid
 				// it from page 2 onwards (and after any search), making rows past
 				// the first page unreachable. Gate on "there is more than one page"
 				// instead, which is true for both the index and the live path.
-				((paging ? (Number(paging.matched) || 0) > pageSize : rest.length > pageSize) || safePage > 0)
-					? createElement("div", { key: "pg", style: styles.pager }, [
-						createElement("select", {
-							key: "size", className: "omkt-select", style: styles.select, value: pageSize,
-							"aria-label": "每页条数",
-							// `onPageSize` owns the reset; a second `onPage(0)` here
-							// fired a request of its own and both raced.
-							onChange: (event) => onPageSize(Number(event.target.value)),
-						}, [20, 50, 100].map((n) => createElement("option", { key: n, value: n }, "每页 " + n + " 条"))),
-						createElement("span", { key: "sp", style: styles.spacer }),
-						createElement("button", {
-							key: "pv", type: "button", style: styles.button, disabled: safePage === 0,
-							onClick: () => onPage(safePage - 1),
-						}, "‹ 上一页"),
-						createElement("span", { key: "info", style: styles.meta }, safePage + 1 + " / " + pageCount),
-						createElement("button", {
-							key: "nx", type: "button", style: styles.button, disabled: safePage >= pageCount - 1,
-							onClick: () => onPage(safePage + 1),
-						}, "下一页 ›"),
-					])
-					: null,
+                data && !busy && !error ? createElement(PageFooter, { key: "pager", page: safePage, pageCount, pageSize, onPage, onPageSize, note: `${sources.length} 个来源 · ${indexed ? "本地索引" : "实时目录"}` }) : null,
 
-				createElement("div", { key: "f", style: styles.smNote }, [
-					"安装到哪里？默认写入 ",
-					createElement("code", { key: "c", style: styles.smCode }, "$DSH_HOME/skills/&lt;name&gt;/"),
-					"（本插件自己的目录，与宿主内置 skill 分开），装了之后出现在「已注册 → 本插件」下；要装进 ~/.agents/skills 则是改动别人的目录，需要显式选择。",
-				]),
 			]);
 		}
 
@@ -4341,34 +3849,16 @@ function MarketCard({ item, stats, media, busy, installing, rank, usageSort, fea
 		const CALL_RANGES = [["1h", "近1小时"], ["24h", "近24小时"], ["7d", "近7天"]];
 
 // How long repeated slash references count as one 调用 (the folding window).
-const CALL_MERGES = [[0, "关"], [5 * 60 * 1000, "5 分"], [30 * 60 * 1000, "30 分"]];const CALL_DOT = { ok: "#8fd4ad", fail: "#f0a8a0", running: "#7a9af5", lost: T.text4 };
-const CALL_HALO = { ok: "rgba(143,212,173,.20)", fail: "rgba(240,168,160,.20)", running: "rgba(122,154,245,.22)", lost: "rgba(128,128,128,.16)" };
-const axisWash = (rgb) => `linear-gradient(180deg, rgba(${rgb},.30), rgba(${rgb},.08))`;
+const CALL_MERGES = [[0, "关"], [5 * 60 * 1000, "5 分"], [30 * 60 * 1000, "30 分"]];
 
 const callStyles = {
-  // Pinned chrome: the numbers, the note and the range bar never scroll away.
-  head: { display: "flex", flexDirection: "column", gap: 10, flex: "0 0 auto", minWidth: 0 },
-  // The one scrolling box in this tab: the timeline (and the rail beside it).
   scroll: { flex: "1 1 auto", minHeight: 0, minWidth: 0, overflowY: "auto", paddingRight: 2 },
   mergeGroup: { display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" },
-  mergeLabel: { fontSize: 12, color: T.text3 },
-  stats: { display: "flex", gap: 10, flexWrap: "wrap" },
-  stat: {
-    flex: "1 1 150px", minWidth: 136, borderRadius: 14, padding: "12px 14px",
-    display: "flex", flexDirection: "column", gap: 2, overflow: "hidden",
-    border: "1px solid rgba(91,124,250,.14)",
-    background: "radial-gradient(180px 80px at 100% 0%, rgba(91,124,250,.10), transparent 70%),"
-      + "linear-gradient(160deg, rgba(255,255,255,.96) 0%, rgba(232,238,252,.55) 100%)",
-    boxShadow: "0 1px 2px rgba(31,35,41,.03), 0 6px 16px rgba(31,35,41,.04)",
-  },
-  statRow: { display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 8 },
-  statNum: { fontSize: 22, fontWeight: 700, lineHeight: 1.15, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" },
-  statLab: { fontSize: 11, color: T.text3 },
-  statNote: { fontSize: 11, color: T.text4 },
-  hint: { display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12, color: T.text3, alignItems: "center" },
+  mergeLabel: { fontSize: 14, color: T.text3 },
+  hint: { display: "flex", gap: 8, flexWrap: "wrap", fontSize: 14, color: T.text3, alignItems: "center" },
   layout: { display: "flex", gap: 12, alignItems: "stretch", flex: "1 1 auto", minHeight: 0 },
   rail: {
-    // Pinned beside the timeline (1.0.3), so it needs its own scroll: a machine
+    // Pinned beside the timeline (1.0.2), so it needs its own scroll: a machine
     // with thirty servers would otherwise push its own rows out of reach, since
     // the panel body is the box with overflow hidden.
     flex: "0 0 208px", display: "flex", flexDirection: "column", gap: 2,
@@ -4377,46 +3867,26 @@ const callStyles = {
     maxHeight: "100%", minHeight: 0, overflowY: "auto", overflowX: "hidden",
     boxShadow: "0 1px 2px rgba(31,35,41,.03), 0 6px 16px rgba(31,35,41,.04)",
   },
-  railHead: { fontSize: 11, color: T.text3, padding: "2px 8px 6px" },
+  railHead: { display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 17, color: T.text, padding: "2px 8px 6px" },
   railItem: {
     display: "flex", gap: 8, alignItems: "center", padding: "7px 9px", borderRadius: 10,
-    border: "1px solid transparent", background: "transparent", font: "inherit", fontSize: 12,
+    border: "1px solid transparent", background: "transparent", font: "inherit", fontSize: 14,
     color: T.text2, cursor: "pointer", textAlign: "left",
   },
-  railOn: { background: SKILL_SOFT, border: "1px solid " + SKILL_LINE, color: SKILL_INK },
   railOnMcp: { background: MCP_SOFT, border: "1px solid #d5e0f8", color: "#3d5fd9" },
   railName: { flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  railCount: { fontSize: 11, fontVariantNumeric: "tabular-nums", color: T.text3 },
-  main: { flex: 1, display: "flex", flexDirection: "column", gap: 8, minWidth: 0 },
+  railCount: { fontSize: 13, fontVariantNumeric: "tabular-nums", color: T.text3 },
   toolbar: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", width: "100%" },
-  chip: { border: "1px solid " + T.line, background: T.cardBg, borderRadius: 999, padding: "4px 10px", fontSize: 12, font: "inherit", color: T.text2, cursor: "pointer" },
-  chipOn: { background: T.text, borderColor: T.text, color: "#fff" },
-  statline: { fontSize: 12, color: T.text3 },
-  timeline: { position: "relative", display: "flex", flexDirection: "column", gap: 8, paddingLeft: 2 },
-  entry: { display: "flex", gap: 10, alignItems: "stretch" },
-  axis: { flex: "0 0 12px", display: "flex", flexDirection: "column", alignItems: "center", position: "relative" },
-  axisLine: { position: "absolute", top: 0, bottom: -8, width: 2, borderRadius: 2, background: SKILL_LINE },
-  axisLineMcp: { position: "absolute", top: 0, bottom: -8, width: 2, borderRadius: 2 },
-  node: { position: "relative", marginTop: 14, width: 9, height: 9, borderRadius: 999, flex: "0 0 auto", boxShadow: "0 0 0 3px " + T.cardBg },
-  card: { flex: 1, minWidth: 0, background: T.cardBg, border: "1px solid " + T.line2, borderRadius: 12, padding: "11px 14px", display: "flex", flexDirection: "column", gap: 5 },
-  top: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" },
-  name: { fontSize: 13, fontWeight: 600, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" },
-  kindTag: { fontSize: 11, color: SKILL_INK, background: SKILL_SOFT, border: "1px solid " + SKILL_LINE, borderRadius: 999, padding: "0 7px" },
-  dur: { border: "1px solid " + T.line, borderRadius: 999, padding: "0 8px", fontSize: 11, fontVariantNumeric: "tabular-nums", color: T.text2 },
-  durFail: { color: T.red, borderColor: "#f3c9c9", background: "#fdf1f1" },
-  durRunning: { color: T.amber, borderColor: "#f0dcbc", background: "#fdf7ec" },
-  toggle: { marginLeft: "auto" },
-  meta: { display: "flex", gap: 8, flexWrap: "wrap", fontSize: 11, color: T.text3, alignItems: "center" },
-  code: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", background: T.soft, border: "1px solid " + T.line2, borderRadius: 5, padding: "0 4px", color: T.text2 },
-  note: { fontSize: 11, color: T.text3 },
+  chip: { border: "1px solid " + T.line, background: T.cardBg, borderRadius: 999, padding: "4px 10px", fontSize: 14, font: "inherit", color: T.text2, cursor: "pointer" },
+  note: { fontSize: 13, color: T.text3 },
   detail: { display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 },
   blk: { flex: "1 1 240px", minWidth: 0, display: "flex", flexDirection: "column", gap: 3 },
-  blkLab: { fontSize: 10, letterSpacing: ".04em", textTransform: "uppercase", color: T.text4 },
-  pre: { margin: 0, padding: 8, background: T.soft, borderRadius: 8, fontSize: 11, whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 220, overflow: "auto", color: T.text2 },
-  why: { flex: "1 1 100%", fontSize: 11, color: T.text3, background: T.soft, borderRadius: 8, padding: "6px 8px" },
+  blkLab: { fontSize: 13, fontWeight: 600, color: T.text2 },
+  pre: { margin: 0, padding: 8, background: T.soft, borderRadius: 8, fontSize: 13, whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 220, overflow: "auto", color: T.text2 },
+  why: { flex: "1 1 100%", fontSize: 13, color: T.text3, background: T.soft, borderRadius: 8, padding: "6px 8px" },
   empty: { border: "1px dashed " + T.line, borderRadius: 10, padding: "22px 16px", display: "flex", flexDirection: "column", gap: 6, alignItems: "center", textAlign: "center", color: T.text3 },
   emptyTitle: { fontSize: 13, fontWeight: 600, color: T.text2 },
-  emptyHint: { fontSize: 12, lineHeight: 1.5, maxWidth: 460 },
+  emptyHint: { fontSize: 14, lineHeight: 1.5, maxWidth: 460 },
 };
 
 function clockText(iso) {
@@ -4427,23 +3897,6 @@ function clockText(iso) {
   return pad(date.getHours()) + ":" + pad(date.getMinutes()) + ":" + pad(date.getSeconds());
 }
 
-/** How long ago, in the shape the prototype used: 刚刚 / N 分钟前 / 昨天 19:30. */
-function agoText(iso) {
-  const at = Date.parse(iso);
-  if (!Number.isFinite(at)) return "";
-  const diff = Date.now() - at;
-  if (diff < 0) return "";
-  if (diff < 60e3) return "刚刚";
-  if (diff < 3600e3) return Math.floor(diff / 60e3) + " 分钟前";
-  const date = new Date(at);
-  const today = new Date();
-  if (date.toDateString() === today.toDateString()) return Math.floor(diff / 3600e3) + " 小时前";
-  const yesterday = new Date(today.getTime());
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (date.toDateString() === yesterday.toDateString()) return "昨天 " + clockText(iso).slice(0, 5);
-  return date.getMonth() + 1 + "月" + date.getDate() + "日";
-}
-
 /** null is "no result yet"; a number is milliseconds, seconds past 1000. */
 function durationText(row) {
   if (row.status === "running") return "…";
@@ -4452,39 +3905,6 @@ function durationText(row) {
   if (!Number.isFinite(ms)) return "—";
   if (ms < 1000) return ms + " ms";
   return (ms / 1000).toFixed(1).replace(/\.0$/, "") + " s";
-}
-
-/**
- * One 24-bucket line from real counts. With nothing to draw it says "-", not a
- * decorative curve: a picture of traffic that did not happen is a lie.
- */
-function CallSpark({ values, width = 56, height = 28, color = SKILL_ACCENT }) {
-  const list = Array.isArray(values) ? values : [];
-  if (list.length < 2 || !list.some((value) => value > 0)) {
-    return createElement("span", { style: { fontSize: 11, color: T.text4 } }, "-");
-  }
-  const max = Math.max(1, ...list);
-  const stepX = (width - 2) / (list.length - 1);
-  const d = list
-    .map((value, i) => {
-      const x = 1 + i * stepX;
-      const y = height - 3 - (value / max) * (height - 6);
-      return (i === 0 ? "M" : "L") + x.toFixed(1) + " " + y.toFixed(1);
-    })
-    .join(" ");
-  return createElement(
-    "svg",
-    { width, height, viewBox: "0 0 " + width + " " + height, style: { display: "block", color, flex: "0 0 auto" } },
-    createElement("path", {
-      d,
-      fill: "none",
-      stroke: "currentColor",
-      "stroke-width": 1.6,
-      "stroke-linecap": "round",
-      "stroke-linejoin": "round",
-      opacity: 0.55,
-    }),
-  );
 }
 
 /** A small waveform, the way the prototype marks "there is nothing on the line yet". */
@@ -4511,235 +3931,204 @@ function callHaystack(row) {
     .toLowerCase();
 }
 
-function CallCard({ row }) {
-  const [open, setOpen] = useState(false);
-  const name = row.space === "skill" ? row.skill || row.tool || row.name : row.tool || row.name;
-  const durStyle = { ...callStyles.dur, ...(row.status === "fail" ? callStyles.durFail : row.status === "running" ? callStyles.durRunning : {}) };
-  const label = open ? "▾ 收起请求 / 响应" : "▸ 展开请求 / 响应";
-  return createElement("div", { key: row.id, style: callStyles.entry }, [
-    createElement("div", { key: "axis", style: callStyles.axis }, [
-      createElement("span", {
-        key: "line",
-        style: row.space === "skill"
-          ? callStyles.axisLine
-          : { ...callStyles.axisLineMcp, background: axisWash("91,124,250") },
-      }),
-      createElement("span", {
-        key: "node",
-        style: {
-          ...callStyles.node,
-          background: CALL_DOT[row.status] ?? T.text4,
-          boxShadow: "0 0 0 3px " + (CALL_HALO[row.status] ?? "rgba(128,128,128,.16)"),
-          ...(row.status === "running" ? { animation: "omkt-fade .9s ease-in-out infinite alternate" } : {}),
-        },
-      }),
-    ]),
-    createElement("div", { key: "card", style: callStyles.card }, [
-      createElement("div", { key: "top", style: callStyles.top }, [
-        createElement("span", { key: "name", style: callStyles.name }, name ?? "调用"),
-        row.space === "skill" && row.kind
-          ? createElement("span", { key: "kind", style: callStyles.kindTag },
-            // A repeated slash command inside the merge window is one row, and the
-            // count says how many times it happened.
-            row.kind + (row.via === "用户引用"
-              ? " · 用户引用" + (Number(row.count) > 1 ? " ×" + row.count : "")
-              : ""))
-          : null,
-        createElement("span", { key: "dur", style: durStyle }, durationText(row)),
-        createElement("button", {
-          key: "toggle",
-          type: "button",
-          className: "omkt-calltoggle",
-          style: { ...styles.smallBtn, ...callStyles.toggle },
-          onClick: () => setOpen(!open),
-        }, label),
-      ]),
-      createElement("div", { key: "meta", style: callStyles.meta }, [
-        row.session ? createElement("span", { key: "s" }, "会话") : null,
-        row.session ? createElement("code", { key: "c", style: callStyles.code }, row.session) : null,
-        clockText(row.startedAt) ? createElement("span", { key: "t" }, clockText(row.startedAt)) : null,
-        agoText(row.startedAt) ? createElement("span", { key: "ago" }, agoText(row.startedAt)) : null,
-        row.space === "mcp" && row.server ? createElement("span", { key: "sv" }, row.server) : null,
-      ]),
-      row.note ? createElement("div", { key: "note", style: callStyles.note }, row.note) : null,
-      open
-        ? createElement("div", { key: "detail", style: callStyles.detail }, [
-            createElement("div", { key: "req", style: callStyles.blk }, [
-              createElement("div", { key: "l", style: callStyles.blkLab }, "Request"),
-              createElement("pre", { key: "p", style: callStyles.pre }, row.req || "（没有记录请求内容）"),
-            ]),
-            createElement("div", { key: "res", style: callStyles.blk }, [
-              createElement("div", { key: "l", style: callStyles.blkLab }, "Response"),
-              createElement("pre", { key: "p", style: callStyles.pre },
-                row.status === "running" ? "还在等结果…" : row.res || "（没有记录响应内容）"),
-            ]),
-            row.space === "skill"
-              ? createElement("div", { key: "why", style: callStyles.why },
-                  "说明：此处记录的是「触发」——模型经 `skill` 工具加载，或你在输入框里用斜杠命令引用（宿主把技能直接展开注入，不是工具调用）；都不是远程工具 RPC。")
-              : null,
-          ])
-        : null,
-    ]),
-  ]);
+function callStatus(row) {
+    if (row.via === "用户引用") return "已记录";
+    return { ok: "成功", fail: "失败", running: "执行中", lost: "无结果" }[row.status] ?? "未知";
 }
 
-function CallsPanel({ space, data, error, busy, range, onRange, merge, onMerge, query, onQuery, filter, onFilter, onExport, note }) {
-  const isMcp = space === "mcp";
-  const stats = data?.stats ?? {};
-  const rail = Array.isArray(data?.rail) ? data.rail : [];
-  const rows = Array.isArray(data?.rows) ? data.rows : [];
-  const needle = (query ?? "").trim().toLowerCase();
-  // Filtering happens here, as you type: the host already answered for the
-  // window, and a keystroke should not become a round trip.
-  const shown = needle === "" ? rows : rows.filter((row) => callHaystack(row).includes(needle));
-			const okCount = shown.filter((row) => row.status === "ok").length;
-			const failCount = shown.filter((row) => row.status === "fail").length;
-			const settled = okCount + failCount;
-			// The host answers for the whole window; the list on screen may be shorter.
-			// So the headline numbers come from the host unless the reader narrowed the
-			// rows with the box, in which case they describe what is left.
-			const hosting = needle === "" && Number.isFinite(stats.rate);
-			const rate = hosting
-				? stats.rate
-				: settled === 0 ? null : Math.round((okCount / settled) * 1000) / 10;
-			const durs = shown.map((row) => row.ms).filter((ms) => Number.isFinite(ms));
-			const avgMs = hosting && Number.isFinite(stats.avgMs)
-				? stats.avgMs
-				: durs.length === 0 ? null : Math.round(durs.reduce((sum, ms) => sum + ms, 0) / durs.length);
-			const rangeLabel = (CALL_RANGES.find(([id]) => id === range) ?? CALL_RANGES[1])[1];
-  const stat = (key, value, label, hint, spark) =>
-    createElement("div", { key, style: callStyles.stat }, [
-      createElement("div", { key: "num", style: callStyles.statRow }, [
-        createElement("div", { key: "v", style: callStyles.statNum }, value),
-        spark === undefined ? null : createElement(CallSpark, { key: "sp", values: spark }),
-      ]),
-      createElement("div", { key: "lab", style: callStyles.statLab }, label),
-      createElement("div", { key: "hint", style: callStyles.statNote }, hint),
-    ]);
-  const railItem = (key, label, today, spark, on, onClick) =>
-    createElement("button", {
-      key,
-      type: "button",
-      style: { ...callStyles.railItem, ...(on ? (isMcp ? callStyles.railOnMcp : callStyles.railOn) : {}) },
-      "aria-pressed": on ? "true" : "false",
-      onClick,
-    }, [
-      createElement("span", { key: "n", style: callStyles.railName }, label),
-      createElement(CallSpark, { key: "s", values: spark, width: 34, height: 16, color: on ? (isMcp ? "#3d5fd9" : SKILL_INK) : (isMcp ? MCP_ACCENT : SKILL_ACCENT) }),
-      createElement("span", { key: "c", style: callStyles.railCount }, String(today ?? 0)),
-    ]);
+// A recorded slash reference contributes to completion, without an elapsed time.
+function callMetrics(space, data, shown, narrowed) {
+    const stats = data?.stats;
+    if (space === "mcp" && !narrowed && stats) {
+        return { ok: stats.ok ?? 0, fail: stats.fail ?? 0, rate: Number.isFinite(stats.rate) ? stats.rate : null,
+            avgMs: Number.isFinite(stats.avgMs) ? stats.avgMs : null, scope: "当前时间范围", count: stats.shown ?? shown.length };
+    }
+    let loaded = 0, fail = 0, references = 0, count = 0, duration = 0, timed = 0;
+    for (const row of shown) {
+        if (space === "skill" && row.via === "用户引用") {
+            const n = Number.isInteger(row.count) && row.count > 0 ? row.count : 1;
+            references += n;
+            count += n;
+            continue;
+        }
+        count++;
+        if (row.status === "ok") loaded++;
+        else if (row.status === "fail") fail++;
+        else continue;
+        if (Number.isFinite(row.ms)) { duration += row.ms; timed++; }
+    }
+    const ok = loaded + references;
+    const settled = ok + fail;
+    return { ok, loaded, fail, references, rate: settled ? Math.round(ok / settled * 1000) / 10 : null,
+        avgMs: timed ? Math.round(duration / timed) : null, scope: "当前列表", count };
+}
 
-  return createElement("div", { className: "omkt-skillpanel", style: { display: "flex", flexDirection: "column", gap: 10, flex: "1 1 auto", minHeight: 0 } }, [
-    createElement("div", { key: "callhead", style: callStyles.head }, [
-    createElement("div", { key: "stats", style: callStyles.stats }, [
-      stat(
-        "today",
-        String(stats.today ?? 0),
-        "今日调用",
-        isMcp ? "工具调用（含失败）" : "触发事件",
-        stats.spark,
-      ),
-      stat(
-        "rate",
-        rate === null ? "—" : rate + "%",
-        "成功率",
-        "当前筛选 · 成功 " + okCount + " / 失败 " + failCount,
-      ),
-      stat(
-        "avg",
-        avgMs === null ? "—" : durationText({ ms: avgMs, status: "ok" }),
-        "平均耗时",
-        isMcp ? "工具往返延迟" : "模型加载 skill 的耗时（斜杠引用不计）",
-      ),
-    ]),
-    createElement("div", { key: "hint", style: callStyles.hint }, [
-      createElement("span", { key: "chip", style: { ...callStyles.chip, ...callStyles.chipOn } }, isMcp ? "工具调用" : "触发"),
-      createElement("span", { key: "text" },
-        isMcp
-          ? "已启用的服务器工具以 mcp__<服务器>__<工具> 形式出现在对话中；此处按延迟与状态回放。"
-          : "Skill 不是远程 RPC：下列为「触发」事件。新增或移除 Skill 后需重启 DSH，新会话才会看到。"),
-    ]),
-    error ? createElement("div", { key: "err", style: styles.error }, error) : null,
-    note ? createElement("div", { key: "note", style: styles.message }, note) : null,
-        createElement("div", { key: "toolbar", style: callStyles.toolbar }, [
-          ...CALL_RANGES.map(([id, label]) =>
-            createElement("button", {
-              key: id,
-              type: "button",
-              style: { ...callStyles.chip, ...(range === id ? callStyles.chipOn : {}) },
-              "aria-pressed": range === id ? "true" : "false",
-              onClick: () => onRange(id),
-            }, label),
-          ),
-          isMcp ? null : createElement("div", { key: "merge", style: callStyles.mergeGroup }, [
-            createElement("span", { key: "lab", style: callStyles.mergeLabel }, "合并"),
-            ...CALL_MERGES.map(([id, label]) =>
-              createElement("button", {
-                key: id,
-                type: "button",
-                style: { ...callStyles.chip, ...(merge === id ? callStyles.chipOn : {}) },
-                "aria-pressed": merge === id ? "true" : "false",
-                onClick: () => onMerge(id),
-              }, label),
-            ),
-          ]),
-          createElement("div", {
-            key: "q",
-            className: "omkt-search",
-            style: { ...styles.searchWrap, flex: "1 1 220px", minWidth: 160, padding: "5px 12px" },
-          }, [
-            createElement("span", { key: "i", style: styles.searchIcon }, "⌕"),
-            createElement("input", {
-              key: "in",
-              className: "omkt-input",
-              type: "search",
-              value: query ?? "",
-              placeholder: isMcp ? "搜索工具 / 会话" : "搜索 skill / 事件",
-              style: styles.searchInput,
-              onChange: (event) => onQuery(event.target.value),
-            }),
-          ]),
-          createElement("button", {
-            key: "ex",
-            type: "button",
-            className: "omkt-primary",
-            style: styles.smallPrimary,
-            onClick: onExport,
-          }, "导出"),
+function CallDetail({ row, onClose, onDiagnostics }) {
+    const reference = row.via === "用户引用";
+    const isSkill = row.space === "skill";
+    const name = isSkill ? row.skill || row.tool || row.name : row.tool || row.name;
+    const payload = [
+        createElement("div", { key: "req", style: callStyles.blk }, [
+            createElement("div", { key: "label", style: callStyles.blkLab }, "请求参数"),
+            createElement("pre", { key: "value", style: callStyles.pre }, row.req || "没有记录请求内容"),
         ]),
-        createElement("div", { key: "line", style: callStyles.statline },
-          "展示 " + shown.length + " 条 · 范围 " + rangeLabel + (filter ? " · 已筛选 " + filter : "")),
+        createElement("div", { key: "res", style: callStyles.blk }, [
+            createElement("div", { key: "label", style: callStyles.blkLab }, reference ? "引用记录" : row.status === "fail" ? "错误响应" : "执行结果"),
+            createElement("pre", { key: "value", style: callStyles.pre }, row.status === "running" ? "正在等待结果…" : row.res || "没有记录响应内容"),
+        ]),
+    ];
+    const facts = [
+        ["会话", row.session], ["记录 ID", row.id], [isSkill ? "事件" : "连接器", isSkill ? (reference ? "命令引用" : "工具加载") : row.server],
+        ["耗时", reference ? "—" : durationText(row)], [isSkill ? "触发时间" : row.status === "fail" || row.status === "lost" ? "错误" : "说明", isSkill ? clockText(row.startedAt) : row.note],
+    ].filter(([, value]) => value);
+    return createElement("section", { className: "omkt-call-detail", "aria-label": "执行详情", style: { margin: "7px 12px", padding: "9px 16px", borderRadius: 10, border: `1px solid ${T.line}`, background: "rgba(114,130,167,.045)", minWidth: 0 } }, [
+        createElement("div", { key: "heading", style: { ...styles.toolbar, justifyContent: "space-between", gap: 6, marginBottom: 8 } }, [
+            createElement("div", { key: "title", style: { ...styles.toolbar, minWidth: 0, overflowWrap: "anywhere" } }, [
+                createElement("strong", { key: "name", style: { fontSize: 17 } }, isSkill ? name : "执行详情"),
+                createElement(CallStatusBadge, { key: "status", row }),
+            ]),
+            createElement("button", { key: "close", type: "button", "aria-label": "收起执行详情", style: { ...styles.textBtn, fontSize: 18, padding: "0 6px" }, onClick: onClose }, "×"),
+        ]),
+        createElement("div", { key: "facts", className: "omkt-call-facts", style: { display: "grid", gap: "2px 18px", fontSize: 14, lineHeight: 1.4, overflowWrap: "anywhere" } }, facts.map(([label, value]) => createElement("div", { key: label }, [
+            createElement("span", { key: "label", style: { color: T.text3, marginRight: 10 } }, label), value,
+        ]))),
+        isSkill && row.note ? createElement("div", { key: "note", style: { ...callStyles.why, marginTop: 8 } }, row.note) : null,
+        isSkill ? createElement("details", { key: "payload", style: { marginTop: 8, fontSize: 14 } }, [
+            createElement("summary", { key: "toggle", style: { color: T.brand, cursor: "pointer" } }, "请求参数与原始响应"),
+            createElement("div", { key: "content", style: callStyles.detail }, payload),
+        ]) : createElement("div", { key: "payload", style: { ...callStyles.detail, marginTop: 10 } }, payload),
+        onDiagnostics ? createElement("button", { key: "diagnostics", type: "button", style: { ...styles.textBtn, display: "inline-flex", gap: 7, alignItems: "center", color: T.brand, marginTop: 5, paddingLeft: 0 }, onClick: onDiagnostics }, [createElement(UiIcon, { key: "icon", name: "diagnostics", size: 16 }), "查看运行诊断"]) : null,
+    ]);
+}
 
-    ]),
-    // Only the timeline scrolls: the header above, and the rail beside it, stay
-    // put (the rail is the way to narrow the list, so it must not walk away).
-    createElement("div", { key: "layout", style: callStyles.layout }, [
-      createElement("div", { key: "rail", style: callStyles.rail }, [
-        createElement("div", { key: "hd", style: callStyles.railHead }, (isMcp ? "服务器" : "Skill") + " · 今日"),
-        railItem("all", "全部", stats.today ?? 0, stats.spark, filter === "", () => onFilter("")),
-        ...rail.map((item) =>
-          railItem(item.id, item.name ?? item.id, item.today, item.spark, filter === item.id, () => onFilter(item.id === filter ? "" : item.id)),
-        ),
-      ]),
-      createElement("div", { key: "scroll", "data-omkt": "scroller", style: callStyles.scroll }, [
-      createElement("div", { key: "main", style: callStyles.main }, [
-        busy && rows.length === 0
-          ? createElement("div", { key: "busy", style: styles.message }, "正在读本机的调用记录…")
-          : shown.length === 0
-            ? createElement("div", { key: "empty", style: callStyles.empty }, [
-                createElement("div", { key: "ico" }, callWave()),
-                createElement("div", { key: "t", style: callStyles.emptyTitle }, "这段时间还没有调用"),
-                createElement("div", { key: "h", style: callStyles.emptyHint },
-                  isMcp
-                    ? "换个时间范围，或在对话里用 mcp__<服务器>__<工具> 试一次——成功后会出现在这条时间线上。"
-                    : "模型经 skill 工具加载、或你在输入框里用斜杠命令（如 /skill-router）引用，都会出现在这条时间线上。"),
-              ])
-            : createElement("div", { key: "list", style: callStyles.timeline },
-                shown.map((row) => createElement(CallCard, { key: row.id, row }))),
-      ]),
-      ]),
-    ]),
-  ]);
+function CallStatusBadge({ row }) {
+    const reference = row.via === "用户引用";
+    const success = !reference && row.status === "ok";
+    const failure = !reference && (row.status === "fail" || row.status === "lost");
+    const tone = success ? "#168342" : failure ? "#a45c08" : T.text3;
+    return createElement("span", { style: { display: "inline-flex", alignItems: "center", justifySelf: "start", gap: 5, whiteSpace: "nowrap", fontSize: 14, fontWeight: 500, padding: "0 7px", borderRadius: 10, color: tone, background: success ? "rgba(36,186,98,.12)" : failure ? "rgba(255,157,0,.15)" : T.soft } }, [
+        createElement("span", { key: "dot", "aria-hidden": true, style: { width: 7, height: 7, borderRadius: "50%", background: success ? "#23b960" : failure ? "#ea910b" : T.text4 } }), callStatus(row),
+    ]);
+}
+
+function CallCard({ row, open, onToggle }) {
+    const isSkill = row.space === "skill";
+    const name = isSkill ? row.skill || row.tool || row.name : row.tool || row.name;
+    const reference = row.via === "用户引用";
+    return createElement("div", { style: { background: T.cardBg, borderBottom: `1px solid ${T.line2}` } }, [
+        createElement("div", { key: "row", className: isSkill ? "omkt-callrow omkt-callrow-skill" : "omkt-callrow", style: { padding: "3px 12px", ...(open ? { background: row.status === "fail" ? "rgba(255,159,0,.14)" : "rgba(69,102,233,.09)" } : {}) } }, [
+            createElement("span", { key: "time", style: { fontSize: 14, color: T.text2, fontVariantNumeric: "tabular-nums" }, title: row.startedAt }, clockText(row.startedAt)),
+            createElement("div", { key: "identity", style: { display: "flex", alignItems: "center", gap: 8, minWidth: 0 } }, [
+                !isSkill && row.server ? createElement(ProductIcon, { key: "icon", item: { name: row.server }, size: 23 }) : null,
+                createElement("div", { key: "text", style: { minWidth: 0 } }, [
+                    createElement("div", { key: "name", style: { fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: [name, row.session].filter(Boolean).join(" / ") }, [
+                        createElement("strong", { key: "resource", style: { fontWeight: 600 } }, name || "调用"),
+                        row.session ? createElement("span", { key: "session", style: { fontSize: 14, color: T.text2 } }, ` / ${row.session}`) : null,
+                    ]),
+                    isSkill ? createElement("div", { key: "meta", className: "omkt-callmeta", style: { fontSize: 13, color: T.text3 } }, reference ? `用户引用${row.count > 1 ? ` ×${row.count}` : ""}` : "工具加载") : null,
+                ]),
+            ]),
+            isSkill ? createElement("span", { key: "event-type", className: "omkt-eventtype", style: { fontSize: 14, color: T.text2 } }, reference ? `命令引用${row.count > 1 ? ` ×${row.count}` : ""}` : "工具加载") : null,
+            createElement(CallStatusBadge, { key: "status", row }),
+            createElement("span", { key: "duration", className: "omkt-callduration", style: { fontSize: 14, fontVariantNumeric: "tabular-nums", color: T.text2 } }, reference ? "—" : durationText(row)),
+            createElement("button", { key: "toggle", type: "button", className: "omkt-calltoggle", style: { ...styles.textBtn, padding: "3px 0", fontSize: 16 }, "aria-expanded": open, "aria-label": `${open ? "收起" : "展开"} ${name} 请求和响应`, onClick: onToggle }, open ? "⌃" : "⌄"),
+        ]),
+        open && isSkill ? createElement(CallDetail, { key: "detail", row, onClose: onToggle }) : null,
+    ]);
+}
+
+const CALL_VIEW_DEFAULT = { mode: "all", id: null, page: 0, limit: 5 };
+
+function CallsPanel({ space, data, error, busy, range, onRange, merge, onMerge, query, onQuery, filter, onFilter, onExport, note, view, onView, onDiagnostics }) {
+    const selectedMode = view.mode;
+    const isMcp = space === "mcp";
+    const rail = Array.isArray(data?.rail) ? data.rail : [];
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    const needle = String(query ?? "").trim().toLowerCase();
+    const shown = rows.filter((row) => (!needle || callHaystack(row).includes(needle)) && (
+        selectedMode === "all" || selectedMode === "reference" && row.via === "用户引用"
+        || selectedMode === "load" && row.via !== "用户引用" || selectedMode === row.status
+    ));
+    const metrics = callMetrics(space, data, shown, Boolean(needle) || selectedMode !== "all");
+    const rangeLabel = CALL_RANGES.find(([id]) => id === range)?.[1] ?? range;
+    const pageCount = Math.max(1, Math.ceil(shown.length / 6));
+    const page = Math.min(view.page, pageCount - 1);
+    const visible = isMcp ? shown.slice(0, view.limit) : shown.slice(page * 6, (page + 1) * 6);
+    const selected = visible.find(row => row.id === view.id);
+    const resetView = patch => onView({ id: null, page: 0, limit: 5, ...patch });
+    const selectRow = row => onView({ id: view.id === row.id ? null : row.id });
+    const chooseFilter = id => { onFilter(id); resetView(); };
+    const stat = (key, label, value, hint) => createElement("div", { key, className: "omkt-callstat", style: { flex: "1 1 150px", minWidth: 136, padding: "10px 26px", borderRight: `1px solid ${T.line2}` } }, [
+        createElement("div", { key: "label", style: { fontSize: 14, color: T.text3 } }, label),
+        createElement("div", { key: "numbers", style: { display: "flex", alignItems: "baseline", gap: "2px 12px", flexWrap: "wrap" } }, [
+            createElement("strong", { key: "value", style: { fontSize: 30, fontWeight: 700, fontVariantNumeric: "tabular-nums", lineHeight: 1.25 } }, value),
+            createElement("span", { key: "hint", style: { fontSize: 13, color: T.text3 } }, hint),
+        ]),
+    ]);
+    const railItem = (id, label, count) => createElement("button", {
+        key: id, type: "button", "aria-pressed": filter === id,
+        style: { ...callStyles.railItem, ...(filter === id ? callStyles.railOnMcp : {}) }, onClick: () => chooseFilter(id),
+    }, [isMcp && id ? createElement(ProductIcon, { key: "icon", item: { name: id }, size: 23 }) : null, createElement("span", { key: "name", style: callStyles.railName }, label), createElement("span", { key: "count", style: callStyles.railCount }, count)]);
+    return createElement("div", { className: "omkt-skillpanel", style: { display: "flex", flexDirection: "column", gap: 12, flex: "1 1 auto", minHeight: 0 } }, [
+        createElement(PageHeading, { key: "heading", title: isMcp ? "MCP 调用记录" : "Skill 调用记录", hint: isMcp ? "追踪工具执行与连接异常" : "查看技能加载与命令引用事件", actions: [
+            createElement("button", { key: "export", type: "button", className: "omkt-btn", style: { ...styles.button, display: "inline-flex", gap: 8, alignItems: "center" }, title: "导出当前筛选结果", onClick: () => onExport({ rows: shown, eventFilter: selectedMode }), disabled: !data || busy }, [createElement(UiIcon, { key: "icon", name: "upload", size: 16 }), "导出记录"]),
+        ] }),
+        createElement("div", { key: "stats", className: "omkt-callsummary", style: { display: "flex", flexWrap: "wrap", background: T.cardBg, border: `1px solid ${T.line}`, borderRadius: 12, minHeight: 88, overflow: "hidden" } }, [
+            stat("count", isMcp ? "工具调用" : "触发事件", data ? String(metrics.count) : "—", metrics.scope),
+            stat("rate", isMcp ? "成功率" : "触发完成", metrics.rate === null ? "—" : isMcp ? `${metrics.rate}%` : `${metrics.ok} / ${metrics.ok + metrics.fail}`, isMcp ? `${metrics.ok} 成功 · ${metrics.fail} 失败` : `${metrics.loaded} 加载成功 · ${metrics.references} 命令引用 · ${metrics.fail} 失败`),
+            stat("avg", "平均耗时", metrics.avgMs === null ? "—" : durationText({ status: "ok", ms: metrics.avgMs }), isMcp ? "工具往返延迟" : "工具加载实测耗时"),
+        ]),
+        !isMcp ? createElement("div", { key: "hint", style: { ...callStyles.hint, background: T.soft, borderRadius: 8, padding: "8px 12px" } }, [createElement(UiIcon, { key: "icon", name: "info", size: 16 }), "斜杠命令引用计入触发完成数，合并后仍按实际引用次数计。引用没有实测耗时。新增或移除 Skill 后需重启 DSH。"]) : null,
+        error ? createElement("div", { key: "error", role: "alert", style: styles.error }, error) : null,
+        note ? createElement("div", { key: "note", style: styles.message }, note) : null,
+        createElement("div", { key: "toolbar", style: callStyles.toolbar }, [
+            createElement("div", { key: "range", className: "omkt-call-ranges", style: { display: "flex", alignItems: "center", gap: 3, padding: 2, borderRadius: 14, border: `1px solid ${T.line}`, background: T.cardBg } },
+                CALL_RANGES.map(([id, label]) => createElement("button", { key: id, type: "button", style: { ...callStyles.chip, border: 0, padding: "5px 13px", fontWeight: range === id ? 600 : 500, ...(range === id ? { background: T.brand, color: "#fff" } : {}) }, "aria-pressed": range === id, onClick: () => { onRange(id); resetView(); } }, label))),
+            !isMcp ? createElement("select", { key: "merge", className: "omkt-select", style: styles.select, value: merge ?? "", "aria-label": "合并命令引用", onChange: event => { onMerge(Number(event.target.value)); resetView(); } }, [
+                merge == null ? createElement("option", { key: "loading", value: "", disabled: true }, "读取合并设置…") : null,
+                ...CALL_MERGES.map(([id, label]) => createElement("option", { key: id, value: id }, id ? `合并 ${label}钟` : "不合并")),
+            ]) : null,
+            createElement(SearchField, { key: "search", value: query ?? "", onChange: value => { onQuery(value); resetView(); }, label: "搜索调用记录", placeholder: isMcp ? "搜索工具或会话…" : "搜索 Skill 或会话…", style: { flex: "1 1 220px", height: 38 } }),
+            createElement("select", { key: "eventFilter", className: "omkt-select omkt-call-kind", style: styles.select, value: selectedMode, "aria-label": isMcp ? "按调用状态筛选" : "按事件类型筛选", onChange: event => resetView({ mode: event.target.value }) }, (
+                isMcp ? [["all", "全部状态"], ["ok", "成功"], ["fail", "失败"], ["running", "执行中"], ["lost", "无结果"]]
+                    : [["all", "全部事件"], ["load", "工具加载"], ["reference", "命令引用"], ["fail", "加载失败"]]
+            ).map(([value, label]) => createElement("option", { key: value, value }, label))),
+            createElement("select", { key: "resourceFilter", className: "omkt-select omkt-callfilter", style: styles.select, value: filter, "aria-label": isMcp ? "按连接器筛选调用" : "按 Skill 筛选事件", onChange: event => chooseFilter(event.target.value) }, [
+                createElement("option", { key: "all", value: "" }, isMcp ? "全部连接器" : "全部 Skill"),
+                ...rail.map((item) => createElement("option", { key: item.id, value: item.id }, item.name ?? item.id)),
+                filter && !rail.some((item) => item.id === filter) ? createElement("option", { key: "current", value: filter }, filter) : null,
+            ]),
+        ]),
+        createElement("div", { key: "layout", className: "omkt-calllayout", style: { ...callStyles.layout, alignItems: shown.length ? "stretch" : "flex-start" } }, [
+            rail.length ? createElement("div", { key: "rail", className: "omkt-callrail", style: { ...callStyles.rail, flexBasis: isMcp ? 246 : 224, borderRadius: 12, background: T.cardBg, boxShadow: "none" } }, [
+                createElement("div", { key: "heading", style: callStyles.railHead }, [createElement("strong", { key: "label" }, isMcp ? "连接器" : "Skill"), createElement("span", { key: "scope", style: { fontSize: 12, color: T.text3 } }, rangeLabel)]),
+                railItem("", "全部", data?.stats?.inRange ?? 0),
+                ...rail.map((item) => railItem(item.id, item.name ?? item.id, item.total ?? 0)),
+            ]) : null,
+            createElement("div", { key: "scroll", "data-omkt": "scroller", style: { ...callStyles.scroll, border: `1px solid ${T.line}`, borderRadius: 12, background: T.cardBg } }, [
+                shown.length ? createElement("div", { key: "header", className: isMcp ? "omkt-callrow" : "omkt-callrow omkt-callrow-skill", style: { padding: "7px 12px", fontSize: 15, fontWeight: 500, color: T.text2, background: "rgba(114,130,167,.075)" } }, [
+                    createElement("span", { key: "time" }, "时间"), createElement("span", { key: "tool" }, isMcp ? "工具 / 会话" : "Skill / 会话"), !isMcp ? createElement("span", { key: "type", className: "omkt-eventtype" }, "事件类型") : null, createElement("span", { key: "status" }, "状态"), createElement("span", { key: "duration", className: "omkt-callduration" }, "耗时"), createElement("span", { key: "spacer", className: "omkt-callspacer" }),
+                ]) : null,
+                busy && !rows.length ? createElement("div", { key: "loading", style: { ...styles.message, padding: 30 } }, "正在读取本机调用记录…")
+                    : visible.length ? visible.map(row => createElement(CallCard, { key: row.id, row, open: selected === row, onToggle: () => selectRow(row) }))
+                        : createElement("div", { key: "empty", style: { ...callStyles.empty, border: 0, padding: "40px 20px" } }, [
+                            createElement("div", { key: "icon" }, callWave()),
+                            createElement("div", { key: "title", style: callStyles.emptyTitle }, error ? "读取调用记录失败" : needle ? "没有匹配的调用记录" : selectedMode !== "all" || filter ? "当前筛选下没有记录" : "这段时间还没有调用"),
+                            createElement("div", { key: "hint", style: callStyles.emptyHint }, error ? "上方显示了错误原因，可切换时间范围重试。" : needle || selectedMode !== "all" || filter ? "调整搜索词或清除筛选，查看其他记录。" : "可扩大时间范围，或在对话中使用已注册的连接器和 Skill。"),
+                            createElement("button", { key: "action", type: "button", style: styles.button, onClick: () => {
+                                if (needle || selectedMode !== "all" || filter) { onQuery(""); chooseFilter(""); resetView({ mode: "all" }); }
+                                else onRange(range === "7d" ? "24h" : "7d");
+                            } }, needle ? "清空搜索" : selectedMode !== "all" || filter ? "清除筛选" : range === "7d" ? "查看近 24 小时" : "查看近 7 天"),
+                        ]),
+                isMcp && selected ? createElement(CallDetail, { key: "detail", row: selected, onClose: () => selectRow(selected), onDiagnostics }) : null,
+                isMcp && shown.length ? createElement("div", { key: "footer", style: { ...styles.toolbar, justifyContent: "space-between", borderTop: `1px solid ${T.line2}`, padding: "7px 14px", fontSize: 14, color: T.text3 } }, [
+                    createElement("span", { key: "note" }, `显示 ${visible.length} 条 · 共 ${shown.length} 条 · ${rangeLabel}${rows.length >= 300 ? " · 最近 300 条范围内" : ""}`),
+                    visible.length < shown.length ? createElement("button", { key: "more", type: "button", style: { ...styles.textBtn, color: T.brand }, onClick: () => onView({ limit: view.limit + 5 }) }, "加载更多") : null,
+                ]) : null,
+            ]),
+        ]),
+        !isMcp && shown.length ? createElement(PageFooter, { key: "pager", page, pageCount, onPage: next => onView({ page: next, id: null }), note: `显示 ${page * 6 + 1}–${page * 6 + visible.length} 条 · 共 ${shown.length} 条${rows.length >= 300 ? " · 最近 300 条范围内" : ""}` }) : null,
+    ]);
 }
 
 		function SkillRemoveDialog({ skill, rootLabel, busy, onCancel, onConfirm }) {
@@ -4799,171 +4188,77 @@ function CallsPanel({ space, data, error, busy, range, onRange, merge, onMerge, 
 		// Collapsible per-root block. A machine with four roots and hundreds of
 		// skills has to be able to fold the ones it is not looking at, so the header
 		// is the control and the body is simply absent while folded.
-		function SkillGroupBlock({ group, list, needle, busy, onOpen, onReveal, onRemove }) {
-			const [folded, setFolded] = useState(false);
-			const count = group.found ?? group.count ?? 0;
-			return createElement("div", { id: `omkt-skillgroup-${group.id}`, style: styles.skillGroup }, [
-				createElement("div", {
-					key: "h",
-					style: styles.skillGroupHead,
-					role: "button",
-					tabIndex: 0,
-					"aria-expanded": folded ? "false" : "true",
-					onClick: () => setFolded(!folded),
-					onKeyDown: (event) => {
-						if (event.key === "Enter" || event.key === " ") {
-							event.preventDefault();
-							setFolded(!folded);
-						}
-					},
-				}, [
-					createElement("span", { key: "ch", style: styles.skillGroupChev }, folded ? "▸" : "▾"),
-					createElement("span", { key: "l", style: styles.skillGroupTitle }, group.label),
-					createElement("span", { key: "c", style: styles.spaceCount }, count),
-					createElement("span", { key: "d", style: styles.skillGroupDir, title: group.dir }, group.dir),
-					createElement("span", { key: "note", style: styles.skillGroupNote }, group.note ?? ""),
-				]),
-				// A folder that mirrors an earlier one has to say so, or the cards
-				// below look like the whole contents of that folder.
-				(group.folded ?? 0) > 0 && group.count > 0
-					? createElement("div", { key: "f", style: styles.skillGroupNote },
-						`这里共 ${group.found ?? group.count} 个，其中 ${group.folded} 个与更靠前的目录重复，已折叠；下面列出独有的 ${group.count} 个。`)
-					: null,
-				folded ? null : group.error === "missing"
-					? createElement("div", { key: "m", style: styles.skillGroupEmpty },
-						"这个目录还不存在（第一次往这里放 skill 时会创建）。")
-					: list.length === 0
-						? createElement("div", { key: "m", style: styles.skillGroupEmpty },
-							needle
-								? "没有匹配的 skill。"
-								// Folded is what happened; the raw count is the fallback for an
-								// older payload that does not carry the field yet.
-								: (group.folded ?? 0) > 0 || group.count > 0
-									? `这 ${group.folded || group.count} 个都在更靠前的目录里出现过，已折叠。`
-									: "这里还没有 skill。")
-						: createElement("div", { key: "g", className: "omkt-capgrid", style: styles.skillGrid },
-							list.map((skill) => createElement(SkillCard, {
-								key: `${skill.root}:${skill.dir}`,
-								skill, busy, onOpen, onReveal, onRemove,
-							}))),
-			]);
-		}
 
-		function SkillPanel({ data, error, busy, query, onQuery, root, onRoot, onOpen, onReveal, onRemove, onRefresh }) {
-			if (error) {
-				return createElement("div", { style: styles.emptyBox }, [
-					createElement("div", { key: "t" }, "读取 skill 目录失败。"),
-					createElement("div", { key: "d", style: styles.emptyHint }, error),
-					createElement("button", {
-						key: "b", type: "button", className: "omkt-btn omkt-btn-outline",
-						style: styles.sourceMiniBtn, onClick: onRefresh,
-					}, "重试"),
-				]);
-			}
-			if (!data) {
-				return createElement("div", { style: styles.emptyBox }, busy ? "正在扫描 skill 目录…" : "还没有读到 skill 目录。");
-			}
-			const roots = Array.isArray(data.roots) ? data.roots : [];
-			const skills = Array.isArray(data.skills) ? data.skills : [];
-			const needle = String(query ?? "").trim().toLowerCase();
-			const shown = skills.filter((skill) => {
-				if (root && skill.root !== root) return false;
-				if (!needle) return true;
-				return `${skill.name ?? ""} ${skill.description ?? ""} ${skill.origin ?? ""}`
-					.toLowerCase().includes(needle);
-			});
-			const totals = data.totals ?? {};
-			const groups = roots
-				.map((group) => ({ group, list: shown.filter((skill) => skill.root === group.id) }))
-				// A root that failed to read is kept even when it holds nothing:
-				// "this folder does not exist yet" is the answer the user needs, and
-				// silently hiding the root looks exactly like "the scan missed it".
-				// A root can hold skills that were all folded into an earlier one
-				// (Claude's folder usually mirrors the shared one). It still has to
-				// appear, otherwise the select says "Claude（2）" while no group
-				// explains where those two went.
-				.filter((entry) => entry.group.id === root || entry.list.length > 0
-					|| (!root && (entry.group.error || entry.group.count > 0 || (entry.group.folded ?? 0) > 0)));
-			const firstByLetter = new Map();
-			for (const skill of shown) {
-				const first = String(skill.name ?? "").charAt(0).toUpperCase();
-				const letter = /^[A-Z]$/.test(first) ? first : "#";
-				if (!firstByLetter.has(letter)) firstByLetter.set(letter, skill);
-			}
-			const jumpTo = (skill) => {
-				const group = document.getElementById(`omkt-skillgroup-${skill.root}`);
-				const header = group?.querySelector('[aria-expanded="false"]');
-				if (header) header.click();
-				requestAnimationFrame(() => {
-					const card = document.getElementById(skillAnchor(skill));
-					if (!card) {
-						console.error("overall-mcp: Skill 字母导航目标不存在", { root: skill.root, name: skill.name });
-						return;
-					}
-					card.scrollIntoView({ block: "nearest", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
-					card.focus({ preventScroll: true });
-				});
-			};
-			return createElement("div", { style: { ...styles.skillPanel, flex: "1 1 auto", minHeight: 0 } }, [
-				// The source filter and the search box sit outside the scrolling box,
-				// so the scrollbar belongs to the list alone and starts below them
-				// instead of running up beside the header.
-				createElement("div", { key: "reghead", style: styles.regHeader }, [
-				createElement("div", { key: "tool", style: styles.toolbar }, [
-					createElement("div", { key: "roots", className: "omkt-scopes", role: "group", "aria-label": "按来源筛选 skill" },
-						[{ id: "", label: "全部来源" }, ...roots].map((group) => createElement("button", {
-							key: group.id, type: "button", className: "omkt-btn",
-							"aria-pressed": root === group.id ? "true" : "false",
-							style: { ...styles.sourceMiniBtn, borderRadius: 999,
-								...(root === group.id ? { background: SKILL_SOFT, color: SKILL_INK, borderColor: SKILL_LINE } : {}) },
-							onClick: () => onRoot(group.id),
-						}, group.id ? `${group.label}（${group.found ?? group.count}）` : group.label))),
-					createElement("div", { key: "q", className: "omkt-search", style: { ...styles.searchWrap, flex: "1 1 260px", width: "auto" } }, [
-						createElement("input", {
-							key: "i", className: "omkt-input",
-							// The pill around it already draws the border; a second one
-							// inside reads as a nested input.
-							style: styles.searchInput,
-							value: query, placeholder: "搜索 skill 名称或用途",
-							onChange: (event) => onQuery(event.target.value),
-							"aria-label": "搜索 skill",
-						}),
-					]),
-				]),
-				createElement("div", { key: "stat", style: styles.stats }, [
-					`${totals.count ?? skills.length} 个 skill · ${totals.files ?? 0} 个文件 · ${byteText(totals.bytes) || "—"}`,
-					data.duplicates ? ` · 去掉 ${data.duplicates} 个重复副本` : "",
-				].join("")),
-				]),
-				// Everything below the header scrolls, and this is the only box that
-				// does: `data-omkt="scroller"` is what the return-to-top button binds.
-                createElement("div", { key: "scroll", "data-omkt": "scroller", style: styles.regScroll }, [
-                createElement("div", { key: "layout", style: { display: "flex", gap: 14, alignItems: "flex-start" } }, [
-                    firstByLetter.size ? createElement("nav", { key: "rail", className: "omkt-letterrail", "aria-label": "按首字母定位 Skill" },
-                        [...firstByLetter].sort(([a], [b]) => a.localeCompare(b)).map(([letter, skill]) => createElement("a", {
-                            key: letter, href: `#${skillAnchor(skill)}`,
-                            onClick: (event) => { event.preventDefault(); jumpTo(skill); },
-                        }, letter))) : null,
-                    createElement("div", { key: "groups", style: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 14 } }, [
-				createElement("div", { key: "hint", style: styles.skillHint },
-					"skill 由宿主在会话启动时加载，新增或移除后要重启 DSH 才生效；这里没有「启用/停用」这一层。"),
-				...groups.map(({ group, list }) => createElement(SkillGroupBlock, {
-					key: group.id,
-					group, list, needle, busy, onOpen, onReveal, onRemove,
-				})),
-				shown.length === 0 && groups.length === 0
-					? createElement("div", { key: "z", style: styles.emptyBox },
-						needle ? "没有匹配的 skill。" : "没有扫描到 skill。")
-					: null,
-				]),
+        function SkillPanel({ data, error, busy, query, onQuery, root, onRoot, onOpen, onReveal, onRemove, onRefresh, view, onView }) {
+            const scrollRef = useRef(null);
+            const pageSize = view.pageSize ?? 20;
+            const roots = Array.isArray(data?.roots) ? data.roots : [];
+            const skills = Array.isArray(data?.skills) ? data.skills : [];
+            const needle = String(query ?? "").trim().toLowerCase();
+            const total = data?.totals?.count ?? skills.length;
+            const shown = skills.filter(skill => (!root || skill.root === root)
+                && (!needle || `${skill.name} ${skill.description ?? ""} ${skill.origin ?? ""}`.toLowerCase().includes(needle)))
+                .sort((a, b) => (view.order === "desc" ? -1 : 1) * String(a.name).localeCompare(String(b.name)));
+            const pageCount = Math.max(1, Math.ceil(shown.length / pageSize));
+            const page = Math.min(view.page, pageCount - 1);
+            const start = page * pageSize;
+            const rows = shown.slice(start, start + pageSize);
+            const setPage = page => { onView({ page }); scrollRef.current?.scrollTo({ top: 0 }); };
+            const setPageSize = pageSize => { onView({ pageSize, page: 0 }); scrollRef.current?.scrollTo({ top: 0 }); };
+            const changeRoot = next => { onRoot(next); setPage(0); };
+            const firstIndex = new Map();
+            shown.forEach((skill, index) => {
+                const letter = skill.name.trim().slice(0, 1).toUpperCase();
+                if (!firstIndex.has(letter)) firstIndex.set(letter, index);
+            });
+            const directoryErrors = roots.filter(group => group.error && group.error !== "missing");
+            return createElement("div", { style: { ...styles.skillPanel, flex: "1 1 auto", minHeight: 0 } }, [
+                createElement("div", { key: "header", style: styles.regHeader }, [
+                    createElement(PageHeading, { key: "heading", title: "已注册 Skill", hint: "浏览本机技能与来源", actions: [
+                        createElement("button", { key: "refresh", type: "button", className: "omkt-btn", style: { ...styles.textBtn, color: T.brand }, disabled: busy, onClick: onRefresh }, busy ? "扫描中…" : "重新扫描"),
+                        createElement("button", { key: "directories", type: "button", style: { ...styles.button, display: "inline-flex", gap: 8, alignItems: "center" }, "aria-expanded": view.directories, onClick: () => onView({ directories: !view.directories }) }, [createElement(UiIcon, { key: "icon", name: "folder" }), "技能目录"]),
+                    ] }),
+                    data ? createElement("div", { key: "stats", style: styles.stats }, `${total} 个 Skill　 ${roots.length} 个来源　 ${data.duplicates ? `已合并 ${data.duplicates} 个重复副本` : ""}`) : null,
+                    createElement("div", { key: "hint", style: { ...styles.skillHint, padding: "9px 16px", gap: 10, borderRadius: 10, background: "rgba(69,102,233,.06)", border: `1px solid ${T.line}`, fontSize: 15 } }, [createElement(UiIcon, { key: "icon", name: "info" }), "Skill 在新会话启动时加载；新增或移除后需重启 DSH。"]),
+                    createElement("div", { key: "filters", className: "omkt-reg-filters", style: styles.toolbar }, [
+                        createElement(SearchField, { key: "search", value: query, onChange: value => { onQuery(value); setPage(0); }, label: "搜索 skill", placeholder: "搜索 Skill 名称或用途…", style: { flex: "1 1 240px" } }),
+                        createElement("select", { key: "source", className: "omkt-select", style: styles.select, value: root, "aria-label": "按来源筛选 skill", onChange: event => changeRoot(event.target.value) }, [
+                            createElement("option", { key: "all", value: "" }, "全部来源"),
+                            ...roots.map(group => createElement("option", { key: group.id, value: group.id }, `${group.label}（${group.found ?? group.count}）`)),
+                        ]),
+                        createElement("select", { key: "order", className: "omkt-select", style: styles.select, value: view.order, "aria-label": "Skill 排序", onChange: event => onView({ order: event.target.value, page: 0 }) }, [
+                            createElement("option", { key: "asc", value: "asc" }, "名称 A–Z"),
+                            createElement("option", { key: "desc", value: "desc" }, "名称 Z–A"),
+                        ]),
+                    ]),
+                    createElement("div", { key: "sources", style: styles.toolbar }, [
+                        createElement("button", { key: "all", type: "button", style: { ...styles.sourceMiniBtn, fontSize: 15, borderRadius: 18, padding: "4px 16px", ...(!root ? { background: MCP_SOFT, color: T.brand } : {}) }, "aria-pressed": !root, onClick: () => changeRoot("") }, `全部 ${total}`),
+                        ...roots.slice().sort((a,b) => Number(a.id === "plugin") - Number(b.id === "plugin")).map(group => createElement("button", { key: group.id, type: "button", style: { ...styles.sourceMiniBtn, fontSize: 15, borderRadius: 18, padding: "4px 16px", ...(root === group.id ? { background: MCP_SOFT, color: T.brand } : {}) }, "aria-pressed": root === group.id, onClick: () => changeRoot(group.id) }, `${group.label} ${group.found ?? group.count ?? 0}`)),
+                    ]),
                 ]),
+                error ? createElement("div", { key: "error", role: "alert", style: styles.error }, error) : null,
+                !data ? createElement("div", { key: "loading", style: styles.emptyBox }, busy ? "正在扫描 Skill 目录…" : "还没有读到 Skill 目录。") : null,
+                createElement("div", { key: "scroll", ref: scrollRef, "data-omkt": "scroller", style: styles.regScroll }, [
+                    (view.directories || directoryErrors.length) ? createElement("div", { key: "source-details", style: { ...styles.sourceBox, display: "grid", gap: 6, marginBottom: 12 } },
+                        (view.directories ? roots : directoryErrors).map(group => createElement("div", { key: group.id, role: group.error && group.error !== "missing" ? "alert" : undefined, style: { ...styles.sectionHint, overflowWrap: "anywhere" } }, [
+                            createElement("strong", { key: "label" }, group.label),
+                            ` · ${group.dir || "未报告目录"}${group.error === "missing" ? " · 目录尚未创建" : group.error ? ` · 读取失败：${group.error}` : ""}${group.folded > 0 ? ` · ${group.folded} 个重复副本已折叠` : ""}`,
+                        ]))) : null,
+                    shown.length ? createElement("div", { key: "list-layout", style: { display: "flex", gap: 14, alignItems: "flex-start" } }, [
+                        createElement("div", { key: "list", className: "omkt-skill-list", style: { flex: "1 1 auto", minWidth: 0 } }, [createElement(RegistryColumns, { key: "columns", skill: true }), ...rows.map(skill => createElement(SkillCard, { key: `${skill.root}:${skill.dir}`, skill, rootLabel: rootLabelOf(data, skill.root), busy, onOpen, onReveal, onRemove }))]),
+                        createElement("nav", { key: "letters", className: "omkt-skill-alphabet", "aria-label": "按字母跳转" }, Array.from("ABCDEFGHIJKLMNOPQRSTUVWXYZ").map(letter => createElement("button", {
+                            key: letter, type: "button", disabled: !firstIndex.has(letter), title: `跳转到 ${letter}`, style: { ...styles.textBtn, padding: 0, minWidth: 20, height: 16, fontSize: 11, lineHeight: 1 }, onClick: () => {
+                                const index = firstIndex.get(letter);
+                                setPage(Math.floor(index / pageSize));
+                            },
+                        }, letter))),
+                    ]) : data ? createElement("div", { key: "empty", style: styles.emptyBox }, needle ? "没有匹配的 Skill。" : "当前来源没有独有的 Skill。") : null,
                 ]),
-			]);
-		}
+                data ? createElement(PageFooter, { key: "pager", page, pageCount, pageSize, onPageSize: setPageSize, onPage: setPage, note: rows.length ? `显示 ${start + 1}–${start + rows.length} 项，共 ${shown.length} 项` : "显示 0 项" }) : null,
+            ]);
+        }
 
-		// v5 tints the page head and the tab underline by space, which means the
-// class name is composed — and a composed literal would read to
-// tools/verify-css.mjs as a class called "omkt-pagehead-" with no rule.
+		// Space classes remain selection hooks for theme, keyboard and layout checks.
 const spaceClasses = (base, which) => `${base} ${base}-${which}`;
 function Section({ close }) {
 			ensureStyles();
@@ -4978,6 +4273,8 @@ function Section({ close }) {
 			const [callsError, setCallsError] = useState("");
 			const [callsNote, setCallsNote] = useState("");
 			const [callRange, setCallRange] = useState("24h");
+            const [callView, setCallView] = useState(CALL_VIEW_DEFAULT);
+            const callsRequest = useRef(0);
 			// null until the host says what it is folding with (or the reader picks).
 			const [callMergeChoice, setCallMergeChoice] = useState(null);
 			const callMerge = callMergeChoice ?? (Number.isFinite(calls?.merge) ? calls.merge : null);
@@ -5013,6 +4310,9 @@ function Section({ close }) {
 			const [stateFilter, setStateFilter] = useState("");
 			const [nameFilter, setNameFilter] = useState("");
 			const [collapsed, setCollapsed] = useState(() => new Set());
+            const [groupBySource, setGroupBySource] = useState(false);
+            const [registryView, setRegistryView] = useState({ page: 0, pageSize: 20 });
+            const registryScroll = useRef(null);
 			// The row whose config sheet is open, if any. A row object rather than
 			// a name: two rows can share a name, and the sheet must edit the one
 			// that was clicked.
@@ -5034,6 +4334,8 @@ function Section({ close }) {
 			const [marketBusy, setMarketBusy] = useState(false);
 			const [marketError, setMarketError] = useState("");
 			const [marketQuery, setMarketQuery] = useState("");
+			const [marketAppliedQuery, setMarketAppliedQuery] = useState("");
+			const marketRequest = useRef({ id: 0, filters: { query: "", source: "" } });
 			const [marketSource, setMarketSource] = useState("");
 			const [marketAt, setMarketAt] = useState("");
 			// ---- user-added catalogue sources ----
@@ -5045,10 +4347,18 @@ function Section({ close }) {
 			const [catalogSources, setCatalogSources] = useState(null);
 			const [sourcesMissing, setSourcesMissing] = useState(false);
 			const [sourcesOpen, setSourcesOpen] = useState(false);
+            const [catalogDetailsOpen, setCatalogDetailsOpen] = useState(false);
 			const [sourceDraft, setSourceDraft] = useState("");
 			const [sourceBusy, setSourceBusy] = useState(false);
 			const [sourceNote, setSourceNote] = useState("");
 			const [repoStats, setRepoStats] = useState({});
+            const statsRequests = useRef(new Map());
+            const mediaRequests = useRef(new Map());
+            const statsBatch = useRef(0);
+            const metricRefreshStamp = useRef(new Map());
+            const [statsBusy, setStatsBusy] = useState(false);
+            const [skillMetricNote, setSkillMetricNote] = useState("");
+            const skillMetricRequest = useRef(0);
 			const [repoMedia, setRepoMedia] = useState({});
 			// Repos whose picture lookup failed. Kept separately because a failed
 			// repo does get an empty media entry (the strip must render), so
@@ -5103,6 +4413,9 @@ function Section({ close }) {
 			const actionRef = useRef(false);
 			const checkRef = useRef(false);
 			const pageRef = useRef(null);
+            useEffect(() => {
+                if (tab === "calls" && callView.id) pageRef.current?.querySelector(".omkt-call-detail")?.scrollIntoView({ block: "nearest" });
+            }, [tab, callView.id]);
 			const scrollerRef = useRef(null);
 			const [showTop, setShowTop] = useState(false);
 
@@ -5116,6 +4429,7 @@ function Section({ close }) {
 			const [skillsBusy, setSkillsBusy] = useState(false);
 			const [skillQuery, setSkillQuery] = useState("");
 			const [skillRoot, setSkillRoot] = useState("");
+            const [skillRegistryView, setSkillRegistryView] = useState({ page: 0, pageSize: 20, order: "asc", directories: false });
 			const [skillTarget, setSkillTarget] = useState(null);
 			const [skillNote, setSkillNote] = useState("");
 			// The skill whose removal is being confirmed. A row object, not an id:
@@ -5127,15 +4441,19 @@ function Section({ close }) {
 			const [skillMarketError, setSkillMarketError] = useState("");
 			const [skillMarketBusy, setSkillMarketBusy] = useState(false);
 			const [skillMarketQuery, setSkillMarketQuery] = useState("");
+            const [skillMarketSort, setSkillMarketSort] = useState("default");
 			const [skillMarketSource, setSkillMarketSource] = useState("all");
 			const [skillMarketCategory, setSkillMarketCategory] = useState("all");
+			const skillMarketRequest = useRef({ id: 0, filters: { query: "", source: "all", category: "all", sort: "default", limit: 20, offset: 0 } });
+			const [skillMarketAppliedQuery, setSkillMarketAppliedQuery] = useState("");
 		// Market paging lives here rather than inside SkillMarket: that component is
 		// rendered as a child element, and a hook declared there would be attributed
 		// to the enclosing frame.
 		const [skillMarketPage, setSkillMarketPage] = useState(0);
 		const [skillMarketPageSize, setSkillMarketPageSize] = useState(20);
 			const [skillMarketInstalling, setSkillMarketInstalling] = useState("");
-			const [skillMarketInstalled, setSkillMarketInstalled] = useState([]);
+			const skillsRequest = useRef(0);
+            const skillMarketInstalled = useMemo(() => skills?.installedMarketIds ?? (skills?.skills ?? []).map(row => row.marketId).filter(Boolean), [skills]);
 			const [skillWalkBusy, setSkillWalkBusy] = useState(false);
 			// Which sources the next walk should take to the end. Empty = every
 			// source on its slice, i.e. the 19.8k default.
@@ -5238,18 +4556,23 @@ function Section({ close }) {
 			 * switched to, wrong for every page load. `refresh` also asks the
 			 * host to skip its own one-minute cache.
 			 */
-			async function loadSkills({ refresh: force = false } = {}) {
-				setSkillsBusy(true);
-				try {
-					const body = await api(`/skills${force ? "?refresh=1" : ""}`, { method: "GET" });
-					setSkills(body && typeof body === "object" ? body : null);
-					setSkillsError("");
-				} catch (err) {
-					setSkillsError(String(err.message || err));
-				} finally {
-					setSkillsBusy(false);
-				}
-			}
+            async function loadSkills({ refresh: force = false } = {}) {
+                const id = ++skillsRequest.current;
+                setSkillsBusy(true);
+                try {
+                    const body = await api(`/skills${force ? "?refresh=1" : ""}`, { method: "GET" });
+                    if (id !== skillsRequest.current) return;
+                    if (!Array.isArray(body?.skills)) throw new Error("技能列表响应缺少 skills 数组");
+                    setSkills(body);
+                    setSkillsError("");
+                } catch (err) {
+                    if (id !== skillsRequest.current) return;
+                    setSkillsError(String(err.message || err));
+                    throw err;
+                } finally {
+                    if (id === skillsRequest.current) setSkillsBusy(false);
+                }
+            }
 
 			/**
 			 * Read the skill market.
@@ -5257,58 +4580,34 @@ function Section({ close }) {
 			 * Four upstreams are asked at once and each answers for itself: a dead
 			 * one comes back as that source's `error` while the others still list.
 			 */
-			async function loadSkillMarket({ refresh: force = false } = {}) {
-				setSkillMarketBusy(true);
-				try {
-					const body = await api("/skills/market" + (force ? "?refresh=1" : ""), { method: "GET" });
-					setSkillMarket(body && typeof body === "object" ? body : null);
-					// Until a chip is clicked, show the selection the file actually
-					// holds. Without this the panel says 「已全量」 while the next
-					// 收录 would post `full: []` and walk the slice instead.
-					if (!skillFullTouched.current) {
-						const recorded = (body && body.index && body.index.modes) || {};
-						setSkillFullSel(Object.keys(recorded).filter((id) => recorded[id] === "full"));
-					}
-					// A read answers with the first page, so the pager has to follow it
-					// instead of staying on a page the new payload never contained.
-					setSkillMarketPage(0);
-					setSkillMarketError("");
-				} catch (err) {
-					setSkillMarketError(String(err.message || err));
-				} finally {
-					setSkillMarketBusy(false);
-				}
-			}
-
-			/**
-			 * Search the market with the words in the box.
-			 *
-			 * The host takes a POST for anything with a query, and it only accepts
-			 * `refresh` there, so a search is also the moment a cached answer is
-			 * dropped — which is what a reader typing a new word expects.
-			 */
-			async function searchSkillMarket(over = {}) {
+			async function loadSkillMarket({ refresh = false, ...over } = {}) {
+				const state = skillMarketRequest.current;
+				const id = ++state.id;
+				const filters = state.filters = { ...state.filters, ...over };
 				setSkillMarketBusy(true);
 				setSkillMarketError("");
 				try {
-					const body = await api("/skills/market", {
-						method: "POST",
-						body: JSON.stringify({
-							query: over.query ?? skillMarketQuery,
-							source: over.source ?? skillMarketSource,
-							// 200 is the host's cap once the index is paging; the live
-							// path clamps itself to 60 further in.
-							limit: Math.min(200, Math.max(20, Number(over.limit) || skillMarketPageSize)),
-							// Only the index has anything to offset into: a live read is
-							// one screen per source.
-							offset: Math.max(0, Number(over.offset) || 0),
-						}),
+					const initial = id === 1 && !refresh && !Object.keys(over).length;
+					const body = await api("/skills/market", initial ? { method: "GET" } : {
+						method: "POST", body: JSON.stringify({ ...filters, refresh }),
 					});
-					setSkillMarket(body && typeof body === "object" ? body : null);
+					if (id !== state.id) return;
+					if (!Array.isArray(body?.items)) throw new Error("Skill 市场返回了无效的列表");
+					if (body.paging) {
+						state.filters = { ...filters, offset: body.paging.offset };
+						setSkillMarketPage(Math.floor(body.paging.offset / body.paging.limit));
+					}
+					setSkillMarket(body);
+                    void enrichSkillMetrics(body.items, refresh, id);
+					setSkillMarketAppliedQuery(filters.query);
+					if (!skillFullTouched.current) {
+						const recorded = body.index?.modes ?? {};
+						setSkillFullSel(Object.keys(recorded).filter(id => recorded[id] === "full"));
+					}
 				} catch (err) {
-					setSkillMarketError(String(err.message || err));
+					if (id === state.id) setSkillMarketError(String(err.message || err));
 				} finally {
-					setSkillMarketBusy(false);
+					if (id === state.id) setSkillMarketBusy(false);
 				}
 			}
 
@@ -5373,9 +4672,10 @@ function Section({ close }) {
 						body: JSON.stringify({ id: item.id, root: "plugin" }),
 					});
 					if (out?.ok) {
-						setSkillMarketInstalled((list) => (list.includes(item.id) ? list : [...list, item.id]));
 						setSkillNote(`已安装到 ${out.dir ?? ""}（${out.files ?? 0} 个文件）· 重启 DSH 后可用`);
-						loadSkills({ refresh: true }).catch(() => {});
+						await loadSkills({ refresh: true }).catch(err => {
+                            setSkillNote(`安装已完成，但刷新技能列表失败：${String(err.message || err)}；请重新扫描确认状态`);
+                        });
 					} else {
 						setSkillNote(`安装失败：${out?.error ?? "宿主没有给出原因"}`);
 					}
@@ -5386,8 +4686,7 @@ function Section({ close }) {
 				}
 			}
 
-			/** Arrow keys walk the two spaces. The pills are plain divs (see the
-			 *  render below): a focusable pill is exactly what the shell frames. */
+			/** Arrow keys select a space while focus stays on the tab list. */
 			function onSpacesKeyDown(event) {
 				if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
 				if (typeof event.preventDefault === "function") event.preventDefault();
@@ -5403,9 +4702,12 @@ function Section({ close }) {
 				// feed starts unfiltered rather than looking mysteriously empty.
 				setCallFilter("");
 				setCallQuery("");
-				// "skillmarket" is not an MCP tab; walking back must land on one.
-				// 调用 exists in both spaces, so it can stay; the market cannot.
-				if (next === "mcp" && tab === "skillmarket") setTab("registry");
+                setCallView(CALL_VIEW_DEFAULT);
+				// The resource and the view are independent choices on the same bar.
+				if (tab !== "calls") {
+					const inMarket = tab === "market" || tab === "skillmarket";
+					setTab(next === "mcp" ? (inMarket ? "market" : "registry") : (inMarket ? "skillmarket" : "skillregistry"));
+				}
 				if (next === "skill" && !skills && !skillsBusy) loadSkills().catch(() => {});
 				// The 市场 tab carries a count, so the list has to be asked for
 				// before that tab is ever opened — otherwise the number is missing
@@ -5461,7 +4763,9 @@ function Section({ close }) {
 						setSkillNote(`已移到回收目录：${out.trashedTo ?? ""}`);
 						setSkillRemove(null);
 						setSkillTarget(null);
-						await loadSkills({ refresh: true });
+						await loadSkills({ refresh: true }).catch(err => {
+                            setSkillNote(`技能已移入回收目录，但刷新列表失败：${String(err.message || err)}；请重新扫描确认状态`);
+                        });
 					} else {
 						setSkillNote(`移除失败：${out?.error ?? "宿主没有给出原因"}`);
 					}
@@ -5864,32 +5168,47 @@ function Section({ close }) {
 			}
 
 			async function loadMarket(options = {}) {
+                const state = marketRequest.current;
+                const id = ++state.id;
+                const filters = state.filters = {
+                    query: options.query ?? state.filters.query,
+                    source: options.source ?? state.filters.source,
+                };
+                if (options.keepPage !== true) setMarketPage(0);
 				setMarketBusy(true); setMarketError("");
 				try {
 					const body = await api("/catalog", {
 						method: "POST",
 						timeoutMs: 120000,
 						body: JSON.stringify({
-							query: options.query ?? marketQuery,
-							source: options.source ?? marketSource,
+							query: filters.query,
+							source: filters.source,
 							limit: 10000,
 							refresh: options.refresh === true,
 						}),
 					});
-					// `items` is rendered with `.map()` in several places and a failure
-					// body (`{ error }`) has no items at all: normalise here so a
-					// listing that failed to build shows an empty market, not a blank
-					// page.
-					setMarket({ ...body, items: Array.isArray(body?.items) ? body.items : [] });
+                    if (id !== state.id) return;
+                    if (!Array.isArray(body?.items)) throw new Error("连接器市场响应缺少 items 数组");
+                    setMarket({ ...body, listingRevision: id, metricsRefresh: options.refresh === true });
+                    setDetail(previous => previous ? body.items.find(item => itemKeyOf(item) === itemKeyOf(previous)) ?? previous : null);
+                    setMarketAppliedQuery(filters.query);
+					if (Array.isArray(body?.servers)) {
+						const received = keepSessionHealth(body.servers);
+						setServers(previous => previous ? previous.map(row => {
+							const next = received[row.slot];
+							if (!next || next.name !== row.name || next.source !== row.source) return row;
+							return { ...row, artworkKey: next.artworkKey ?? row.artworkKey, icon: next.icon ?? row.icon, iconCandidates: next.iconCandidates ?? row.iconCandidates, config: row.config ?? next.config };
+						}) : received);
+					}
 					setMarketAt(body.fetchedAt ? new Date(body.fetchedAt).toLocaleTimeString() : "");
 					// A new listing invalidates the page you were on — unless the
 					// reader stayed where they were: installing from page 7 of a
 					// source keeps the context that made them install.
 					if (options.keepPage !== true) setMarketPage(0);
-					enrichStars(body.items ?? [], options.refresh === true);
-					enrichMedia(body.items ?? [], options.refresh === true);
+
 					askForInstallEvidence();
 				} catch (err) {
+					if (id !== state.id) return;
 					const text = String(err.message || err);
 					// A bare 404 means the host bundle running in this window predates
 					// the market route (the plugin was updated while the app was open).
@@ -5897,48 +5216,62 @@ function Section({ close }) {
 						? "宿主插件还是旧版本（缺少 /api/overall-mcp/catalog）。请完全退出 DSH 后重新打开，或在本页刷新一次再试。"
 						: text);
 				} finally {
-					setMarketBusy(false);
+					if (id === state.id) setMarketBusy(false);
 				}
 			}
 
-			/**
-			 * Star counts are not part of the public catalogs: the cards render
-			 * first without them and a single bounded, cached request fills in the
-			 * first 30 GitHub repositories of the listing afterwards. Never blocks
-			 * or fails the tab.
-			 *
-			 * The window is wider than the fold because the interleaved market puts
-			 * only one community-index card per round; a first-screen window would
-			 * often contain no GitHub repository at all. Still capped so the
-			 * unauthenticated GitHub budget (60/h) survives repeated page opens —
-			 * which also means the Star sort only discriminates among those 30
-			 * repositories until the rest are enriched.
-			 */
-			function enrichStars(items, refresh) {
-				const repos = [];
-				const seen = new Set();
-				for (const item of items) {
-					const key = repoKeyOf(item);
-					if (!key || seen.has(key)) continue;
-					// Skip repos already answered: paging back must not re-spend the
-					// unauthenticated GitHub budget on entries we already have.
-					if (repoStats[key]) continue;
-					seen.add(key);
-					repos.push(key);
-					if (repos.length >= 30) break;   // stay inside the GitHub rate budget
-				}
-				if (!repos.length) return;
-				api("/repo-stats", { method: "POST", timeoutMs: 120000, body: JSON.stringify({ repos, refresh }) })
-					.then((body) => {
-						setRepoStats((prev) => ({ ...prev, ...(body.stats ?? {}) }));
-						// GitHub's unauthenticated window is a rolling 60 minutes from
-						// the first request, not a wall-clock hour, and the host
-						// re-probes on a TTL — so promise "after the quota comes
-						// back", never "after the next hour".
-						if (body.rateLimited) setStarNote("GitHub 未认证接口每小时仅 60 次，本轮额度已用完；额度恢复后会自动补齐");
-					})
-					.catch(() => {});
-			}
+            /** Measure the visible page in batches of 30. Cache successes for
+             * five minutes; explicit refresh bypasses it once per listing.
+             * Failed measurements retain old numbers with a visible warning. */
+            async function enrichStars(items, refresh = false) {
+                const repos = [...new Set(items.map(repoKeyOf).filter(Boolean))];
+                const wanted = repos.filter(key => {
+                    const hit = repoStats[key];
+                    const force = refresh && metricRefreshStamp.current.get(key) !== market?.listingRevision;
+                    if (force) metricRefreshStamp.current.set(key, market?.listingRevision);
+                    return force || !hit || hit.stale || !hit.fetchedAt || Date.now() - Date.parse(hit.fetchedAt) >= 300_000;
+                });
+                if (!wanted.length) { setStarNote(""); return; }
+                const batch = ++statsBatch.current;
+                const revisions = new Map(wanted.map(key => {
+                    const id = (statsRequests.current.get(key) ?? 0) + 1;
+                    statsRequests.current.set(key, id); return [key, id];
+                }));
+                setStatsBusy(true);
+                const failures = [];
+                try {
+                    for (let offset = 0; offset < wanted.length; offset += 30) {
+                        const chunk = wanted.slice(offset, offset + 30);
+                        const body = await api("/repo-stats", { method: "POST", timeoutMs: 120000, body: JSON.stringify({ repos: chunk, refresh }) });
+                        if (!body?.stats || typeof body.stats !== "object") throw new Error("仓库统计响应格式无效");
+                        const errors = body.errors ?? (body.rateLimited ? chunk.map(repo => ({ repo, message: "GitHub 访问限额已用完" })) : []);
+                        for (const key of chunk) if (!body.stats[key] && !errors.some(row => row.repo === key)) errors.push({ repo: key, message: "来源未返回仓库统计" });
+                        failures.push(...errors);
+                        setRepoStats(previous => {
+                            const next = { ...previous };
+                            for (const key of chunk) {
+                                if (statsRequests.current.get(key) !== revisions.get(key)) continue;
+                                const error = errors.find(row => row.repo === key);
+                                if (body.stats[key] || next[key] || error) next[key] = {
+                                    ...next[key], ...body.stats[key], stale: Boolean(error), error: error?.message ?? null,
+                                };
+                            }
+                            return next;
+                        });
+                        if (body.rateLimited) { failures.push(...wanted.slice(offset + 30).map(repo => ({ repo, message: "访问限额已用完，本次未更新" }))); break; }
+                    }
+                    if (batch === statsBatch.current) setStarNote(failures.length
+                        ? `${failures.length} 个仓库的统计未能更新，保留已有数字。可稍后刷新，或检查 GitHub 登录与访问额度。`
+                        : "本页仓库统计已更新");
+                } catch (error) {
+                    if (batch === statsBatch.current) setStarNote(`仓库统计更新失败，当前数字可能是旧数据：${String(error.message || error)}`);
+                    setRepoStats(previous => {
+                        const next = { ...previous };
+                        for (const key of wanted) if (statsRequests.current.get(key) === revisions.get(key)) next[key] = { ...next[key], stale: true, error: String(error.message || error) };
+                        return next;
+                    });
+                } finally { if (batch === statsBatch.current) setStatsBusy(false); }
+            }
 
 			/**
 			 * Preview pictures for the cards, one bounded request per market load.
@@ -5953,33 +5286,43 @@ function Section({ close }) {
 			 * could not ask about, and those are listed with a 重试 control
 			 * instead of rendering as "this repo has no images".
 			 */
-			function enrichMedia(items, refresh) {
-				const repos = [];
-				const seen = new Set();
-				for (const item of items) {
-					const key = repoKeyOf(item);
-					if (!key || seen.has(key)) continue;
-					// A plain load asks once per repo: anything already answered —
-					// including a failure, which gets an empty entry so the strip can
-					// render — is skipped. 刷新 and 重试 pass `refresh`, which asks the
-					// host again (it bypasses both TTLs for that call).
-					if (!refresh && repoMedia[key]) continue;
-					seen.add(key);
-					repos.push(key);
-					if (repos.length >= 24) break;
-				}
-				if (!repos.length) return;
-				api("/repo-media", { method: "POST", timeoutMs: 120000, body: JSON.stringify({ repos, refresh }) })
-					.then((body) => {
-						setRepoMedia((prev) => ({ ...prev, ...(body.media ?? {}) }));
-						const errors = body.errors ?? [];
-						setMediaFailures((prev) => [
-							...prev.filter((e) => !repos.includes(e.repo)),
-							...errors,
-						]);
-					})
-					.catch(() => {});
-			}
+            async function enrichMedia(items, refresh = false) {
+                const repos = [...new Set(items.map(repoKeyOf).filter(Boolean))].filter(key => refresh || !repoMedia[key]);
+                const revisions = new Map(repos.map(key => {
+                    const id = (mediaRequests.current.get(key) ?? 0) + 1;
+                    mediaRequests.current.set(key, id); return [key, id];
+                }));
+                for (let offset = 0; offset < repos.length; offset += 24) {
+                    const chunk = repos.slice(offset, offset + 24);
+                    const current = key => mediaRequests.current.get(key) === revisions.get(key);
+                    try {
+                        const body = await api("/repo-media", { method: "POST", timeoutMs: 120000, body: JSON.stringify({ repos: chunk, refresh }) });
+                        if (!body?.media || typeof body.media !== "object") throw new Error("配图响应格式无效");
+                        setRepoMedia(previous => ({ ...previous, ...Object.fromEntries(Object.entries(body.media).filter(([key]) => current(key))) }));
+                        setMediaFailures(previous => [...previous.filter(row => !chunk.includes(row.repo) || !current(row.repo)), ...(body.errors ?? []).filter(row => current(row.repo))]);
+                    } catch (error) {
+                        setMediaFailures(previous => [...previous.filter(row => !chunk.includes(row.repo) || !current(row.repo)), ...chunk.filter(current).map(repo => ({ repo, error: String(error.message || error) }))]);
+                    }
+                }
+            }
+
+            async function enrichSkillMetrics(items, refresh, listingId) {
+                const id = ++skillMetricRequest.current;
+                const ids = items.filter(item => ['clawhub', 'skillhub', 'github'].includes(item.source)).map(item => item.id);
+                if (!ids.length) { setSkillMetricNote(""); return; }
+                setSkillMetricNote("正在更新本页下载量和 Star…");
+                try {
+                    const body = await api("/skills/market/metrics", { method: "POST", timeoutMs: 25000, body: JSON.stringify({ ids, refresh }) });
+                    if (id !== skillMetricRequest.current || listingId !== skillMarketRequest.current.id) return;
+                    if (!body?.items || typeof body.items !== "object") throw new Error("技能统计响应格式无效");
+                    setSkillMarket(previous => ({ ...previous, items: previous.items.map(item => ({ ...item, ...body.items[item.id] })) }));
+                    setSkillMetricNote(body.errors?.length
+                        ? `本页 ${body.errors.length} 项统计更新失败，保留上次数字；可稍后刷新重试。`
+                        : `本页 ${body.updated ?? 0} 项统计已更新。热门顺序按已收录数据及已更新统计计算。`);
+                } catch (error) {
+                    if (id === skillMetricRequest.current && listingId === skillMarketRequest.current.id) setSkillMetricNote(`本页统计更新失败，保留已有数字：${String(error.message || error)}`);
+                }
+            }
 
 			/**
 			 * Read the feed for one space.
@@ -6005,18 +5348,25 @@ function Section({ close }) {
 				}
 				if (filterNow) params.set("filter", filterNow);
 				if (qNow) params.set("q", qNow);
-				setCallsBusy(true);
+				const request = (callsRequest.current ?? 0) + 1;
+                callsRequest.current = request;
+                setCalls(null);
+                setCallsBusy(true);
 				setCallsError("");
 				setCallsNote("");
 				try {
 					const body = await api("/calls?" + params.toString(), { method: "GET" });
-					setCalls(body && typeof body === "object" ? body : null);
+					if (callsRequest.current !== request) return;
+                    // A resource selected in another window must not remain as
+                    // a hidden zero-count filter after its events age out.
+                    if (filterNow && Array.isArray(body?.rail) && !body.rail.some(item => item.id === filterNow)) setCallFilter("");
+                    setCalls(body && typeof body === "object" ? body : null);
 					const today = body?.stats?.today;
 					if (Number.isFinite(today)) setCallBadges((prev) => ({ ...prev, [spaceNow]: today }));
 				} catch (err) {
-					setCallsError(String(err.message || err));
+					if (callsRequest.current === request) setCallsError(String(err.message || err));
 				} finally {
-					setCallsBusy(false);
+					if (callsRequest.current === request) setCallsBusy(false);
 				}
 			}
 
@@ -6042,9 +5392,9 @@ function Section({ close }) {
 			}
 
 			/** What is on screen, as JSON — the same rows, with the filters that produced them. */
-			async function exportCalls() {
-				const rows = Array.isArray(calls?.rows) ? calls.rows : [];
-				const text = JSON.stringify({ space, range: callRange, filter: callFilter, q: callQuery, rows }, null, 2);
+			async function exportCalls(view = {}) {
+				const rows = Array.isArray(view.rows) ? view.rows : [];
+				const text = JSON.stringify({ space, range: callRange, filter: callFilter, q: callQuery, eventFilter: view.eventFilter ?? "all", rows }, null, 2);
 				try {
 					await navigator.clipboard.writeText(text);
 					setCallsNote("已复制 " + rows.length + " 条 JSON");
@@ -6626,12 +5976,13 @@ function Section({ close }) {
 				total: all.length,
 				enabled: all.filter((s) => s.enabled !== false).length,
 				disabled: all.filter((s) => s.enabled === false).length,
-				connected: all.filter((s) => s.connected).length,
-				failed: all.filter((s) => s.error).length,
+				connected: all.filter((s) => s.enabled !== false && s.connected && !s.error && !s.starting && s.health?.ok !== false).length,
+				failed: all.filter((s) => s.error || s.health?.ok === false && !s.starting).length,
 			};
 			// Mounted and enabled, but a required setting is empty — the rows whose
 			// tool calls will fail. A stopped row is not 「还差配置」, it is stopped.
 			const needConfigCount = all.filter((s) => s.needConfig === true && s.enabled !== false).length;
+            const firstFailedServer = all.find(server => server.error || server.health?.ok === false && !server.starting);
 
 			// ---- the update queue, derived for render ----
 			// The bar reports two facts and no more: how many items the host has
@@ -6707,7 +6058,7 @@ function Section({ close }) {
 				// says it can.
 				const matches = (server) => {
 					if (!needle) return true;
-					const hay = [server.name, server.source, server.command, server.url]
+					const hay = [server.name, server.source, server.command, server.url, server.about?.text]
 						.filter((v) => typeof v === "string" && v)
 						.join(" ")
 						.toLowerCase();
@@ -6722,8 +6073,8 @@ function Section({ close }) {
 					if (sourceFilter && source !== sourceFilter) continue;
 					if (stateFilter === "enabled" && server.enabled === false) continue;
 					if (stateFilter === "disabled" && server.enabled !== false) continue;
-					if (stateFilter === "connected" && !server.connected) continue;
-					if (stateFilter === "failed" && !server.error) continue;
+					if (stateFilter === "connected" && (!server.connected || server.error || server.starting || server.health?.ok === false)) continue;
+					if (stateFilter === "failed" && !server.error && server.health?.ok !== false) continue;
 					if (!matches(server)) continue;
 					if (!bySource.has(source)) bySource.set(source, []);
 					bySource.get(source).push(server);
@@ -6732,6 +6083,21 @@ function Section({ close }) {
 					.map(([source, list]) => [source, list.sort((a, b) => a.name.localeCompare(b.name))])
 					.sort((a, b) => a[0].localeCompare(b[0]));
 			}, [servers, aboutI18n, sourceFilter, stateFilter, nameFilter]);
+            // Filter the complete registry first, then page the exact row
+            // objects so row slots and source-wide operations keep their identity.
+            const registryRows = groups.flatMap(([, rows]) => rows);
+            const registryPageCount = Math.max(1, Math.ceil(registryRows.length / registryView.pageSize));
+            const registryPage = Math.min(registryView.page, registryPageCount - 1);
+            const registryStart = registryPage * registryView.pageSize;
+            const registryPageRows = registryRows.slice(registryStart, registryStart + registryView.pageSize);
+            const registryPageRowsSet = new Set(registryPageRows);
+            const registryPageGroups = groups.map(([source, rows]) => [source, rows.filter(row => registryPageRowsSet.has(row))])
+                .filter(([, rows]) => rows.length);
+            const changeRegistryView = update => {
+                setRegistryView(previous => ({ ...previous, ...update }));
+                registryScroll.current?.scrollTo({ top: 0 });
+            };
+
 
 			const toggleCollapsed = (source) => setCollapsed((prev) => {
 				const next = new Set(prev);
@@ -6785,32 +6151,17 @@ function Section({ close }) {
 			// lists' ~75 headings into 19 functional groups (Finance and Finance
 			// & Fintech become 金融支付); the three registries publish no category,
 			// so their entries sit under 未分类 rather than being hidden.
-			// A group whose every entry came from our own reading of the name and
-			// description (`groupSource === "inferred"`, see lib/catalog.js) is
-			// marked as such in the dropdown, not only on the card: someone about to
-			// filter by 「金融支付」 is entitled to know whether a source published
-			// that heading or this panel inferred it from the entry's words. A mixed
-			// group keeps the bare name — part of it did come from an upstream
-			// heading, which is exactly what the option claims.
 			const groupOptions = useMemo(() => {
 				if (!marketItems) return [];
 				const counts = new Map();
-				const inferred = new Map();
 				let uncategorized = 0;
 				for (const item of marketItems) {
 					if (!item.group) { uncategorized += 1; continue; }
 					counts.set(item.group, (counts.get(item.group) ?? 0) + 1);
-					if (item.groupSource === "inferred") {
-						if (!inferred.has(item.group)) inferred.set(item.group, true);
-					} else inferred.set(item.group, false);
 				}
-				const sorted = [...counts.entries()]
-					.map(([name, count]) => [name, count, inferred.get(name) === true])
-					.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-				return uncategorized > 0 ? [...sorted, ["__none__", uncategorized, false]] : sorted;
+				const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+				return uncategorized > 0 ? [...sorted, ["__none__", uncategorized]] : sorted;
 			}, [marketItems]);
-			/** Whether any option in the dropdown is a group this panel inferred. */
-			const groupInferred = groupOptions.some(([, , inferred]) => inferred);
 
 			// The host sends the whole merged listing (~5.4k items — upstream cost
 			// is identical for a capped slice); ordering and paging are a view
@@ -6835,11 +6186,15 @@ function Section({ close }) {
 			const pageItems = sortedItems
 				? sortedItems.slice(safePage * pageSize, safePage * pageSize + pageSize)
 				: null;
+            const visibleMetricsKey = (pageItems ?? []).map(repoKeyOf).filter(Boolean).join('|');
+            useEffect(() => {
+                if (space !== "mcp" || tab !== "market" || marketBusy || !market) return;
+                const items = detail ? [...(pageItems ?? []), detail] : pageItems ?? [];
+                void enrichStars(items, market.metricsRefresh === true);
+                void enrichMedia(items, market.metricsRefresh === true);
+            }, [space, tab, market?.listingRevision, marketBusy, visibleMetricsKey, safePage, pageSize, marketGroup, marketSort, favOnly, detail?.id]);
 
-			const spotlight = marketSpotlights(pageItems ?? [], {
-				enabled: safePage === 0 && marketSort === "default" && !marketQuery.trim() && !marketSource && !marketGroup && !favOnly,
-				stats: repoStats,
-			});
+
 			// The sub-line answers "what am I looking at" — see subLineText.
 			const running = subLineText(hostStatus);
 			const staleSource = hostStatus?.plugin?.source?.stale === true;
@@ -6941,116 +6296,54 @@ function Section({ close }) {
 
 			// The one outlined control that belongs beside the sub-line rather
 			// than in the run of text buttons on the first row.
+            const highlightCount = marketSort === "default" && safePage === 0 && !marketAppliedQuery.trim() && !marketGroup && !favOnly && (pageItems?.length ?? 0) > 2 ? 2 : 0;
+            const marketCard = (item, i, featured = false) => createElement(MarketCard, {
+                key: `${item.source}:${item.id ?? item.title}`, item, stats: repoStats, busy,
+                installing: installingKey === itemKeyOf(item), featured,
+                rank: marketSort === "default" ? null : safePage * pageSize + i + 1,
+                usageSort: marketSort === "installs", onInstall: doInstall, onOpen: setDetail, onToggleFavorite: doToggleFavorite,
+            });
 			const logButton = createElement("button", {
 				key: "hd-log", type: "button", className: "omkt-btn omkt-btn-outline",
 				style: styles.outlineBtn, onClick: doExportLog,
 			}, "⤓ 导出日志");
-			return createElement("div", { className: "omkt-page", style: { ...styles.page, "--omkt-accent": space === "skill" ? SKILL_ACCENT : MCP_ACCENT, "--omkt-accent-soft": space === "skill" ? SKILL_SOFT : MCP_SOFT, "--omkt-accent-ink": space === "skill" ? SKILL_INK : "#3d5fd9" }, ref: pageRef }, [
-				// ---- page head, laid out the way the v5 prototype lays it out ----
-				// Two stacked rows inside one wrapper: the tinted panel holds only
-				// the identity and the page's own actions, and a quiet ident line
-				// sits under it — build facts on the left, the two log controls on
-				// the right. The panel is full width exactly as in the prototype;
-				// sizing it to its contents made the title wrap as soon as the
-				// window narrowed, which is what made the last version read wrong.
-				createElement("div", { key: "head", style: styles.headWrap }, [
-					createElement("div", {
-						key: "hd-panel", className: spaceClasses("omkt-pagehead", space),
-						style: styles.pageHead,
-					}, [
-						createElement("div", { key: "hd-title", style: styles.titleRow }, [
-							createElement("span", { key: "hd-mark", style: styles.brandTile }, brandMark(22)),
-							createElement("strong", { key: "n", style: styles.pageTitle }, [
-								"全局 MCP",
-								createElement("span", { key: "amp", style: styles.amp }, "&"),
-								"Skill",
-							]),
-							createElement("span", { key: "hd-ver", style: styles.versionChip, title: "插件版本" },
-								`v${CLIENT_VERSION}`),
-							// The plugin's own update lives beside the version it
-							// changes: it is the one action here that is about this
-							// page rather than about the page's content.
-							selfUpdate && selfUpdate.updateAvailable
-								? createElement("button", {
-									key: "hd-self", type: "button", className: "omkt-btn omkt-btn-primary",
-									style: { ...styles.button, ...styles.primary, ...styles.chipButton },
-									disabled: busy,
-									title: `把 dsh-overall-mcp 更新到 v${selfUpdate.latest}（${selfUpdate.profileName ?? "本 profile"}）`,
-									onClick: doSelfUpdate,
-								}, busy ? "更新中…" : `更新到 v${selfUpdate.latest}`)
-								: null,
-							// 「点个 star」 follows the version it would be starring:
-							// it is an invitation, not one of the page's controls.
-							starPill(),
-						]),
-						createElement("div", { key: "hd-acts", style: styles.headCol }, [
-							// One filled button per view. The registry tab's important
-							// action is the rescan; the market tab keeps it too, but
-							// quiet, because 刷新 there only re-reads the catalogue.
-							tab === "registry"
-								? createElement("button", {
-									key: "hd-primary", type: "button", className: "omkt-btn omkt-btn-primary",
-									style: { ...styles.button, ...styles.primary }, disabled: busy, onClick: doScan,
-								}, "重新扫描宿主机")
-								: null,
-							tab === "market"
-								? createElement("button", {
-									key: "hd-secondary", type: "button", className: "omkt-btn omkt-btn-text",
-									style: styles.textBtn, disabled: busy, onClick: doScan,
-								}, "重新扫描宿主机")
-								: null,
-							createElement("button", {
-								key: "hd-updates", type: "button", className: "omkt-btn omkt-btn-text",
-								style: styles.textBtn, disabled: busy, onClick: doCheckUpdates,
-							}, "检查更新"),
-							close
-								? createElement("button", {
-									key: "hd-close", type: "button", className: "omkt-btn omkt-btn-text", style: styles.textBtn,
-									onClick: close,
-								}, "关闭")
-								: null,
-						]),
-					]),
-					// The ident line: what is running, then the two controls that
-					// are about the log rather than about the page's content.
-					createElement("div", { key: "hd-ident", style: styles.identRow }, [
-						createElement("span", { key: "i-txt", style: styles.identText, title: running },
-							subLineText(hostStatus)),
-						createElement("div", { key: "i-acts", style: styles.identActs }, [
-							createElement("button", {
-								key: "hd-events", type: "button", className: "omkt-btn omkt-btn-text",
-								style: styles.textBtn, onClick: toggleLog, title: running,
-							}, logOpen ? "收起运行日志" : "运行日志"),
-							logButton,
-						]),
-					]),
-					// Warnings, when there are any: nothing to say means no row at
-					// all — an empty row would still be a grid child and leave slack.
-					staleSource || statusError
-						? createElement("div", { key: "hd-row2", style: styles.headSubRow }, [
-						createElement("div", { key: "hd-sub", style: styles.pageSub }, [
-							// The fact this panel could not state before: the files on
-							// disk are newer than the process serving them, so a fix
-							// that has already been made is not in effect yet. It is
-							// the difference between "still broken" and "not loaded".
-							staleSource
-								? createElement("span", {
-									key: "hd-stale", style: styles.error,
-									title: `磁盘上的代码比当前进程更新（进程启动于 ${hostStatus.plugin.loadedAt}）；重启 DSH 后生效`,
-								}, "⚠ 代码已更新，重启 DSH 后生效")
-								: null,
-							statusError
-								? createElement("span", { key: "hd-statuserr", style: styles.error }, `⚠ ${statusError}`)
-								: null,
-						]),
-						])
-						: null,
-				]),
+			return createElement("div", { className: "omkt-page", style: styles.page, ref: pageRef }, [
+
+                createElement("div", { key: "head", style: styles.headWrap }, [
+                    createElement("div", { key: "hd-panel", className: spaceClasses("omkt-pagehead", space), style: styles.pageHead }, [
+                        createElement("div", { key: "title", style: styles.titleRow }, [
+                            createElement("span", { key: "mark", style: { ...styles.brandTile, width: 40, height: 40, background: MCP_SOFT, color: T.brand } }, brandMark(24)),
+                            createElement("strong", { key: "name", style: styles.pageTitle }, "全局 MCP & Skill"),
+                            createElement("span", { key: "version", style: styles.versionChip, title: "插件版本" }, `v${CLIENT_VERSION}`),
+                            selfUpdate?.updateAvailable ? createElement("button", {
+                                key: "hd-self", type: "button", style: { ...styles.button, ...styles.primary }, title: `更新到 v${selfUpdate.latest}`, disabled: busy, onClick: doSelfUpdate,
+                            }, `更新到 v${selfUpdate.latest}`) : null,
+                        ]),
+                        createElement("div", { key: "actions", style: styles.headCol }, [
+                            createElement("span", { key: "status", style: { ...styles.hint, display: "inline-flex", gap: 9, alignItems: "center", fontSize: 14, color: T.text } }, [
+                                createElement("span", { key: "dot", style: { width: 7, height: 7, borderRadius: "50%", background: statusError ? T.red : hostStatus ? T.green : T.text4 } }),
+                                statusError ? "连接异常" : hostStatus ? "宿主已连接" : "连接中…",
+                            ]),
+                            createElement("button", { key: "hd-events", type: "button", className: "omkt-btn", style: { ...styles.outlineBtn, fontSize: 14, display: "inline-flex", gap: 8, alignItems: "center" }, title: running, onClick: toggleLog, "aria-expanded": logOpen }, [createElement(UiIcon, { key: "icon", name: "diagnostics", size: 17 }), logOpen ? "收起诊断" : "运行诊断"]),
+                            createElement(ActionMenu, { key: "more", label: "插件操作" }, [
+                                createElement("button", { key: "scan", type: "button", style: styles.textBtn, disabled: busy, onClick: doScan }, "重新扫描宿主机"),
+                                createElement("button", { key: "github", type: "button", style: styles.textBtn, onClick: () => { switchSpace("mcp"); setTab("registry"); setGhAccessPinned(value => !value); } }, "GitHub 访问设置"),
+                                createElement("button", { key: "hd-updates", type: "button", style: styles.textBtn, disabled: busy, onClick: doCheckUpdates }, "检查更新"),
+                                logButton,
+                                starPill(),
+                                close ? createElement("button", { key: "close", type: "button", style: styles.textBtn, onClick: close }, "关闭") : null,
+                            ]),
+                        ]),
+                    ]),
+                    staleSource ? createElement("div", { key: "stale", role: "status", style: styles.error }, "代码已更新，重启 DSH 后生效") : null,
+                    statusError ? createElement("div", { key: "error", role: "alert", style: styles.error }, statusError) : null,
+                ]),
 				// 运行日志 — the host's own account of what this plugin did, which
 				// outlives the request that produced it and the process that knew
 				// the reason. Folded away until asked for.
 				logOpen
 					? createElement("div", { key: "log", style: styles.logBox }, [
+                        createElement("div", { key: "build", style: styles.identText, title: running }, subLineText(hostStatus)),
 						createElement("div", { key: "log-hd", style: styles.logHead }, [
 							createElement("span", { key: "log-t", style: styles.logTitle },
 								eventLog === null
@@ -7076,77 +6369,20 @@ function Section({ close }) {
 					])
 					: null,
 
-				// ---------------- space switch ----------------
-				// Two peers on one page. The count on each pill is the only number
-				// the other space shows, so the switch also says how much is behind
-				// it; the accent below is picked from `space` (the page is inline
-				// styles, so there is no body class to hang a CSS variable on).
-				createElement("div", {
-					// The space-specific suffix lets the focus ring follow the accent:
-					// blue for MCP, violet for Skill, same as the pills themselves.
-					key: "spaces", className: spaceClasses("omkt-spaceswitch", space), style: styles.spaceSwitch, role: "tablist", "aria-label": "空间",
-					tabIndex: 0, onKeyDown: onSpacesKeyDown,
-				}, [
+				createElement("div", { key: "navigation", className: "omkt-navigation", style: { borderBottom: `1px solid ${T.line}`, marginBottom: 13 } }, [
 					createElement("div", {
-						key: "mcp", role: "tab", className: "omkt-spacep",
-						"aria-selected": space === "mcp" ? "true" : "false",
-						style: {
-							...styles.spacePill,
-							...(space === "mcp" ? { ...styles.spacePillOn, borderColor: "rgba(91,124,250,0.34)" } : {}),
-						},
-						onClick: () => switchSpace("mcp"),
+						key: "spaces", className: "omkt-spaceswitch", style: styles.spaceSwitch, role: "tablist", "aria-label": "资源",
+						tabIndex: 0, onKeyDown: onSpacesKeyDown,
 					}, [
-						createElement("span", {
-							key: "i",
-							style: {
-								...styles.spaceIco,
-								...(space === "mcp" ? { background: MCP_SOFT, color: MCP_ACCENT, border: "1px solid rgba(91,124,250,0.28)" } : {}),
-							},
-						}, brandMark(20, true)),
-						createElement("span", { key: "b", style: styles.spaceBody }, [
-							createElement("span", { key: "l", style: { ...styles.spaceLab, color: space === "mcp" ? "#3d5fd9" : undefined } }, [
-								"MCP",
-								createElement("span", { key: "c", style: { ...styles.spaceCount, ...(space === "mcp" ? { background: MCP_SOFT, color: "#3d5fd9" } : {}) } }, String(stats.total)),
-							]),
-							createElement("span", { key: "sub", style: styles.spaceSub }, "连接器 · 工具前缀 · 健康检查"),
-						]),
+						...[["mcp", "MCP"], ["skill", "Skill"]].map(([id, label]) => createElement("button", {
+							key: id, type: "button", role: "tab", tabIndex: -1, className: "omkt-spacep",
+							"aria-selected": space === id ? "true" : "false",
+							style: { ...styles.spacePill, ...(space === id ? styles.spacePillOn : {}) },
+							onClick: () => { if (space !== id) switchSpace(id); },
+						}, label)),
+						createElement("span", { key: "divider", "aria-hidden": true, style: { marginInlineStart: 2, width: 1, height: 17, background: T.line } }),
 					]),
-					createElement("div", {
-						key: "skill", role: "tab",
-						className: "omkt-spacep omkt-spacep-skill",
-						"aria-selected": space === "skill" ? "true" : "false",
-						style: {
-							...styles.spacePill,
-							...(space === "skill"
-								? { ...styles.spacePillOn, borderColor: "rgba(139,143,214,0.42)" }
-								: {}),
-						},
-						onClick: () => switchSpace("skill"),
-					}, [
-						createElement("span", {
-							key: "i",
-							style: {
-								...styles.spaceIco,
-								...(space === "skill" ? { background: SKILL_SOFT, color: SKILL_INK, border: "1px solid " + SKILL_LINE } : {}),
-							},
-						}, skillGlyph(20)),
-						createElement("span", { key: "b", style: styles.spaceBody }, [
-							createElement("span", { key: "l", style: { ...styles.spaceLab, color: space === "skill" ? SKILL_INK : undefined } }, [
-								"Skill",
-								// The count is the point of this pill: it appears only once
-								// the host has actually counted the skills, never as an
-								// ellipsis placeholder.
-								skills
-									? createElement("span", { key: "c", style: { ...styles.spaceCount, ...(space === "skill" ? { background: SKILL_SOFT, color: SKILL_INK } : {}) } },
-										String(skills.totals?.count ?? (skills.skills?.length ?? 0)))
-									: null,
-							]),
-							createElement("span", { key: "sub", style: styles.spaceSub }, "剧本能力包 · 会话启动加载"),
-						]),
-					]),
-				]),
-
-				createElement("div", { key: "tabs", className: spaceClasses("omkt-tabbar", space), role: "tablist", style: styles.tabBar },
+				createElement("div", { key: "tabs", className: spaceClasses("omkt-tabbar", space), role: "tablist", "aria-label": "页面", style: { ...styles.tabBar, gap: 12, marginBottom: 0 } },
 					space === "mcp"
 						? [
 							createElement("button", {
@@ -7160,13 +6396,13 @@ function Section({ close }) {
 								role: "tab", "aria-selected": tab === "market" ? "true" : "false",
 								style: { ...styles.tab, ...(tab === "market" ? styles.tabActive : {}) },
 								onClick: () => setTab("market"),
-							}, `MCP 市场${market ? ` (${compactCount(market.total ?? marketItems.length)})` : ""}`),
+							}, "市场"),
 							createElement("button", {
 								key: "calls", type: "button", className: "omkt-tab",
 								role: "tab", "aria-selected": tab === "calls" ? "true" : "false",
 								style: { ...styles.tab, ...(tab === "calls" ? styles.tabActive : {}) },
 								onClick: () => setTab("calls"),
-							}, "调用" + (callBadges.mcp ? " (" + callBadges.mcp + ")" : "")),
+							}, "调用记录" + (callBadges.mcp ? " (" + callBadges.mcp + ")" : "")),
 						]
 						: [
 							createElement("button", {
@@ -7184,14 +6420,16 @@ function Section({ close }) {
 								role: "tab", "aria-selected": tab === "skillmarket" ? "true" : "false",
 								style: { ...styles.tab, ...(tab === "skillmarket" ? styles.tabActive : {}) },
 								onClick: () => setTab("skillmarket"),
-							}, `市场${skillMarket ? ` (${skillMarketTotalLabel(skillMarket)})` : ""}`),
+							}, "市场"),
 							createElement("button", {
 								key: "calls", type: "button", className: "omkt-tab",
 								role: "tab", "aria-selected": tab === "calls" ? "true" : "false",
 								style: { ...styles.tab, ...(tab === "calls" ? styles.tabActive : {}) },
 								onClick: () => setTab("calls"),
-							}, "调用" + (callBadges.skill ? " (" + callBadges.skill + ")" : "")),
+							}, "调用记录" + (callBadges.skill ? " (" + callBadges.skill + ")" : "")),
 						]),
+                    createElement("button", { key: "directory", type: "button", "aria-label": "管理目录源", title: "管理目录源", style: { ...styles.textBtn, display: "inline-flex", gap: 8, alignItems: "center", marginLeft: "auto", fontSize: 14, minHeight: 34, flexShrink: 0, whiteSpace: "nowrap" }, onClick: () => { switchSpace("mcp"); setTab("market"); setCatalogDetailsOpen(true); setSourcesOpen(true); } }, [createElement(UiIcon, { key: "icon", name: "layers", size: 17 }), createElement("span", { key: "label", className: "omkt-directory-label" }, "管理目录源")]),
+                ]),
 
 				// ---------------- calls tab ----------------
 				// Read-only: every control on it filters what the host already
@@ -7214,7 +6452,7 @@ function Section({ close }) {
 							setCallMergeChoice(next);
 							// Remembered on the host: the page cannot persist it (the GUI's
 							// port changes between restarts, so browser storage is per run).
-							api("/prefs", { method: "POST", body: JSON.stringify({ merge: next }) }).catch(() => {});
+							api("/prefs", { method: "POST", body: JSON.stringify({ merge: next }) }).catch((err) => setCallsNote(`合并设置保存失败：${err.message || err}`));
 						},
 						query: callQuery,
 						onQuery: setCallQuery,
@@ -7223,63 +6461,58 @@ function Section({ close }) {
 						onFilter: setCallFilter,
 						onExport: exportCalls,
 						note: callsNote,
+                        view: callView,
+                        onView: patch => setCallView(previous => ({ ...previous, ...patch })),
+                        onDiagnostics: () => { if (!logOpen) toggleLog(); },
 					}),
 				]) : null,
 				// ---------------- skill market tab ----------------
 				// Its own body, because the four upstreams answer separately and the
 				// per-source chips are the answer to "which one is empty".
 				space === "skill" && tab === "skillmarket" ? createElement("div", {
-					key: "skillmarketbody", className: "omkt-tabbody", "data-omkt": "scroller", style: styles.tabBody,
+					key: "skillmarketbody", className: "omkt-tabbody", style: styles.market,
 				}, [
+                    skillsError ? createElement("div", { key: "scan-error", role: "alert", style: styles.error }, `技能列表读取失败，已安装状态可能尚未同步：${skillsError}`) : null,
 					skillNote ? createElement("div", { key: "note", style: styles.message }, skillNote) : null,
+                    skillMetricNote ? createElement("div", { key: "metrics-note", role: "status", style: styles.hint }, skillMetricNote) : null,
 					createElement(SkillMarket, {
-						key: "market",
+						key: "market", sort: skillMarketSort, onSort: (next) => {
+							setSkillMarketSort(next);
+							return loadSkillMarket({ sort: next, offset: 0 });
+						},
 						data: skillMarket,
 						error: skillMarketError,
 						busy: skillMarketBusy,
 						query: skillMarketQuery,
+						appliedQuery: skillMarketAppliedQuery,
 						onQuery: setSkillMarketQuery,
 						source: skillMarketSource,
 						onSource: (next) => {
 							setSkillMarketSource(next);
-							// A new listing starts at its first page, in the same tick
-							// as the request, or the pager inside the answer disagrees
-							// with the page number on screen.
-							setSkillMarketPage(0);
-							searchSkillMarket({ source: next, offset: 0 }).catch(() => {});
+							return loadSkillMarket({ source: next, offset: 0 });
 						},
 						category: skillMarketCategory,
-						// 分类 is a client-side filter over rows already here: rewinding
-						// the page must not cost a request (the old handler fired one
-						// through `onPage(0)` and then another through `onSource`).
 						onCategory: (next) => {
-							setSkillMarketPage(0);
 							setSkillMarketCategory(next);
+							return loadSkillMarket({ category: next, offset: 0 });
 						},
 						page: skillMarketPage,
 						pageSize: skillMarketPageSize,
-						onPage: (next) => {
-							setSkillMarketPage(next);
-							// With a local index the host pages the file, so a page turn
-							// is a request; without one it stays pure slicing over what
-							// already arrived (and must not spend anything).
-							const paging = skillMarket && skillMarket.paging;
-							if (paging && paging.mode === "index") {
-								searchSkillMarket({ offset: next * skillMarketPageSize }).catch(() => {});
-							}
-						},
+						onPage: (next) => skillMarket?.paging
+							? loadSkillMarket({ offset: next * skillMarketPageSize }) : setSkillMarketPage(next),
 						onPageSize: (size) => {
-					setSkillMarketPageSize(size);
-					setSkillMarketPage(0);
-					searchSkillMarket({ limit: size }).catch(() => {});
-				},
-						onSearch: (over) => {
-							// A search always answers with its first page; leaving the
-							// page number at 3 showed page-0 rows under "4 / N".
+							setSkillMarketPageSize(size);
 							setSkillMarketPage(0);
-							return searchSkillMarket({ ...(over ?? {}), offset: 0 });
+							return loadSkillMarket({ limit: size, offset: 0 });
 						},
-						onRefresh: () => loadSkillMarket({ refresh: true }),
+						onSearch: () => {
+							setSkillMarketPage(0);
+							return loadSkillMarket({ query: skillMarketQuery, offset: 0 });
+						},
+						onRefresh: () => {
+							setSkillMarketQuery(skillMarketRequest.current.filters.query);
+							return loadSkillMarket({ refresh: true });
+						},
 						installing: skillMarketInstalling,
 						installed: skillMarketInstalled,
 						onInstall: doInstallMarket,
@@ -7332,11 +6565,13 @@ function Section({ close }) {
 						query: skillQuery,
 						onQuery: setSkillQuery,
 						root: skillRoot,
+                        view: skillRegistryView,
+                        onView: patch => setSkillRegistryView(previous => ({ ...previous, ...patch })),
 						onRoot: setSkillRoot,
 						onOpen: setSkillTarget,
 						onReveal: doRevealSkill,
 						onRemove: setSkillRemove,
-						onRefresh: () => loadSkills({ refresh: true }),
+						onRefresh: () => { void loadSkills({ refresh: true }).catch(() => { /* loadSkills renders the scan error */ }); },
 					}),
 				]) : null,
 
@@ -7347,6 +6582,10 @@ function Section({ close }) {
 					key: "reg", className: "omkt-tabbody", style: styles.market,
 				}, [
 					createElement("div", { key: "reghead", style: styles.regHeader }, [
+                    createElement(PageHeading, { key: "heading", title: "已注册 MCP", hint: "管理连接器与连接状态", actions: [
+                        createElement("button", { key: "scan", type: "button", className: "omkt-btn", style: styles.button, disabled: busy, onClick: doScan }, "重新扫描"),
+                        createElement("button", { key: "market", type: "button", className: "omkt-btn", style: { ...styles.button, ...styles.primary }, onClick: () => setTab("market") }, "添加连接器"),
+                    ] }),
 					createElement("div", { key: "stats", style: styles.stats }, [
 						createElement("span", { key: "t" }, `${stats.total} 台服务器`),
 						createElement("span", { key: "e" }, `${stats.enabled} 已启用`),
@@ -7354,6 +6593,11 @@ function Section({ close }) {
 						createElement("span", { key: "c" }, `${stats.connected} 已连接`),
 						stats.failed ? createElement("span", { key: "f", style: styles.error }, `${stats.failed} 连接异常`) : null,
 					]),
+                    firstFailedServer ? createElement("div", { key: "connection-warning", role: "alert", style: { display: "flex", gap: 12, alignItems: "center", padding: "3px 16px", minHeight: 40, border: "1px solid rgba(255,125,0,.3)", background: "rgba(255,125,0,.07)", borderRadius: 9, fontSize: 14 } }, [
+                        createElement("span", { key: "icon", style: { color: T.amber } }, "ⓘ"),
+                        createElement("span", { key: "reason", style: { flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: firstFailedServer.error || healthLine(firstFailedServer.health) }, `${firstFailedServer.name} · ${firstFailedServer.error || healthLine(firstFailedServer.health)}`),
+                        createElement("button", { key: "diagnosis", type: "button", style: { ...styles.textBtn, color: T.brand }, disabled: busy || checkingKeys.includes(rowKey(firstFailedServer)), onClick: () => { setSourceFilter(""); setStateFilter(""); setNameFilter(firstFailedServer.name); doHealth(firstFailedServer); } }, "查看诊断"),
+                    ]) : null,
 					!error && servers === null ? createElement("div", { key: "loading", style: styles.message }, "加载中…") : null,
 					// 来源已删除 — records the last scan proved no config file on
 					// this machine still defines. They are one kind of leftover (the
@@ -7461,7 +6705,7 @@ function Section({ close }) {
 					// visible (已认证 / 匿名 · 剩余次数), so a credential nobody can
 					// find is still one click away without four rows of chrome
 					// standing between the reader and the server list.
-					createElement("div", { key: "authbox", style: styles.sourceBox }, [
+					createElement("div", { key: "authbox", hidden: !ghAccessOpen && !auth?.error && !authNote, style: styles.sourceBox }, [
 						createElement("div", { key: "head", style: styles.sourceHead }, [
 							createElement("button", {
 								key: "t", type: "button",
@@ -7642,13 +6886,14 @@ function Section({ close }) {
 							}, "去配置"),
 						])
 						: null,
-					servers ? createElement("div", { key: "filters", style: styles.filters }, [
+                    servers ? createElement("div", { key: "filters", className: "omkt-reg-filters", style: styles.filters }, [
+                        createElement(SearchField, { key: "name", value: nameFilter, onChange: value => { setNameFilter(value); changeRegistryView({ page: 0 }); }, label: "搜索 MCP", placeholder: "搜索名称或用途…", style: { flex: "1 1 240px" } }),
 						createElement("select", {
 							key: "source", className: `omkt-select${sourceFilter ? " omkt-select-on" : ""}`,
 							style: sourceFilter ? { ...styles.select, ...styles.filterSelectOn } : styles.select,
 							value: sourceFilter,
 							title: sourceFilter ? `来源：${sourceLabel(sourceFilter)}` : "按来源筛选",
-							onChange: (e) => setSourceFilter(e.target.value),
+							onChange: (e) => { setSourceFilter(e.target.value); changeRegistryView({ page: 0 }); },
 						}, [
 							createElement("option", { key: "", value: "" }, "全部来源"),
 							...sourceOptions.map((s) => createElement("option", { key: s, value: s }, sourceLabel(s))),
@@ -7658,7 +6903,7 @@ function Section({ close }) {
 							style: stateFilter ? { ...styles.select, ...styles.filterSelectOn } : styles.select,
 							value: stateFilter,
 							title: stateFilter ? "按连接状态筛选" : "全部状态",
-							onChange: (e) => setStateFilter(e.target.value),
+							onChange: (e) => { setStateFilter(e.target.value); changeRegistryView({ page: 0 }); },
 						}, [
 							createElement("option", { key: "", value: "" }, "全部状态"),
 							createElement("option", { key: "enabled", value: "enabled" }, "已启用"),
@@ -7666,17 +6911,12 @@ function Section({ close }) {
 							createElement("option", { key: "connected", value: "connected" }, "已连接"),
 							createElement("option", { key: "failed", value: "failed" }, "连接异常"),
 						]),
-						createElement("input", {
-							key: "name", className: "omkt-input", style: styles.searchBox, value: nameFilter,
-							placeholder: "搜索 MCP 连接器（能力、厂商、协议）",
-							title: "按服务器名称、来源或命令过滤",
-							onChange: (e) => setNameFilter(e.target.value),
-						}),
+                        createElement("button", { key: "grouping", type: "button", style: { ...styles.button, ...(groupBySource ? { color: T.brand, background: MCP_SOFT } : {}) }, "aria-pressed": groupBySource, onClick: () => { setGroupBySource((value) => !value); changeRegistryView({ page: 0 }); } }, [createElement(UiIcon, { key: "icon", name: "layers", size: 17 }), "按来源分组"]),
 					]) : null,
 					]),
 					// The list is the only thing that scrolls; the return-to-top button
 					// binds to this box (`data-omkt="scroller"`).
-					createElement("div", { key: "regscroll", "data-omkt": "scroller", style: styles.regScroll }, [
+					createElement("div", { key: "regscroll", ref: registryScroll, "data-omkt": "scroller", style: styles.regScroll }, [
 					servers && servers.length === 0
 						? createElement("div", { key: "empty", style: styles.message },
 							"注册表为空，点击「重新扫描宿主机」导入已有 MCP 配置。")
@@ -7684,8 +6924,8 @@ function Section({ close }) {
 					servers && servers.length > 0 && groups.length === 0
 						? createElement("div", { key: "nomatch", style: styles.message }, "没有符合筛选条件的服务器。")
 						: null,
-					...groups.map(([source, list]) => createElement(SourceGroup, {
-						key: source, source, servers: list, busy, checkingKeys, hintingKey: configHintKey, jobOf,
+					...(groupBySource ? registryPageGroups.map(([source, list]) => createElement(SourceGroup, {
+						key: source, source, servers: list, allServers: all.filter(row => (row.source || "manual") === source), busy, checkingKeys, hintingKey: configHintKey, jobOf,
 						collapsed: collapsed.has(source),
 						onToggleCollapsed: () => toggleCollapsed(source),
 						onToggleSource: doToggleSource,
@@ -7694,135 +6934,36 @@ function Section({ close }) {
 						onUpdate: doUpdate,
 						onConfigure: doConfigure,
 						onHealth: doHealth,
-					})),
+					})) : [createElement("div", { key: "flat", className: "omkt-reg-table" }, [createElement(RegistryColumns, { key: "columns" }), ...registryPageRows.map((server) => createElement(ServerRow, {
+                        key: rowKey(server), server, busy, checking: checkingKeys.includes(rowKey(server)), hinting: configHintKey === rowKey(server), job: jobOf(server),
+                        onToggle: doToggle, onRemove: doRemove, onUpdate: doUpdate, onConfigure: doConfigure, onHealth: doHealth,
+                    }))]) ]),
 					]),
+                    servers ? createElement(PageFooter, { key: "registry-pager", page: registryPage, pageCount: registryPageCount,
+                        pageSize: registryView.pageSize, onPage: page => changeRegistryView({ page }),
+                        onPageSize: pageSize => changeRegistryView({ pageSize, page: 0 }),
+                        note: registryPageRows.length ? `显示 ${registryStart + 1}–${registryStart + registryPageRows.length} 项，共 ${registryRows.length} 项` : "显示 0 项",
+                    }) : null,
 				]) : null,
 
 				// ---------------- market tab ----------------
 				space === "mcp" && tab === "market" ? createElement("div", {
 					key: "mkt", className: "omkt-tabbody", "data-omkt": "market", style: styles.market,
 				}, [
-					// Row 1 — the search pill, on a line of its own. v4 makes it
-					// the widest control on the page because it is the one thing
-					// that turns five thousand entries into the one you meant.
-					createElement("div", { key: "search", className: "omkt-toolbar", style: styles.toolbar }, [
-						createElement("div", { key: "field", className: "omkt-search", style: { ...styles.searchWrap, flex: 1, width: "auto" } }, [
-						createElement("span", { key: "ico", style: styles.searchIcon }, "⌕"),
-						createElement("input", {
-							key: "q", className: "omkt-input", style: styles.searchInput, value: marketQuery, disabled: marketBusy,
-							placeholder: "搜索 MCP 连接器（能力、厂商、协议）",
-							title: "搜索名称、描述或安装命令（回车或点「搜索」）",
-							onChange: (e) => setMarketQuery(e.target.value),
-							onKeyDown: (e) => { if (e.key === "Enter") loadMarket({}); },
-						}),
-						]),
-						// An explicit trigger stays: a settings pane gives a
-						// first-time reader no reason to guess "press Enter".
-						createElement("button", {
-							key: "go", type: "button", className: "omkt-btn omkt-btn-primary",
-							style: { ...styles.button, ...styles.accent, padding: "6px 14px", fontSize: 12.5 },
-							disabled: marketBusy, onClick: () => loadMarket({}),
-						}, marketBusy ? "搜索中…" : "搜索"),
-					]),
-					// Row 2 — the taxonomy on the left, the compact controls that
-					// narrow it pushed to the far end of the same row. The
-					// taxonomy is one dropdown rather than a row of scrolling
-					// chips: a 5k-entry catalogue carries ~20 functional groups,
-					// and as chips they either scrolled sideways (half of them
-					// never seen) or wrapped into three lines of chrome.
-					//
-					// A listing where NOTHING carries a group means the host is
-					// older than this page (group is computed host-side at DSH
-					// startup). Saying that is far more useful than a taxonomy of
-					// just 全部/未分类, which reads as "the taxonomy is broken".
-					createElement("div", { key: "filters", style: styles.filters }, [
-						groupOptions.length > 1 || (groupOptions.length === 1 && groupOptions[0][0] !== "__none__")
-							? createElement("div", { key: "group", style: styles.groupFilter }, [
-								createElement("span", { key: "l", style: styles.groupLabel }, "分类"),
-								createElement("select", {
-									key: "g", className: `omkt-select${marketGroup ? " omkt-select-on" : ""}`,
-									style: marketGroup
-										? { ...styles.groupSelect, ...styles.filterSelectOn }
-										: styles.groupSelect,
-									value: marketGroup,
-									title: marketGroup
-										? `分类筛选：${marketGroup === "__none__" ? "未分类" : marketGroup}`
-										: (groupInferred
-											? "按功能分类筛选：标「推断」的分类是来源没有发布、由本面板按条目的名称与描述归的"
-											: "按功能分类筛选"),
-									onChange: (e) => { setMarketGroup(e.target.value); setMarketPage(0); },
-								}, [
-									createElement("option", { key: "", value: "" },
-										`全部分类 (${marketItems.length})`),
-									// No per-group counts (user request): the total
-									// lives on 全部分类 alone, but the order still
-									// follows group size, so the shape of the
-									// taxonomy shows in the list. 「推断」 appears on
-									// the groups whose whole membership this panel
-									// grouped itself — the reader is choosing a
-									// category, and ours must be labelled as ours.
-									...groupOptions.map(([name, , inferredAll]) => createElement("option", {
-										key: name, value: name,
-									}, name === "__none__"
-										? "未分类"
-										: (inferredAll ? `${name}（推断）` : name))),
-								]),
-							])
-							: null,
-						createElement("div", { key: "right", style: styles.filterRight }, [
-							createElement("select", {
-								key: "src", className: `omkt-select${marketSource ? " omkt-select-on" : ""}`,
-								style: marketSource
-									? { ...styles.filterSelect, ...styles.filterSelectOn }
-									: styles.filterSelect,
-								value: marketSource,
-								title: marketSource ? `来源筛选：${shortSourceName(marketSource)}` : "按来源筛选",
-								onChange: (e) => {
-									setMarketSource(e.target.value);
-									// A new listing may not hold the selected group;
-									// leaving it set would filter everything out.
-									setMarketGroup("");
-									loadMarket({ source: e.target.value });
-								},
-							}, marketSourceOptions.map(([value, label]) => createElement("option", { key: value, value }, label))),
-							createElement("select", {
-								key: "sort", className: `omkt-select${marketSort !== "default" ? " omkt-select-on" : ""}`,
-								style: marketSort !== "default"
-									? { ...styles.filterSelect, ...styles.filterSelectOn }
-									: styles.filterSelect,
-								value: marketSort,
-								// The chosen order is stated on the control itself: a
-								// select that looks identical whether or not it is
-								// doing anything is how "我选了使用量最多但没生效" reads.
-								title: marketSort === "default"
-									? "排序：多源均衡（宿主在各来源之间轮转，避免一个市场占满整页）"
-									: `排序：${(SORT_OPTIONS.find(([v]) => v === marketSort) ?? [, marketSort])[1]}`
-										+ (marketSort === "installs"
-											? "（Smithery 调用次数 + Docker 拉取次数 + 本面板安装次数；三者单位不同）"
-											: ""),
-								onChange: (e) => { setMarketSort(e.target.value); setMarketPage(0); },
-							}, SORT_OPTIONS.map(([value, label]) => createElement("option", { key: value, value }, label))),
-							createElement("button", {
-								key: "fav", type: "button",
-								className: `omkt-btn omkt-btn-outline${favOnly ? " omkt-icon-on" : ""}`,
-								style: favOnly ? { ...styles.filterBtn, ...styles.filterSelectOn } : styles.filterBtn,
-								title: favoriteCount
-									? `只看已收藏的条目（当前列表里有 ${favoriteCount} 条；卡片与详情里的 ♡ 都能收藏）`
-									: "只看已收藏的条目。这张列表里还没有收藏：卡片或详情里的 ♡ 会把它加进来",
-								onClick: async () => {
-									const next = !favOnly;
-									setFavOnly(next);
-									setMarketPage(0);
-									if (next && favTotal === null) await loadFavorites();
-								},
-							}, `仅看收藏${favoriteCount ? ` (${favoriteCount})` : ""}`),
-							createElement("button", {
-								key: "refresh", type: "button", className: "omkt-btn omkt-btn-outline",
-								style: styles.filterBtn, disabled: marketBusy,
-								onClick: () => loadMarket({ refresh: true }),
-							}, marketBusy ? "拉取中…" : "刷新"),
-						]),
-					].filter(Boolean)),
+                    createElement(PageHeading, { key: "heading", title: "发现 MCP 连接器", hint: market ? `${compactCount(market.total ?? marketItems.length)} 个可用连接器` : "浏览各个目录源的连接器", actions: [
+                        createElement("span", { key: "coverage", style: { fontSize: 13, color: T.text3 } }, market?.counts ? `聚合 ${Object.keys(market.counts).length} 个目录源${market.deduped ? " · 已去重" : ""}` : ""),
+                        createElement("button", { key: "sources", type: "button", style: { ...styles.textBtn, color: T.brand }, "aria-expanded": catalogDetailsOpen, onClick: () => setCatalogDetailsOpen(value => !value) }, "来源详情"),
+                    ] }),
+                    createElement(MarketToolbar, {
+                        key: "toolbar", query: marketQuery, onQuery: setMarketQuery, onSearch: () => loadMarket({ query: marketQuery }), busy: marketBusy,
+                        source: marketSource, sources: marketSourceOptions.map(([value, label]) => [value, value ? label : "全部来源"]),
+                        onSource: value => { setMarketSource(value); setMarketGroup(""); loadMarket({ source: value }); },
+                        category: marketGroup, onCategory: value => { setMarketGroup(value); setMarketPage(0); },
+                        categories: [["", "全部分类"], ...groupOptions.map(([name]) => [name, name === "__none__" ? "未分类" : name])],
+                        sort: marketSort, sorts: SORT_OPTIONS.map(([value, label]) => [value, value === "default" ? "推荐排序" : label]), onSort: value => { setMarketSort(value); setMarketPage(0); },
+                        favOnly, onFavorite: async () => { const next = !favOnly; setFavOnly(next); setMarketPage(0); if (next && favTotal === null) await loadFavorites(); },
+                        onRefresh: () => { setMarketQuery(marketRequest.current.filters.query); return loadMarket({ refresh: true, keepPage: true }); },
+                    }),
 					// 「使用量最多」 sums three counters that do not share a unit:
 					// Smithery's invocation count, Docker's pull count and this
 					// panel's own install count (`usageOf`). The cards state each
@@ -7840,6 +6981,9 @@ function Section({ close }) {
 						? createElement("div", { key: "favnote", style: styles.hint },
 							`共 ${favTotal} 条收藏；当前来源与搜索下能看到 ${favoriteCount} 条。`)
 						: null,
+                    createElement("details", { key: "catalog-details", open: true, hidden: !catalogDetailsOpen && !sourcesOpen && !sourceNote && !catalogSources?.error, style: { fontSize: 13, color: T.text3 } }, [
+                        createElement("summary", { key: "summary", style: { cursor: "pointer", padding: "2px 0" } }, `目录源与数据详情${market?.counts ? ` · ${Object.keys(market.counts).length} 个来源` : ""}${marketAt ? ` · 读取于 ${marketAt}` : ""}`),
+                        createElement("div", { key: "details", style: { display: "grid", gap: 8, paddingTop: 8, maxHeight: 240, overflow: "auto" } }, [
 					// Row 3 — v4's meta line: the three numbers a reader checks
 					// before paging, with the freshness note pushed to the end.
 					sortedItems
@@ -7888,7 +7032,9 @@ function Section({ close }) {
 					// and state because they now age independently: one can answer
 					// from a TTL entry while another re-validates upstream.
 					market && market.counts
-						? createElement("div", { key: "srcline", style: { ...styles.hint, marginBottom: 14 },
+						? createElement("details", { key: "srcline", style: styles.hint }, [
+                            createElement("summary", { key: "summary", style: { cursor: "pointer" } }, "来源详情 · " + Object.keys(market.counts).length + " 个目录源"),
+                            createElement("div", { key: "data", style: { paddingTop: 6 },
 							title: "各来源的数字是去重后计入本页的条数；括号里是来源自己的状态与本地时间（读取/普查），不是上游发布时间" },
 							[
 								Object.entries(market.counts)
@@ -7924,7 +7070,7 @@ function Section({ close }) {
 								marketGroup && sortedItems
 									? `「${marketGroup === "__none__" ? "未分类" : marketGroup}」筛选后 ${sortedItems.length} 条`
 									: null,
-							].filter(Boolean).join(" · "))
+							].filter(Boolean).join(" · "))])
 						: null,
 					// The user's own sources, in one collapsible box: the market's
 					// filter row is not the place to add or remove one, but the
@@ -8028,6 +7174,8 @@ function Section({ close }) {
 								])
 								: null,
 						]),
+                        ]),
+                    ]),
 					// Old host, new page: every item lacks `group`, so the chip row
 					// would degrade to 全部/未分类 and look broken. Name the cause.
 					!marketBusy && marketItems && marketItems.length > 0
@@ -8052,7 +7200,7 @@ function Section({ close }) {
 								return reason ? `${label}（${kind}：${reason}）` : `${label}（${kind}）`;
 							}).join("、")}`)
 						: null,
-					starNote ? createElement("div", { key: "star", style: styles.hint }, starNote) : null,
+					starNote || statsBusy ? createElement("div", { key: "star", style: styles.hint }, statsBusy ? "正在更新本页仓库统计…" : starNote) : null,
 					// The host reports which repo lookups failed; those repos have an
 					// empty media entry, so without this line "加载失败" would read as
 					// "这个仓库没有配图". The retry asks the host again regardless of
@@ -8064,7 +7212,7 @@ function Section({ close }) {
 								key: "retry", type: "button", className: "omkt-btn omkt-btn-outline",
 								style: { ...styles.outlineBtn, marginLeft: 8, padding: "2px 8px", fontSize: 12 },
 								disabled: marketBusy,
-								onClick: () => enrichMedia(sortedItems ?? [], true),
+								onClick: () => enrichMedia(mediaFailures.map(row => ({ repository: `https://github.com/${row.repo}` })), true),
 							}, "重试"),
 						])
 						: null,
@@ -8083,64 +7231,15 @@ function Section({ close }) {
 							// 700px pane on a 1600px screen. The wrapper is the
 							// container the sheet's @container rules measure.
 							createElement("div", { key: "gridwrap", style: styles.gridHost },
-								createElement("div", { key: "grid", className: "omkt-grid", style: styles.cardColumns },
-									[
-										...(spotlight.length ? [createElement("div", {
-											key: "spotlight", className: "omkt-spotlight",
-										}, spotlight.map(({ item, kind }) => createElement(MarketCard, {
-											key: itemKeyOf(item), item, stats: repoStats, media: repoMedia, busy,
-											installing: installingKey === itemKeyOf(item), featured: kind,
-											onInstall: doInstall, onOpen: setDetail, onToggleFavorite: doToggleFavorite,
-										})))] : []),
-										...pageItems.filter((item) => !spotlight.some((hero) => hero.item === item)).map((item, i) => createElement(MarketCard, {
-										key: `${item.source}:${item.id ?? item.title}`,
-										item, stats: repoStats, media: repoMedia, busy,
-										// One card's install at a time, and only that card
-										// says 处理中… — see `installingKey`.
-										installing: installingKey === itemKeyOf(item),
-										// A ranked list has to *show* its ranking.
-										// The wall is CSS multi-column, so a sorted
-										// list reads down each column, not across
-										// the row — without a number it looks
-										// unsorted ("我选了使用量最多但没生效"). On the
-										// default (综合推荐) there is no ranking to
-										// state, so no chip.
-										rank: marketSort === "default" ? null : safePage * pageSize + i + 1,
-										// Under 使用量 ordering a card with no number
-										// at all sorts last, and that looks arbitrary
-										// unless the card says why.
-										usageSort: marketSort === "installs",
-										onInstall: doInstall, onOpen: setDetail,
-										onToggleFavorite: doToggleFavorite,
-									}))])))
+                                [highlightCount ? createElement("div", { key: "highlights", style: { ...styles.smSpotlight, marginBottom: 16 } }, pageItems.slice(0, highlightCount).map((item, i) => marketCard(item, i, true))) : null,
+                                createElement("div", { key: "grid", className: "omkt-grid", style: styles.cardColumns }, pageItems.slice(highlightCount).map((item, i) => marketCard(item, i + highlightCount))) ]))
+
 						: null,
 
-					sortedItems && pageCount > 1
-						? createElement("div", { key: "pager", style: styles.pager }, [
-							createElement("select", {
-								key: "size", style: styles.select, value: pageSize,
-								onChange: (e) => { setPageSize(Number(e.target.value)); setMarketPage(0); },
-							}, PAGE_SIZES.map((n) => createElement("option", { key: n, value: n }, `每页 ${n} 条`))),
-							createElement("span", { key: "spacer", style: styles.spacer }),
-							createElement("button", {
-								key: "first", type: "button", style: styles.button, disabled: safePage === 0,
-								onClick: () => setMarketPage(0),
-							}, "« 首页"),
-							createElement("button", {
-								key: "prev", type: "button", style: styles.button, disabled: safePage === 0,
-								onClick: () => setMarketPage(safePage - 1),
-							}, "‹ 上一页"),
-							createElement("span", { key: "info", style: styles.meta }, `${safePage + 1} / ${pageCount}`),
-							createElement("button", {
-								key: "next", type: "button", style: styles.button, disabled: safePage >= pageCount - 1,
-								onClick: () => setMarketPage(safePage + 1),
-							}, "下一页 ›"),
-							createElement("button", {
-								key: "last", type: "button", style: styles.button, disabled: safePage >= pageCount - 1,
-								onClick: () => setMarketPage(pageCount - 1),
-							}, "末页 »"),
-						])
-						: null,
+                    sortedItems ? createElement(PageFooter, { key: "pager", page: safePage, pageCount, pageSize,
+                        onPage: setMarketPage, onPageSize: value => { setPageSize(value); setMarketPage(0); }, note: marketAt ? `列表读取于 ${marketAt}${market?.cached ? "（缓存）" : ""}${market?.notModified > 0 ? ` · ${market.notModified} 源未变` : ""}` : "",
+                    }) : null,
+
 				]) : null,
 
 				// The detail overlay is a sibling of the page content, not a child
@@ -8151,7 +7250,7 @@ function Section({ close }) {
 							// holds per-entry state (the copy button's verdict), and a
 							// second entry opened in the same slot must not inherit it.
 							key: `detail:${detail.source}:${detail.id ?? detail.title}`,
-							item: detail, stats: repoStats, media: repoMedia, busy,
+							item: marketItems?.find(item => itemKeyOf(item) === itemKeyOf(detail)) ?? detail, stats: repoStats, media: repoMedia, busy,
 							installing: installingKey === itemKeyOf(detail),
 							mediaFailed: mediaFailures.some((e) => e.repo === repoKeyOf(detail)),
 							onRetryMedia: () => enrichMedia([detail], true),
@@ -8162,7 +7261,6 @@ function Section({ close }) {
 					: null,
 
 				// The confirmation sits beside the drawer, not inside it: a removal
-				// opened from the drawer has to survive the drawer closing.
 				createElement(SkillRemoveDialog, {
 					key: `remove:` + String(skillRemove?.id ?? skillRemove?.name ?? ''),
 					skill: skillRemove,
@@ -8183,16 +7281,8 @@ function Section({ close }) {
 					})
 					: null,
 
-				// The confirmation sits beside the drawer, not inside it: a removal
-				// opened from the drawer has to survive the drawer closing.
-				createElement(SkillRemoveDialog, {
-					key: `remove:` + String(skillRemove?.id ?? skillRemove?.name ?? ''),
-					skill: skillRemove,
-					rootLabel: skillRemove ? rootLabelOf(skills, skillRemove.root) : '',
-					busy: skillRemoving,
-					onCancel: () => setSkillRemove(null),
-					onConfirm: () => { confirmRemoveSkill().catch(() => {}); },
-				}),
+
+
 
 				// One skill, opened from its card. Keyed by the skill's id so two
 				// cards opened in a row cannot inherit each other's state.
@@ -8207,16 +7297,8 @@ function Section({ close }) {
 					})
 					: null,
 
-				// The confirmation sits beside the drawer, not inside it: a removal
-				// opened from the drawer has to survive the drawer closing.
-				createElement(SkillRemoveDialog, {
-					key: `remove:` + String(skillRemove?.id ?? skillRemove?.name ?? ''),
-					skill: skillRemove,
-					rootLabel: skillRemove ? rootLabelOf(skills, skillRemove.root) : '',
-					busy: skillRemoving,
-					onCancel: () => setSkillRemove(null),
-					onConfirm: () => { confirmRemoveSkill().catch(() => {}); },
-				}),
+
+
 
 				// Fixed, and only while there is something to scroll back from.
 				showTop
@@ -8340,7 +7422,8 @@ function Section({ close }) {
 		// once the route answers. No test that avoids real rendering could catch
 		// the first two, and none that renders once can catch the third.
 		exports.__test = {
-			MarketDetail, MarketCard, MediaStrip, marketSpotlights, SkillDrawer, DetailRow, LinkChip, PanelGlyph, subLineText,
+			MarketDetail, MarketCard, DetailRow, LinkChip, PanelGlyph, subLineText, styles,
+            SkillCard, SkillPanel, SkillMarket, skillSourceErrorMessage, CallsPanel, CallCard, callMetrics, callStatus, ensureStyles,
 			// The config sheet leaves the page only through a click, so no probe
 			// that renders the section can reach it; rendering it directly is the
 			// only way to catch a throw that happens before the first paint.

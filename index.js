@@ -65,12 +65,13 @@ import {
 } from './lib/github-auth.js';
 import { createSkillMarket, SKILL_MARKET_LABELS, SKILL_MARKET_SOURCES } from './lib/skill-market.js';
 import {
-  SKILL_INDEX_FILE, WALK_SOURCES,
+  SKILL_INDEX_FILE, SKILL_MARKET_CATEGORIES, WALK_SOURCES,
   cursorsForWalk, limitsForModes, mergeSkillRows, mergeTruncations, minStarsForWalk, needsSkillWalk, normalizeModes,
   querySkillRows, readSkillIndexDocument, resolveSlices, sameWalkSelection,
   skillIndexDocumentOf, skillIndexSummary, walkSkillIndex,
 } from './lib/skill-index.js';
 import { moveToTrash, readSkills, skillRoots, TRASH_DIR } from './lib/skills.js';
+import { cleanPublisherIcons, mcpArtworkKey, publicIcon, publisherIcons } from './lib/item-icons.js';
 import {
   CALL_RANGES, CallStore, runningRowOf, settlementOf, summarize, userSkillRowsOf,
 } from './lib/calls.js';
@@ -716,10 +717,12 @@ export async function apply(ctx) {
    * something else mounted the name in the meantime.
    */
   const mountAttempts = new Map();
+  let disposed = false;
   // Pending retry timers, so disposing the plugin does not leave a timeout that
   // mounts a fiber into a dead context.
   const mountRetryTimers = new Set();
   function scheduleMountRetry(entry) {
+    if (disposed) return;
     const error = String(entry.connectError ?? '');
     if (!TRANSIENT_MOUNT_ERROR.test(error)) return;
     if (entry.enabled === false || entry.providedExternally === true) return;
@@ -733,7 +736,9 @@ export async function apply(ctx) {
     mountAttempts.set(entry.name, used + 1);
     const timer = setTimeout(() => {
       mountRetryTimers.delete(timer);
+      if (disposed) return;
       serialized(async () => {
+        if (disposed) return;
         if (entry.enabled === false || entry.providedExternally === true) return;
         if (fibers.has(entry.name) || starting.has(entry.name)) return;
         if (!(registry.servers ?? []).includes(entry)) return;
@@ -766,6 +771,7 @@ export async function apply(ctx) {
    *      reported as `starting`.
    */
   async function connect(entry) {
+    if (disposed) return { ok: false, error: 'plugin disposed' };
     if (fibers.has(entry.name)) return { ok: true, already: true };
     const serverName = toServerName(entry.name);
     if (!serverName) return { ok: false, error: `invalid server name: ${entry.name}` };
@@ -810,6 +816,10 @@ export async function apply(ctx) {
       return { ok: false, error: entry.connectError };
     }
 
+    if (disposed) {
+      await fiber.dispose();
+      return { ok: false, error: 'plugin disposed' };
+    }
     fibers.set(entry.name, fiber);
     // Exactly one row per name may carry the mount marker: `fibers` is keyed by
     // name, so the row that mounted owns the name and every sibling gives the
@@ -817,17 +827,20 @@ export async function apply(ctx) {
     setMountHolder(registry.servers, entry.name, entry, serverName);
     entry.connectError = undefined;
     entry.providedExternally = false;
-    mountAttempts.delete(entry.name);
+    if (!timedOut) mountAttempts.delete(entry.name);
     if (timedOut) {
       // Keep the fiber and let it finish in the background; a later
       // `overall_mcp_list` / page refresh shows the settled state.
       starting.add(entry.name);
       fiber.await().then(
         () => {
+          if (disposed || fibers.get(entry.name) !== fiber) return;
           starting.delete(entry.name);
+          mountAttempts.delete(entry.name);
           log?.info?.(`overall-mcp: ${entry.name} finished connecting in the background`);
         },
         async (err) => {
+          if (disposed || fibers.get(entry.name) !== fiber) return;
           starting.delete(entry.name);
           entry.connectError = redactSecrets(err?.message ?? err);
           // The 8 s deadline only deferred this failure. Leaving the fiber in
@@ -968,6 +981,9 @@ export async function apply(ctx) {
         slot,
         transport: s.transport,
         source: s.source,
+        artworkKey: mcpArtworkKey(s.catalogId, undefined, s.url),
+        icon: publicIcon(s.icon),
+        iconCandidates: cleanPublisherIcons(s.iconCandidates),
         // The last scan read this entry's source and it no longer defines a
         // server by this name: the row is a leftover, not a config anyone has.
         orphan: orphans.has(s),
@@ -1255,7 +1271,7 @@ export async function apply(ctx) {
     // `withGithubAuth` reads the resolved credential rather than the token, so
     // the panel's 检测本机登录 and the anonymous fallback both feed this one path.
     const fetchImpl = (url, init) => fetch(url, { ...init, headers: withGithubAuth(url, init?.headers ?? {}) });
-    marketInstance = createSkillMarket({ fetchImpl, isGithubAuthenticated: () => githubAuthStatus().inUse === true });
+    marketInstance = createSkillMarket({ fetchImpl, metricsAuthKey: () => withGithubAuth('https://api.github.com').authorization ?? '', isGithubAuthenticated: () => githubAuthStatus().inUse === true });
     return marketInstance;
   }
 
@@ -1366,7 +1382,7 @@ export async function apply(ctx) {
     const modes = normalizeModes(Object.fromEntries(
       (Array.isArray(full) ? full : []).filter((id) => WALK_SOURCES.includes(id)).map((id) => [id, 'full']),
     ));
-    const cursors = cursorsForWalk(skillIndexDoc?.cursors, skillIndexDoc?.modes, modes);
+    const cursors = cursorsForWalk(skillIndexDoc?.cursors, skillIndexDoc?.modes, modes, { restartCompleted: force });
     const slices = resolveSlices(Object.keys(modes).filter((id) => modes[id] === 'full'));
     const limits = limitsForModes(modes);
     const stop = { controller: new AbortController(), reason: null };
@@ -1442,7 +1458,7 @@ export async function apply(ctx) {
         ? `已手动停止（${held}）`
         : stop.reason === 'dispose' ? `插件卸载时停止（${held}）` : walk.partial;
       const doc = skillIndexDocumentOf({
-        at: walk.at,
+        at: walk.rows.length ? walk.at : skillIndexDoc?.at ?? walk.at,
         rows,
         cursors: walk.cursors,
         requests: walk.requests,
@@ -1486,23 +1502,35 @@ export async function apply(ctx) {
    * source. The upstream totals ride along untouched — those are the
    * population, the row count is what we hold, and the panel is told both.
    */
-  async function skillMarketPayload({ source = 'all', query = '', limit = 20, offset = 0, refresh = false } = {}) {
+  async function skillMarketPayload({ source = 'all', query = '', category = 'all', sort = 'default', limit = 20, offset = 0, refresh = false } = {}) {
     // Resolution is cached inside github-auth; asking here means the first
     // market open after a restart can already use a stored or `gh` token.
     const auth = await refreshGithubAuth();
     const index = await skillIndexPayload({ refresh });
-    const out = index
-      ? await indexedSkillMarket({ index, source, query, limit, offset })
-      : await marketFor().list({ source, query, limit });
+    const options = { source, query, category, sort, limit, offset };
+    let out;
+    if (index) {
+      out = await indexedSkillMarket(index, { ...options, refresh });
+    } else {
+      // Without a local index the same filters apply to the bounded upstream sample.
+      const listing = await marketFor().list({ source, query, limit: 60, refresh });
+      const { items, ...page } = querySkillRows(marketFor().applyMetrics(listing.items), options);
+      out = { sources: listing.sources, items, paging: { mode: 'live', ...page, rows: listing.items.length } };
+    }
     const now = Date.now();
     if (now - marketIndexAt > MARKET_ITEM_TTL_MS) marketIndex.clear();
     marketIndexAt = now;
-    for (const item of out.items) marketIndex.set(item.id, item);
+    const items = out.items.map(item => ({
+      ...item,
+      iconCandidates: publisherIcons(item.homepage, item.pageUrl, item.repository),
+    }));
+    for (const item of items) marketIndex.set(item.id, item);
     // Computed once: every field below reads the same summary, and `needsWalk`
     // asks the TTL question the panel is not allowed to act on by itself.
     const summary = index ? skillIndexSummary(index) : null;
     return {
       ...out,
+      items,
       github: { source: auth?.source ?? null, active: auth?.inUse === true },
       index: summary
         ? {
@@ -1535,35 +1563,15 @@ export async function apply(ctx) {
    * to keep in a file with its own staleness rules, and they cannot change
    * halfway through a walk.
    */
-  async function indexedSkillMarket({ index, source, query, limit, offset }) {
+  async function indexedSkillMarket(index, options) {
+    const { source, refresh } = options;
     const summary = skillIndexSummary(index);
     const wanted = source && source !== 'all' ? [source] : [...SKILL_MARKET_SOURCES];
-    const walked = wanted.filter((id) => WALK_SOURCES.includes(id));
-    const page = walked.length
-      ? querySkillRows(index.rows, {
-        query,
-        source: walked.length === 1 ? walked[0] : 'all',
-        offset,
-        limit,
-      })
-      : { items: [], matched: 0, offset: Math.max(0, Number(offset) || 0), limit };
-
-    const items = [];
-    let official = null;
-    let officialError = null;
-    const pageOffset = Math.max(0, Number(offset) || 0);
-    if (wanted.includes('official')) {
-      try {
-        // Fetched for its source row on every page, but its rows belong to the
-        // first page only: the official set is not part of the file being paged,
-        // and repeating it under every page would look like 19 new rows each time.
-        official = await marketFor().list({ source: 'official', query, limit: 19 });
-      } catch (error) {
-        officialError = String(error?.message ?? error).slice(0, 240);
-      }
-    }
-    if (official && pageOffset === 0) items.push(...official.items);
-    if (walked.length) items.push(...page.items);
+    const official = wanted.includes('official')
+      ? await marketFor().list({ source: 'official', limit: 60, refresh })
+      : null;
+    const rows = official?.items.length ? index.rows.concat(official.items) : index.rows;
+    const { items, ...page } = querySkillRows(marketFor().applyMetrics(rows), options);
 
     const sources = SKILL_MARKET_SOURCES
       .filter((id) => wanted.includes(id))
@@ -1573,9 +1581,7 @@ export async function apply(ctx) {
           // No `indexed` here on purpose: these nineteen rows are read live and
           // are not in the file, so counting them would make 「收录 N」 claim rows
           // a restart cannot find.
-          return officialError
-            ? { id, label, count: 0, error: officialError }
-            : { id, label, count: official.items.length, total: official.total, error: null };
+          return { ...official.sources[0], count: items.filter((item) => item.source === id).length };
         }
         const held = summary.sources.find((row) => row.id === id) ?? { rows: 0, done: false };
         return {
@@ -1599,12 +1605,7 @@ export async function apply(ctx) {
     return {
       sources,
       items,
-      // Only the walked sources are paged from the file. A filter that leaves
-      // none of them (official only) keeps the client-side slicing it had, so
-      // the pager is not told "0 matched" about a list that has rows.
-      ...(walked.length
-        ? { paging: { mode: 'index', matched: page.matched, offset: page.offset, limit: page.limit, rows: index.rows.length } }
-        : {}),
+      paging: { mode: 'index', ...page, rows: index.rows.length },
     };
   }
 
@@ -1968,7 +1969,7 @@ export async function apply(ctx) {
    * change exists to remove.
    *
    * Two demands look alike and are not: a `Bearer` challenge a key can satisfy,
-   * and a `401` whose `resource_metadata` names an OAuth authorization server —
+   * and a `401` carrying an OAuth `resource_metadata` challenge —
    * that one needs a browser login this plugin cannot perform. The second used
    * to surface its metadata URL as 「去获取」, which opened raw JSON. It now says
    * what it is and links the server's own page instead.
@@ -1979,10 +1980,9 @@ export async function apply(ctx) {
     if (demand) entry.authDemand = demand;
     if (demand?.required !== true) return;
     const spec = configSpecFor(null, entry);
-    const authorizationHost = demand.oauth === true ? hostOfUrl(demand.authorizationServer) : '';
     const help = demand.oauth === true
       ? [
-        `端点回了 401，要的是 OAuth 登录${authorizationHost ? `（授权服务器 ${authorizationHost}）` : ''}。`,
+        '端点回了 401，要的是 OAuth 登录。',
         '浏览器授权这一步插件走不完，装上也调不通；除非服务商另外发了 API key —— 那种情况把令牌按 `Bearer <令牌>` 填在这里就能用。',
       ].join(' ')
       : [
@@ -2210,11 +2210,14 @@ export async function apply(ctx) {
     if (matches.length === 0) throw new Error(`unknown server: ${name}`);
     if (Number.isInteger(slot)) {
       const at = registry.servers[slot];
-      if (at && at.name === name) return at;
+      if (at && at.name === name && (from == null || (parsePackageInvocation(at)?.version ?? null) === from)) return at;
+      throw new Error(`stale entry: ${name}（列表位置已变化，请刷新后重试）`);
     }
     if (from != null) {
-      const byVersion = matches.find((s) => (parsePackageInvocation(s)?.version ?? null) === from);
-      if (byVersion) return byVersion;
+      const byVersion = matches.filter((s) => (parsePackageInvocation(s)?.version ?? null) === from);
+      if (byVersion.length === 1) return byVersion[0];
+      if (byVersion.length === 0) throw new Error(`stale entry: ${name}（版本已变化，请刷新后重试）`);
+      throw new Error(`ambiguous server name: ${name}（同版本有 ${byVersion.length} 条记录）；请带上 slot`);
     }
     if (matches.length === 1) return matches[0];
     throw new Error(`ambiguous server name: ${name}（${matches.length} 条同名记录）；请带上 slot`);
@@ -3213,7 +3216,7 @@ export async function apply(ctx) {
    * `qualifiedName`, to build a link to its listing page). Everything the UI
    * shows is derived here instead of being forwarded wholesale.
    */
-  let backfilledSpecs = false;
+  const pendingCatalogBackfills = new Map();
   function annotateItem(item) {
     const entry = catalogItemToEntry(item);
     // A hosted row has no entry until its detail request runs (no endpoint
@@ -3223,14 +3226,32 @@ export async function apply(ctx) {
     const match = name === null ? null : registry.servers.find((s) => s.name === name
       && (s.catalogId ? s.catalogId === item.id && s.source === `catalog:${item.source}` : s.source === `catalog:${item.source}`));
     const installed = Boolean(match);
+    // Recover display metadata for older entries using exact catalog identity
+    // or an exact official remote endpoint, never a name-only match.
+    const icon = publicIcon(item.icon);
+    const iconCandidates = publisherIcons(item.homepage, item.repository);
+    const iconMatch = match?.catalogId ? match : (icon || iconCandidates.length) && item.source === 'official-registry' && entry?.url
+      ? registry.servers.find(row => !row.catalogId && row.url === entry.url)
+      : null;
+    const fillIcon = iconMatch && icon && !publicIcon(iconMatch.icon);
+    const heldCandidates = cleanPublisherIcons(iconMatch?.iconCandidates);
+    const mergedCandidates = cleanPublisherIcons([...iconCandidates, ...heldCandidates]);
+    const fillCandidates = iconMatch && iconCandidates.length && mergedCandidates.some((url, i) => url !== heldCandidates[i]);
+    if (fillIcon || fillCandidates) {
+      if (fillIcon) iconMatch.icon = icon;
+      if (fillCandidates) iconMatch.iconCandidates = mergedCandidates;
+      pendingCatalogBackfills.set(iconMatch.name, { kind: 'catalog-icon-restored', source: item.source, id: item.id });
+    }
     if (installed && entry?.config) {
       if (match && !match.config) {
         match.config = entry.config;
-        backfilledSpecs = true;
+        if (!pendingCatalogBackfills.has(match.name)) pendingCatalogBackfills.set(match.name, { kind: 'catalog-config-restored', source: item.source, id: item.id });
       }
     }
     return {
       ...item,
+      artworkKey: mcpArtworkKey(item.id, item.repository, item.install?.url),
+      iconCandidates,
       raw: undefined,
       qualifiedName: item.raw?.qualifiedName ?? undefined,
       proposedName: name,
@@ -3410,10 +3431,21 @@ export async function apply(ctx) {
     });
     const items = result.items
       .map((item) => applyInstallEvidence(item, evidence.get(item.id)))
-      .map(annotateItem);
-    if (backfilledSpecs) {
-      backfilledSpecs = false;
-      await save();
+      .map(annotateItem)
+      .map(item => ({ ...item, statsAt: result.sources[item.source]?.at ?? null, statsStale: result.sources[item.source]?.stale === true }));
+    if (pendingCatalogBackfills.size) {
+      const pending = [...pendingCatalogBackfills];
+      try {
+        await save();
+      } catch (error) {
+        emit({ kind: 'catalog-backfill-save-failed', count: pending.length, error: String(error?.code ?? error?.name ?? 'write') });
+        throw error;
+      }
+      for (const [name, event] of pending) {
+        if (pendingCatalogBackfills.get(name) !== event) continue;
+        pendingCatalogBackfills.delete(name);
+        emit(event);
+      }
     }
     return {
       // Evidence first: `annotateItem` derives `installable` from the row's
@@ -3514,58 +3546,58 @@ export async function apply(ctx) {
   //   - when GitHub reports the limit as exhausted, enrichment stops until the
   //     window resets instead of burning the shared limit on guaranteed 403s.
   // Stars are decoration — the cards must stay complete without them.
-  const repoStatsCache = new Map(); // 'owner/repo' -> { at, data }
-  const REPO_STATS_TTL_MS = 6 * 60 * 60 * 1000;
+  const repoStatsCache = new Map(); // successful measurements only
+  const repoStatsRevision = new Map();
+  const REPO_STATS_TTL_MS = 5 * 60 * 1000;
   const REPO_STATS_MAX = 30;
-  const REPO_STATS_BUDGET_TTL_MS = 10 * 60 * 1000;   // re-probe the limit every 10 min
-  let repoStatsBudget = { at: 0, exhausted: false };
+  let repoStatsBatch = 0;
+  let repoStatsBudget = { auth: '', retryAt: 0 };
 
   async function doRepoStats({ repos = [], refresh = false } = {}) {
+    await refreshGithubAuth();
+    const auth = withGithubAuth('https://api.github.com').authorization ?? '';
+    if (repoStatsBudget.auth !== auth) repoStatsBudget = { auth, retryAt: 0 };
     const keys = [...new Set((Array.isArray(repos) ? repos : [])
-      .map((r) => String(r ?? '').trim())
-      .filter((r) => /^[\w.-]+\/[\w.-]+$/.test(r)))]
-      .slice(0, REPO_STATS_MAX);
+      .map(r => String(r ?? '').trim()).filter(r => /^[\w.-]+\/[\w.-]+$/.test(r)))].slice(0, REPO_STATS_MAX);
     const now = Date.now();
     const stats = {};
     const stale = [];
     for (const key of keys) {
       const hit = repoStatsCache.get(key);
-      if (!refresh && hit && now - hit.at < REPO_STATS_TTL_MS) {
-        if (hit.data) stats[key] = hit.data;
-      } else {
-        stale.push(key);
-      }
+      if (hit?.data) stats[key] = hit.data; // a failed refresh must retain the last measured value
+      if (refresh || !hit || hit.error || now - hit.at >= REPO_STATS_TTL_MS) stale.push(key);
     }
-
-    // Rate-limited? Serve whatever is cached and say so rather than hammering.
-    const budgetExpired = now - repoStatsBudget.at >= REPO_STATS_BUDGET_TTL_MS;
-    if (repoStatsBudget.exhausted && !budgetExpired) {
-      return { stats, requested: keys.length, cached: stale.length === 0, rateLimited: true };
+    if (repoStatsBudget.retryAt > now && stale.length) {
+      return { stats, requested: keys.length, cached: false, rateLimited: true,
+        retryAt: repoStatsBudget.retryAt, stale,
+        errors: stale.map(repo => ({ repo, rateLimited: true, message: 'GitHub 访问限额已用完，保留上次统计' })) };
     }
-
-    if (stale.length) {
-      const fetched = await fetchRepoStats(stale.map((key) => {
-        const [owner, repo] = key.split('/');
-        return { key, owner, repo };
-      }));
-      for (const key of stale) {
-        const data = fetched[key] ?? null;   // negative-cache misses too
-        repoStatsCache.set(key, { at: now, data });
-        if (data) stats[key] = data;
+    const batch = ++repoStatsBatch;
+    const revisions = new Map(stale.map(key => {
+      const id = (repoStatsRevision.get(key) ?? 0) + 1;
+      repoStatsRevision.set(key, id); return [key, id];
+    }));
+    const fetched = stale.length ? await fetchRepoStats(stale.map(key => {
+      const [owner, repo] = key.split('/'); return { key, owner, repo };
+    })) : { errors: [], rateLimited: false };
+    for (const key of stale) {
+      if (repoStatsRevision.get(key) === revisions.get(key) && fetched[key]) {
+        repoStatsCache.set(key, { at: Date.now(), data: fetched[key] });
       }
-      // Track the upstream budget so the next open does not retry into a wall.
-      if (fetched.rateLimited) {
-        repoStatsBudget = { at: now, exhausted: true };
-      } else if (Object.keys(fetched).some((k) => k !== 'rateLimited')) {
-        repoStatsBudget = { at: now, exhausted: false };
+      const error = fetched.errors?.find(row => row.repo === key);
+      if (error && repoStatsRevision.get(key) === revisions.get(key)) {
+        const held = repoStatsCache.get(key);
+        repoStatsCache.set(key, { at: held?.at ?? 0, data: held?.data ?? null, error: error.message });
       }
+      const current = repoStatsCache.get(key);
+      if (current?.data) stats[key] = current.data;
     }
-    return {
-      stats, requested: keys.length, cached: stale.length === 0,
-      ...(repoStatsBudget.exhausted && now - repoStatsBudget.at < REPO_STATS_BUDGET_TTL_MS
-        ? { rateLimited: true }
-        : {}),
-    };
+    if (batch === repoStatsBatch && repoStatsBudget.auth === auth && fetched.rateLimited) repoStatsBudget = { auth, retryAt: fetched.retryAt ?? Date.now() + 60_000 };
+    const errors = fetched.errors ?? [];
+    if (errors.length) log?.warn?.(`overall-mcp: repository statistics refresh incomplete: ${errors.map(row => `${row.repo}: ${row.message}`).join('; ')}`);
+    return { stats, requested: keys.length, cached: stale.length === 0, errors,
+      stale: errors.map(row => row.repo), rateLimited: fetched.rateLimited === true,
+      ...(fetched.retryAt ? { retryAt: fetched.retryAt } : {}) };
   }
 
   /**
@@ -3582,7 +3614,8 @@ export async function apply(ctx) {
    * neither a README nor a social card — is not asked again until the TTL
    * expires. A *failure* is different: see `REPO_MEDIA_FAIL_TTL_MS`.
    */
-  const repoMediaCache = new Map(); // 'owner/repo' -> { at, data, failed? }
+  const repoMediaCache = new Map();
+  const repoMediaRevision = new Map(); // 'owner/repo' -> { at, data, failed? }
   const REPO_MEDIA_TTL_MS = 6 * 60 * 60 * 1000;
   // A failed lookup is cached, but only briefly. The honest causes are
   // transient (a network blip, or GitHub's rate limit), and reusing the
@@ -3603,23 +3636,26 @@ export async function apply(ctx) {
     const now = Date.now();
     const media = {};
     const stale = [];
+    const errors = [];
     for (const key of keys) {
       const hit = repoMediaCache.get(key);
       const ttl = hit?.failed ? REPO_MEDIA_FAIL_TTL_MS : REPO_MEDIA_TTL_MS;
       if (!refresh && hit && now - hit.at < ttl) {
         media[key] = hit.data;
+        if (hit.error) errors.push({ repo: key, error: hit.error });
       } else {
         stale.push(key);
       }
     }
-    const errors = [];
     if (stale.length) {
+      const revisions = new Map(stale.map(key => { const id = (repoMediaRevision.get(key) ?? 0) + 1; repoMediaRevision.set(key, id); return [key, id]; }));
       const fetched = await collectRepoMedia(stale, { max: stale.length });
       const failed = new Set((fetched.errors ?? []).map((e) => e.repo));
       for (const key of stale) {
         const data = fetched.media?.[key] ?? { repo: key, images: [], og: null };
-        repoMediaCache.set(key, { at: now, data, ...(failed.has(key) ? { failed: true } : {}) });
-        media[key] = data;
+        const error = fetched.errors?.find(row => row.repo === key)?.error;
+        if (repoMediaRevision.get(key) === revisions.get(key)) repoMediaCache.set(key, { at: Date.now(), data: failed.has(key) ? repoMediaCache.get(key)?.data ?? data : data, ...(failed.has(key) ? { failed: true, error } : {}) });
+        media[key] = repoMediaCache.get(key)?.data ?? data;
       }
       // Entries are small (ranked URL lists, never the README bytes), but the key
       // is a repo name that arrives from the caller, so this map is capped too.
@@ -3897,9 +3933,9 @@ export async function apply(ctx) {
                 // old sentence guessed at the endpoint for both: a mount that was
                 // reset once by the network read as 「这个地址并不是 MCP 端点」.
                 : !mounted
-                  ? `行未挂载，工具自然为 0${row.connectError ? `：${capText(row.connectError, 160)}` : ''}${TRANSIENT_MOUNT_ERROR.test(String(row.connectError ?? '')) ? '（连接被重置这类网络抖动会自动重试一次；也可点「更新」重连）' : ''}`
+                  ? `行未挂载，工具自然为 0${row.connectError ? `：${capText(row.connectError, 160)}` : ''}${TRANSIENT_MOUNT_ERROR.test(String(row.connectError ?? '')) ? '（网络异常最多自动重试两次；需要手动重连时，可先停用再启用）' : ''}`
                   : remote
-                    ? '已连接但工具表为空：端点握手成功却没发布工具（可能还在预热，或这个地址不是 MCP 端点）；再点一次「检查」会重连'
+                    ? '已连接但工具表为空：先确认服务是否已就绪及地址是否为 MCP 端点；需要重连时，可先停用再启用'
                     : '一个工具都没注册：服务进程可能已经退出',
         },
         {
@@ -4009,8 +4045,16 @@ export async function apply(ctx) {
         // clamps itself to 60 inside `lib/skill-market.js`.
         const limit = Math.min(Math.max(Number(body.limit ?? url.searchParams.get('limit')) || 20, 1), 200);
         const offset = Math.max(Number(body.offset ?? url.searchParams.get('offset')) || 0, 0);
+        const category = body.category ?? url.searchParams.get('category') ?? 'all';
+        const sort = body.sort ?? url.searchParams.get('sort') ?? 'default';
+        if (!['all', ...SKILL_MARKET_CATEGORIES].includes(category) || !['default', 'popular', 'name'].includes(sort)) {
+          return json({ error: '无效的 Skill 市场分类或排序' }, 400);
+        }
+        if (source !== 'all' && !SKILL_MARKET_SOURCES.includes(source)) {
+          return json({ error: '未知的 Skill 市场来源' }, 400);
+        }
         const refresh = body.refresh === true || url.searchParams.get('refresh') === '1';
-        return json(await skillMarketPayload({ source, query, limit, offset, refresh }));
+        return json(await skillMarketPayload({ source, query, category, sort, limit, offset, refresh }));
       })],
       // The index walk, and the two verbs a reader owns: `start` (walk now) and
       // `stop` (end the one in flight). Opening the market never starts it: ten
@@ -4068,6 +4112,20 @@ export async function apply(ctx) {
       })],
       // Installing writes a directory into one of the four roots we scanned.
       // The body names a bucket, never a path, and an id we listed ourselves.
+      ['/api/overall-mcp/skills/market/metrics', ['POST'], guard(async (req) => {
+        const body = await readBody(req);
+        if (!Array.isArray(body.ids) || body.ids.length > 200 || body.ids.some(id => typeof id !== 'string' || id.length > 512)) return json({ error: '技能统计请求需要有效的 id 列表（最多200个）' }, 400);
+        await refreshGithubAuth();
+        const items = [...new Set(body.ids)].map(id => {
+          const item = marketIndex.get(id);
+          if (!item) throw Object.assign(new Error('unknown skill id, list the market first'), { status: 404 });
+          return item;
+        });
+        const result = await marketFor().metrics({ items, refresh: body.refresh === true });
+        if (result.errors.length) log?.warn?.(`overall-mcp: skill statistics refresh incomplete: ${result.errors.map(row => `${row.id}: ${row.message}`).join('; ')}`);
+        emit({ kind: 'skill-metrics', requested: result.requested, updated: result.updated, errors: result.errors.length });
+        return json(result);
+      })],
       ['/api/overall-mcp/skills/market/install', ['POST'], guard(async (req) => {
         const body = await readBody(req);
         const id = typeof body?.id === 'string' ? body.id : '';
@@ -4273,13 +4331,9 @@ export async function apply(ctx) {
       // the panel just never asked. So ask here, on the click, and answer with
       // the row as it is *now*: the form states the server's own requirements.
       ['/api/overall-mcp/config-hints', ['POST'], guard(async (req) => {
-        const { name, slot } = await readBody(req);
+        const { name, slot, from } = await readBody(req);
         if (typeof name !== 'string' || name === '') return json({ error: 'name (string) required' }, 400);
-        const rows = registry.servers ?? [];
-        const row = Number.isInteger(slot) && rows[slot]?.name === name
-          ? rows[slot]
-          : rows.find((s) => s.name === name) ?? null;
-        if (!row) return json({ error: `no such server: ${name}` }, 404);
+        const row = resolveEntry(name, { slot, from });
         let healed = false;
         try {
           healed = await healSmitheryRow(row);
@@ -4293,9 +4347,10 @@ export async function apply(ctx) {
           emit({ kind: 'config', action: 'hints', target: name, healed: true });
         }
         const { servers } = await serversPayload();
-        const fresh = (Number.isInteger(slot) ? servers[slot] : null)
-          ?? servers.find((s) => s.name === name)
-          ?? null;
+        const currentSlot = registry.servers.indexOf(row);
+        if (currentSlot < 0) throw new Error(`stale entry: ${name}（记录已移除）`);
+        const fresh = servers[currentSlot];
+        if (!fresh || fresh.name !== name) throw new Error(`stale entry: ${name}（列表位置已变化）`);
         return json({ healed, server: fresh });
       })],
       // 「测一下这台服务器到底能不能用」. Local, cheap, no model call: what decides
@@ -4306,13 +4361,9 @@ export async function apply(ctx) {
       // server whose process died still has its row, and 「已连接」 on a row the
       // model cannot see a single tool on is exactly the lie this answers.
       ['/api/overall-mcp/health', ['POST'], guard(async (req) => {
-        const { name, slot, retry } = await readBody(req);
+        const { name, slot, from, retry } = await readBody(req);
         if (typeof name !== 'string' || name === '') return json({ error: 'name (string) required' }, 400);
-        const rows = registry.servers ?? [];
-        const row = Number.isInteger(slot) && rows[slot]?.name === name
-          ? rows[slot]
-          : rows.find((s) => s.name === name) ?? null;
-        if (!row) return json({ error: `no such server: ${name}` }, 404);
+        const row = resolveEntry(name, { slot, from });
         const startedAt = Date.now();
         let attempted = false;
         let waitedMs = 0;
@@ -4358,9 +4409,10 @@ export async function apply(ctx) {
         health.set(row.name, verdict);
         emit({ kind: 'health', action: 'check', target: name, ok, toolCount: verdict.toolCount });
         const { servers } = await serversPayload();
-        const fresh = (Number.isInteger(slot) ? servers[slot] : null)
-          ?? servers.find((s) => s.name === name)
-          ?? null;
+        const currentSlot = registry.servers.indexOf(row);
+        if (currentSlot < 0) throw new Error(`stale entry: ${name}（记录已移除）`);
+        const fresh = servers[currentSlot];
+        if (!fresh || fresh.name !== name) throw new Error(`stale entry: ${name}（列表位置已变化）`);
         // The fingerprint is how the row is matched later, not something a page
         // needs: keep it on the stored copy only.
         const { fingerprint: _fingerprint, ...sharedVerdict } = verdict;
@@ -4515,6 +4567,8 @@ export async function apply(ctx) {
   }
 
   ctx.effect(() => () => {
+    if (disposed) return;
+    disposed = true;
     // A walk in flight reads the network; it stops with the plugin rather than
     // outliving it (it writes what it found, so nothing is lost by stopping).
     // Both walks get the same treatment now — before this, the census outlived
@@ -4530,5 +4584,6 @@ export async function apply(ctx) {
       Promise.resolve(fiber.dispose()).catch(() => {});
     }
     fibers.clear();
+    starting.clear();
   }, 'overall-mcp.cleanup');
 }
