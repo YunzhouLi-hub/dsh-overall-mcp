@@ -2195,6 +2195,7 @@ window.__ModuleLoader__.load({
 				+ ".omkt-spacep:focus-visible{outline:2px solid rgba(69,102,233,0.62)!important;outline-offset:2px}",
 				".omkt-title{color:inherit;text-decoration:none}",
 				".omkt-title:hover{color:#4d6bfe}",
+				".omkt-skill-source:hover,.omkt-skill-source:focus-visible{text-decoration:underline}",
 				".omkt-btn,.omkt-link{transition:border-color .12s ease,background .12s ease,color .12s ease}",
 				// The tab underline, drawn here instead of as an inline border on
 				// each tab: `border-bottom: 2px solid transparent` on the
@@ -3357,13 +3358,22 @@ function MarketCard({ item, stats, busy, installing, rank, usageSort, onInstall,
             return createElement("div", { className: (skill ? "omkt-skill-columns" : "omkt-reg-columns") + " omkt-reg-head" }, labels.map((label, index) => createElement("span", { key: label, className: index === 1 ? skill ? "omkt-listmeta" : "omkt-reg-source" : index === 2 ? skill ? "omkt-listmeta" : "omkt-reg-status" : undefined }, label)));
         }
 
+        function skillSourceLink({ item, name, style, key = "name" }) {
+            const href = item.pageUrl;
+            if (typeof href !== "string" || !/^https?:\/\/[^/]/i.test(href) || /[\u0000-\u0020\u007f\\]/.test(href)) return null;
+            const url = URL.parse(href);
+            if (!url || url.username || url.password) return null;
+            return createElement("a", { key, href, target: "_blank", rel: "noopener noreferrer", className: "omkt-title omkt-skill-source", style: { ...style, display: "block", width: "fit-content", maxWidth: "100%", color: undefined }, title: `打开来源网页：${name}`, onClick: event => openExternal(event, href) }, name);
+        }
+
         function SkillCard({ skill, busy, onOpen, onReveal, onRemove, rootLabel }) {
             const meta = [Number.isFinite(skill.files) ? `${skill.files} 个文件` : "", byteText(skill.bytes)].filter(Boolean).join(" · ");
             return createElement("div", { className: "omkt-skillcard omkt-listrow omkt-skill-columns", style: styles.skillCard }, [
                 createElement("div", { key: "identity", style: { display: "flex", gap: 12, alignItems: "center", minWidth: 0 } }, [
                 createElement(SkillIcon, { key: "icon", item: skill, size: 36, initial: true }),
                 createElement("div", { key: "main", style: styles.skillMain }, [
-                    createElement("button", { key: "name", type: "button", style: { ...styles.textBtn, ...styles.skillName, padding: 0, textAlign: "left" }, onClick: () => onOpen(skill) }, skill.name),
+                    skillSourceLink({ item: skill, name: skill.name, style: styles.skillName })
+                        ?? createElement("button", { key: "name", type: "button", style: { ...styles.textBtn, ...styles.skillName, padding: 0, textAlign: "left" }, onClick: () => onOpen(skill) }, skill.name),
                     skill.description ? createElement("div", { key: "desc", style: styles.skillDesc, title: skill.description }, skill.description) : null,
                 ]),
                 ]),
@@ -3434,7 +3444,7 @@ function MarketCard({ item, stats, busy, installing, rank, usageSort, onInstall,
 						row("来源", skill.origin),
 						row("目录", skill.dir),
 						row("图标读取问题", skill.iconIssue),
-						row("主页", skill.homepage),
+						row("来源网页", skillSourceLink({ item: skill, name: "打开网页" })),
 						row("更新", skill.modifiedAt ? String(skill.modifiedAt).slice(0, 10) : ""),
 					]),
 					// We know how many files and how big, not their names — so the
@@ -3502,7 +3512,8 @@ function MarketCard({ item, stats, busy, installing, rank, usageSort, onInstall,
 				createElement("div", { key: "t", style: styles.smTop }, [
 					createElement(SkillIcon, { key: "a", item, size: 48 }),
 					createElement("div", { key: "m", style: styles.smBox }, [
-						createElement("div", { key: "n", style: styles.smNm, title: name }, name),
+						skillSourceLink({ item, name, style: styles.smNm, key: "n" })
+							?? createElement("div", { key: "n", style: styles.smNm, title: name }, name),
 						createElement("div", { key: "s", style: styles.smSrc }, [
 							createElement("span", { key: "p", title: [skillSourceOrigin(item.source), versionText(item.version), item.category].filter(Boolean).join(" · ") }, item.author || skillSourceOrigin(item.source)),
 						]),
@@ -3645,12 +3656,13 @@ function MarketCard({ item, stats, busy, installing, rank, usageSort, onInstall,
 		 */
         function SkillMarketHero({ item, alt, installed, installing, onInstall }) {
             const name = item.title ?? item.name ?? "未命名";
+            const titleStyle = { ...styles.smHTitle, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
             return createElement("div", { className: "omkt-skillhero", style: { ...styles.smHero, height: 128, boxSizing: "border-box" } }, [
                 createElement("div", { key: "eyebrow", style: styles.smEyebrow }, alt ? "推荐技能" : "♛ 精选技能"),
                 createElement("div", { key: "main", style: { display: "flex", gap: 14, alignItems: "center", minWidth: 0, flex: 1 } }, [
                     createElement(SkillIcon, { key: "icon", item, size: 54 }),
                     createElement("div", { key: "text", style: { flex: 1, minWidth: 0 } }, [
-                        createElement("div", { key: "name", style: { ...styles.smHTitle, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }, title: name }, name),
+                        skillSourceLink({ item, name, style: titleStyle }) ?? createElement("div", { key: "name", style: titleStyle, title: name }, name),
                         createElement("div", { key: "summary", style: styles.smHDesc, title: item.summary }, item.summary || "来源未提供描述"),
                         createElement("span", { key: "source", title: [skillSourceOrigin(item.source), item.version && `v${item.version}`].filter(Boolean).join(" · "), style: { fontSize: 14, color: T.text3, display: "flex", alignItems: "center", gap: 6 } }, [createElement(UiIcon, { key: "source-icon", name: "layers", size: 15 }), skillSourceLabel(item.source)]),
                     ]),

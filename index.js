@@ -70,7 +70,7 @@ import {
   querySkillRows, readSkillIndexDocument, resolveSlices, sameWalkSelection,
   skillIndexDocumentOf, skillIndexSummary, walkSkillIndex,
 } from './lib/skill-index.js';
-import { moveToTrash, readSkills, skillRoots, TRASH_DIR } from './lib/skills.js';
+import { moveToTrash, readSkills, skillRoots, skillSourcePage, TRASH_DIR } from './lib/skills.js';
 import { cleanPublisherIcons, mcpArtworkKey, publicIcon, publisherIcons } from './lib/item-icons.js';
 import {
   CALL_RANGES, CallStore, runningRowOf, settlementOf, summarize, userSkillRowsOf,
@@ -1199,6 +1199,23 @@ export async function apply(ctx) {
     const now = Date.now();
     if (!refresh && skillsCache && now - skillsCacheAt < SKILLS_TTL_MS) return skillsCache;
     const answer = await readSkills({ dshHome: path.dirname(dataDir()) });
+    // Older SkillHub installs stored the slug, but only the index knows its publisher.
+    const needsPage = new Set(answer.skills.filter(row => !row.pageUrl && row.marketId?.startsWith('skillhub:')).map(row => row.marketId));
+    if (needsPage.size) {
+      const pages = new Map();
+      const index = await skillIndexPayload();
+      for (const item of index?.rows ?? []) {
+        if (item.source !== 'skillhub' || !needsPage.has(item.id)) continue;
+        const page = skillSourcePage(item);
+        if (!page) continue;
+        pages.set(item.id, page);
+        needsPage.delete(item.id);
+        if (!needsPage.size) break;
+      }
+      for (const row of answer.skills) {
+        if (!row.pageUrl && pages.has(row.marketId)) row.pageUrl = pages.get(row.marketId);
+      }
+    }
     skillsCache = answer;
     skillsCacheAt = now;
     return answer;
@@ -1522,6 +1539,7 @@ export async function apply(ctx) {
     marketIndexAt = now;
     const items = out.items.map(item => ({
       ...item,
+      pageUrl: skillSourcePage({ ...item, marketId: item.id }),
       iconCandidates: publisherIcons(item.homepage, item.pageUrl, item.repository),
     }));
     for (const item of items) marketIndex.set(item.id, item);

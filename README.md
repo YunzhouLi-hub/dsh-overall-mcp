@@ -27,6 +27,8 @@
 
 Both Registered lists default to 20 entries and offer **20 / 50 / 100** per page. MCP and Skill share one navigation row and preserve the selected view type when switching.
 
+In the Skill market and Registered list, click a skill name to open its source page when one is available. **查看** still opens the local skill details.
+
 ### Counters and ranking
 
 - Stars and download counts can refresh. Opening or paging measures supported counters for the visible items, with a five-minute cache for successful measurements. Manual refresh bypasses that cache.
