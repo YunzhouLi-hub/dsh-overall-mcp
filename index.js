@@ -63,7 +63,7 @@ import {
   storeToken,
   withGithubAuth,
 } from './lib/github-auth.js';
-import { createSkillMarket, SKILL_MARKET_LABELS, SKILL_MARKET_SOURCES } from './lib/skill-market.js';
+import { createSkillMarket, SKILL_LIVE_REPO_SOURCES, SKILL_MARKET_LABELS, SKILL_MARKET_SOURCES } from './lib/skill-market.js';
 import {
   SKILL_INDEX_FILE, SKILL_MARKET_CATEGORIES, WALK_SOURCES,
   cursorsForWalk, limitsForModes, mergeSkillRows, mergeTruncations, minStarsForWalk, needsSkillWalk, normalizeModes,
@@ -1270,9 +1270,8 @@ export async function apply(ctx) {
 
   // ---- skill market ------------------------------------------------------
   //
-  // Four places sell skills, and they do not agree on anything: ClawHub has a
-  // JSON API, the official set is a git repository, SkillHub publishes only a
-  // README table, and GitHub's search needs a token to be useful. `lib/skill-market.js`
+  // The marketplace joins public APIs and official Git repositories.
+  // `lib/skill-market.js`
   // owns those differences; this keeps the two things a route needs to own —
   // who may spend a GitHub request, and which item an install refers to.
   //
@@ -1577,29 +1576,24 @@ export async function apply(ctx) {
   /**
    * The market answered from the index.
    *
-   * `official` stays live: nineteen fixed directories are cheaper to read than
-   * to keep in a file with its own staleness rules, and they cannot change
-   * halfway through a walk.
+   * Small official repositories stay live beside the indexed catalogs.
    */
   async function indexedSkillMarket(index, options) {
     const { source, refresh } = options;
     const summary = skillIndexSummary(index);
     const wanted = source && source !== 'all' ? [source] : [...SKILL_MARKET_SOURCES];
-    const official = wanted.includes('official')
-      ? await marketFor().list({ source: 'official', limit: 60, refresh })
-      : null;
-    const rows = official?.items.length ? index.rows.concat(official.items) : index.rows;
+    const live = await Promise.all(SKILL_LIVE_REPO_SOURCES.filter(id => wanted.includes(id))
+      .map(id => marketFor().list({ source: id, limit: 60, refresh })));
+    const liveSources = new Map(live.flatMap(result => result.sources.map(row => [row.id, row])));
+    const rows = index.rows.concat(live.flatMap(result => result.items));
     const { items, ...page } = querySkillRows(marketFor().applyMetrics(rows), options);
 
     const sources = SKILL_MARKET_SOURCES
       .filter((id) => wanted.includes(id))
       .map((id) => {
         const label = SKILL_MARKET_LABELS[id];
-        if (id === 'official') {
-          // No `indexed` here on purpose: these nineteen rows are read live and
-          // are not in the file, so counting them would make 「收录 N」 claim rows
-          // a restart cannot find.
-          return { ...official.sources[0], count: items.filter((item) => item.source === id).length };
+        if (liveSources.has(id)) {
+          return { ...liveSources.get(id), count: items.filter((item) => item.source === id).length };
         }
         const held = summary.sources.find((row) => row.id === id) ?? { rows: 0, done: false };
         return {
@@ -4050,7 +4044,7 @@ export async function apply(ctx) {
         const out = await removeSkill(typeof body?.id === 'string' ? body.id : '');
         return json(out, out.status ?? 200);
       })],
-      // The skill market: four sources behind one list, then one install verb.
+      // The skill market: several sources behind one list, then one install verb.
       // `?source=` and `?query=` are read from the URL on GET and from the body
       // on POST, the same shape the MCP catalog uses.
       ['/api/overall-mcp/skills/market', ['GET', 'POST'], guard(async (req) => {

@@ -21,13 +21,15 @@
 | **MCP · Registered** | Scan host MCP configurations, inspect connections, enable, disable, configure, check, or remove servers. Filter and group by source, with source-wide bulk actions. |
 | **MCP · Market** | Search, categorize, bookmark, and install deduplicated entries from the official Registry, Smithery, Docker MCP, GitHub MCP, Awesome Remote, and Awesome List. |
 | **Skill · Registered** | Read `$DSH_HOME/skills`, `~/.agents/skills`, `~/.claude/skills`, and `~/.codex/skills`. Inspect descriptions, origins, files, and directories, with search, sorting, and an alphabet index. |
-| **Skill · Market** | Browse ClawHub, Anthropic official skills, SkillHub, and GitHub. Use a local index, categories, source filters, popularity ranking, and installation. |
+| **Skill · Market** | Browse ClawHub, Anthropic official skills, Tencent SkillHub official skills, SkillHub, and GitHub. Use a local index, categories, source filters, popularity ranking, and installation. |
 | **MCP · Calls** | Inspect tool requests, responses, outcomes, latency, and connection failures over the last hour, 24 hours, or 7 days. |
 | **Skill · Calls** | Inspect tool loads and slash-command references, filter events, fold repeated references, and page through results. References count with their actual multiplicity; latency averages only measured tool loads. |
 
 Both Registered lists default to 20 entries and offer **20 / 50 / 100** per page. MCP and Skill share one navigation row and preserve the selected view type when switching.
 
 In the Skill market and Registered list, click a skill name to open its source page when one is available. **查看** still opens the local skill details.
+
+The Tencent SkillHub official source reads the [open-source Skill directories](https://github.com/Tencent/skillhub/tree/main/skills) separately from the SkillHub platform. Combined results prefer the repository copy when both sources list the same Skill.
 
 ### Counters and ranking
 

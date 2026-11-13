@@ -297,8 +297,7 @@ window.__ModuleLoader__.load({
 		const SKILL_ACCENT = T.brand;
 		const SKILL_INK = T.brand;
 		const SKILL_SOFT = MCP_SOFT;
-		// The four upstreams, spelled the way each site spells itself.
-		const SKILL_MARKET_LABELS = { clawhub: "ClawHub", official: "Anthropic 官方技能", skillhub: "SkillHub", github: "GitHub" };
+		const SKILL_MARKET_LABELS = { clawhub: "ClawHub", official: "Anthropic 官方技能", "tencent-official": "腾讯 SkillHub 官方", skillhub: "SkillHub", github: "GitHub" };
 		const SKILL_LINE = "rgba(69,102,233,.18)";
 
 		const styles = {
@@ -3536,7 +3535,7 @@ function MarketCard({ item, stats, busy, installing, rank, usageSort, onInstall,
 		}
 
 		// ---- Skill 市场：每个来源自己报数，页面只负责把它说清楚 ----------------
-		// 四个上游里只有三个会报总数（ClawHub 的 /api/v1/skills 是游标分页，
+		// ClawHub 的 /api/v1/skills 是游标分页，
 		// 只有 items + nextCursor），所以「N 个可用 Skill」只在四家都报数时才敢写；
 		// 否则退回「本页列了几条」，并用 + 标出哪几个源是按页给的。
         const skillSourceTint = () => ({ background: T.soft, color: T.text3, borderColor: T.line2 });
@@ -3546,7 +3545,7 @@ function MarketCard({ item, stats, busy, installing, rank, usageSort, onInstall,
         // In particular, a plain 403 is not evidence of rate limiting.
         function skillSourceErrorMessage(row) {
             const raw = String(row?.error ?? "");
-            const github = row?.id === "official" || row?.id === "github";
+            const github = ["official", "tencent-official", "github"].includes(row?.id);
             if (github && /secondary rate limit|abuse detection/i.test(raw)) {
                 return "GitHub 请求过于频繁，已被暂时限制。请暂停刷新，稍后再试。";
             }
@@ -3578,6 +3577,7 @@ function MarketCard({ item, stats, busy, installing, rank, usageSort, onInstall,
 		// chip ("官方 19"); on a card the reader wants to know *which* official list.
 		const SKILL_SRC_ORIGIN = {
 			official: "anthropics/skills",
+			"tencent-official": "Tencent/skillhub",
 			skillhub: "SkillHub",
 			clawhub: "ClawHub",
 			github: "GitHub",
@@ -3674,11 +3674,7 @@ function MarketCard({ item, stats, busy, installing, rank, usageSort, onInstall,
         }
 
 		/**
-		 * The Skill 市场 tab: four upstreams behind one search box.
-		 *
-		 * Each source reports for itself, so one upstream being down shows as a red
-		 * chip instead of an empty page — that distinction is the point of asking
-		 * four places at all.
+		 * Each Skill source reports its own counts and failures.
 		 */
 		function SkillMarket({ data, error, busy, query, appliedQuery, onQuery, onSearch, onRefresh, installing, installed, onInstall, source, onSource, category, onCategory, page, pageSize, onPage, onPageSize, index, walk, walkBusy, fullSel, onFullSel, onWalk, sort = "default", onSort }) {
 			// Per-source slice vs full, as recorded by the walk that wrote the file.
@@ -6479,7 +6475,7 @@ function Section({ close }) {
 					}),
 				]) : null,
 				// ---------------- skill market tab ----------------
-				// Its own body, because the four upstreams answer separately and the
+				// Its own body, because the upstreams answer separately and the
 				// per-source chips are the answer to "which one is empty".
 				space === "skill" && tab === "skillmarket" ? createElement("div", {
 					key: "skillmarketbody", className: "omkt-tabbody", style: styles.market,
