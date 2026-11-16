@@ -59,7 +59,7 @@ window.__ModuleLoader__.load({
 		// probe also checks CHANGELOG.md's newest section is this version, since
 		// a release note that stops at an older build tells a reader what
 		// changed in code they are not running.
-		const CLIENT_VERSION = "1.0.4";
+		const CLIENT_VERSION = "1.0.5";
 		// Where 「点个 star」 points. A constant, not a config: it is this
 		// plugin's own repository, and a panel that could be pointed at another
 		// repository would be asking for a star it does not deserve.
@@ -297,7 +297,7 @@ window.__ModuleLoader__.load({
 		const SKILL_ACCENT = T.brand;
 		const SKILL_INK = T.brand;
 		const SKILL_SOFT = MCP_SOFT;
-		const SKILL_MARKET_LABELS = { clawhub: "ClawHub", official: "Anthropic 官方技能", "tencent-official": "腾讯 SkillHub 官方", skillhub: "SkillHub", github: "GitHub" };
+		const SKILL_MARKET_LABELS = { clawhub: "ClawHub", official: "Anthropic 官方技能", skillhub: "SkillHub", github: "GitHub" };
 		const SKILL_LINE = "rgba(69,102,233,.18)";
 
 		const styles = {
@@ -2114,12 +2114,14 @@ window.__ModuleLoader__.load({
                 ".omkt-market-search{display:grid;gap:20px;align-items:center;margin:0;min-width:0}",
                 ".omkt-market-search>button,.omkt-reg-filters>button{display:inline-flex;align-items:center;justify-content:center;gap:8px}",
                 ".omkt-reg-filters>select{flex:0 1 218px;min-width:128px}",
-                ".omkt-skill-alphabet{display:flex;flex-direction:column;align-items:center;flex:0 0 24px}",
+                ".omkt-skill-alphabet{display:flex;flex-direction:column;align-items:center;gap:5px;flex:0 0 28px;min-height:0;overflow-y:auto;scrollbar-width:thin;padding:4px 0}",
+                ".omkt-skill-alphabet>button.omkt-btn{flex-shrink:0;transition:none}",
+                ".omkt-skill-letter-select{display:none}",
                 ".omkt-call-ranges>button{white-space:nowrap}",
                 ".omkt-call-detail{scroll-margin-block:8px}",
                 ".omkt-call-kind{width:190px}",
                 ".omkt-call-facts{grid-template-columns:repeat(2,minmax(0,1fr))}",
-                "@container(max-width:950px){.omkt-reg-filters>select{flex-basis:140px}.omkt-call-kind{width:auto}.omkt-skill-alphabet{display:none}}",
+                "@container(max-width:950px){.omkt-reg-filters>select{flex-basis:140px}.omkt-call-kind{width:auto}.omkt-skill-alphabet{display:none}.omkt-skill-letter-select{display:block}}",
                 "@container(max-width:540px){.omkt-reg-filters>select{flex:1 1 120px}.omkt-call-facts{grid-template-columns:minmax(0,1fr)}}",
                 ".omkt-market-categories{display:flex;align-items:center;gap:12px;flex-wrap:wrap;min-height:36px;margin-bottom:8px}",
                 ".omkt-featured{height:128px;flex-shrink:0}",
@@ -3352,8 +3354,8 @@ function MarketCard({ item, stats, busy, installing, rank, usageSort, onInstall,
 			return /^v/i.test(text) ? text : `v${text}`;
 		}
 
-        function RegistryColumns({ skill = false }) {
-            const labels = skill ? ["名称与用途", "来源", "文件", "操作"] : ["连接器", "来源", "状态", "启用", "操作"];
+        function RegistryColumns({ skill = false, skillMetric = "文件" }) {
+            const labels = skill ? ["名称与用途", "来源", skillMetric, "操作"] : ["连接器", "来源", "状态", "启用", "操作"];
             return createElement("div", { className: (skill ? "omkt-skill-columns" : "omkt-reg-columns") + " omkt-reg-head" }, labels.map((label, index) => createElement("span", { key: label, className: index === 1 ? skill ? "omkt-listmeta" : "omkt-reg-source" : index === 2 ? skill ? "omkt-listmeta" : "omkt-reg-status" : undefined }, label)));
         }
 
@@ -3365,9 +3367,9 @@ function MarketCard({ item, stats, busy, installing, rank, usageSort, onInstall,
             return createElement("a", { key, href, target: "_blank", rel: "noopener noreferrer", className: "omkt-title omkt-skill-source", style: { ...style, display: "block", width: "fit-content", maxWidth: "100%", color: undefined }, title: `打开来源网页：${name}`, onClick: event => openExternal(event, href) }, name);
         }
 
-        function SkillCard({ skill, busy, onOpen, onReveal, onRemove, rootLabel }) {
+        function SkillCard({ skill, busy, onOpen, onReveal, onRemove, rootLabel, usageLabel, initial }) {
             const meta = [Number.isFinite(skill.files) ? `${skill.files} 个文件` : "", byteText(skill.bytes)].filter(Boolean).join(" · ");
-            return createElement("div", { className: "omkt-skillcard omkt-listrow omkt-skill-columns", style: styles.skillCard }, [
+            return createElement("div", { className: "omkt-skillcard omkt-listrow omkt-skill-columns", style: styles.skillCard, "data-skill-initial": initial }, [
                 createElement("div", { key: "identity", style: { display: "flex", gap: 12, alignItems: "center", minWidth: 0 } }, [
                 createElement(SkillIcon, { key: "icon", item: skill, size: 36, initial: true }),
                 createElement("div", { key: "main", style: styles.skillMain }, [
@@ -3377,7 +3379,7 @@ function MarketCard({ item, stats, busy, installing, rank, usageSort, onInstall,
                 ]),
                 ]),
                 createElement("span", { key: "source", className: "omkt-listmeta", style: { ...styles.listMeta, fontSize: 14 } }, createElement("span", { style: { padding: "3px 9px", borderRadius: 6, background: MCP_SOFT, display: "inline-block" } }, rootLabel || skill.origin || skill.root)),
-                createElement("span", { key: "files", className: "omkt-listmeta", style: styles.listMeta, title: skill.dir }, meta),
+                createElement("span", { key: "files", className: "omkt-listmeta", style: styles.listMeta, title: usageLabel ?? skill.dir }, usageLabel ?? meta),
                 createElement("div", { key: "actions", style: styles.skillActs }, [
                     createElement("button", { key: "open", type: "button", className: "omkt-btn omkt-btn-text", style: { ...styles.textBtn, color: T.brand }, onClick: () => onOpen(skill) }, "查看"),
                     createElement(ActionMenu, { key: "more", label: `${skill.name} 更多操作` }, [
@@ -3545,7 +3547,7 @@ function MarketCard({ item, stats, busy, installing, rank, usageSort, onInstall,
         // In particular, a plain 403 is not evidence of rate limiting.
         function skillSourceErrorMessage(row) {
             const raw = String(row?.error ?? "");
-            const github = ["official", "tencent-official", "github"].includes(row?.id);
+            const github = ["official", "github"].includes(row?.id);
             if (github && /secondary rate limit|abuse detection/i.test(raw)) {
                 return "GitHub 请求过于频繁，已被暂时限制。请暂停刷新，稍后再试。";
             }
@@ -3577,7 +3579,6 @@ function MarketCard({ item, stats, busy, installing, rank, usageSort, onInstall,
 		// chip ("官方 19"); on a card the reader wants to know *which* official list.
 		const SKILL_SRC_ORIGIN = {
 			official: "anthropics/skills",
-			"tencent-official": "Tencent/skillhub",
 			skillhub: "SkillHub",
 			clawhub: "ClawHub",
 			github: "GitHub",
@@ -4197,33 +4198,152 @@ function CallsPanel({ space, data, error, busy, range, onRange, merge, onMerge, 
 		// skills has to be able to fold the ones it is not looking at, so the header
 		// is the control and the body is simply absent while folded.
 
+        const SKILL_LETTERS = Array.from("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        const skillIndexLetter = skill => {
+            const initial = skill.name.trim().charAt(0).toUpperCase();
+            return SKILL_LETTERS.includes(initial) ? initial : "";
+        };
+
         function SkillPanel({ data, error, busy, query, onQuery, root, onRoot, onOpen, onReveal, onRemove, onRefresh, view, onView }) {
             const scrollRef = useRef(null);
+            const alphabetRef = useRef(null);
+            const letterAnimation = useRef(null);
+            const pendingJump = useRef(null);
+            const clampedJump = useRef(null);
+            const [visibleLetter, setVisibleLetter] = useState(null);
+            const usageSort = view.order === "usage-count" || view.order === "usage-recent";
+            const [usage, setUsage] = useState(null);
+            const [usageError, setUsageError] = useState("");
+            const [usageRefresh, setUsageRefresh] = useState(0);
+            useEffect(() => {
+                if (!usageSort) return;
+                let active = true;
+                api("/skills/usage", { method: "GET" }).then(body => {
+                    if (!Array.isArray(body?.usage) || body.usage.some(row => typeof row?.name !== "string"
+                        || !Number.isSafeInteger(row.count) || row.count <= 0 || !Number.isFinite(row.lastUsedAt))) {
+                        throw new Error("Skill 使用统计响应无效");
+                    }
+                    if (active) setUsage(new Map(body.usage.map(row => [row.name, row])));
+                }).catch(err => {
+                    if (active) setUsageError(String(err.message || err));
+                });
+                return () => { active = false; };
+            }, [usageSort, usageRefresh]);
+            const clearUsage = () => { setUsage(null); setUsageError(""); };
+            const refreshUsage = () => { clearUsage(); setUsageRefresh(value => value + 1); };
+            const getUsage = skill => usage?.get(skill.name);
+            const usageLabel = skill => {
+                const row = getUsage(skill);
+                if (view.order === "usage-count") return `${row?.count ?? 0} 次`;
+                return row ? new Date(row.lastUsedAt).toLocaleString("zh-CN", { hour12: false }) : "暂无记录";
+            };
             const pageSize = view.pageSize ?? 20;
             const roots = Array.isArray(data?.roots) ? data.roots : [];
-            const skills = Array.isArray(data?.skills) ? data.skills : [];
+            const skills = data?.skills;
             const needle = String(query ?? "").trim().toLowerCase();
-            const total = data?.totals?.count ?? skills.length;
-            const shown = skills.filter(skill => (!root || skill.root === root)
+            const total = data?.totals?.count ?? (Array.isArray(skills) ? skills.length : 0);
+            const shown = useMemo(() => ((usageSort && !usage) || !Array.isArray(skills) ? [] : skills).filter(skill => (!root || skill.root === root)
                 && (!needle || `${skill.name} ${skill.description ?? ""} ${skill.origin ?? ""}`.toLowerCase().includes(needle)))
-                .sort((a, b) => (view.order === "desc" ? -1 : 1) * String(a.name).localeCompare(String(b.name)));
+                .sort((a, b) => {
+                    if (usageSort) {
+                        const left = getUsage(a), right = getUsage(b);
+                        const byTime = (right?.lastUsedAt ?? 0) - (left?.lastUsedAt ?? 0);
+                        const byCount = (right?.count ?? 0) - (left?.count ?? 0);
+                        const difference = view.order === "usage-count" ? byCount || byTime : byTime || byCount;
+                        if (difference) return difference;
+                    }
+                    return (view.order === "desc" ? -1 : 1) * a.name.localeCompare(b.name);
+                }), [skills, needle, root, usageSort, usage, view.order]);
             const pageCount = Math.max(1, Math.ceil(shown.length / pageSize));
             const page = Math.min(view.page, pageCount - 1);
             const start = page * pageSize;
             const rows = shown.slice(start, start + pageSize);
-            const setPage = page => { onView({ page }); scrollRef.current?.scrollTo({ top: 0 }); };
-            const setPageSize = pageSize => { onView({ pageSize, page: 0 }); scrollRef.current?.scrollTo({ top: 0 }); };
+            const resetScroll = () => {
+                pendingJump.current = null;
+                clampedJump.current = null;
+                setVisibleLetter(null);
+                scrollRef.current?.scrollTo({ top: 0, behavior: "instant" });
+            };
+            const setPage = page => { resetScroll(); onView({ page }); };
+            const setPageSize = pageSize => { resetScroll(); onView({ pageSize, page: 0 }); };
             const changeRoot = next => { onRoot(next); setPage(0); };
-            const firstIndex = new Map();
-            shown.forEach((skill, index) => {
-                const letter = skill.name.trim().slice(0, 1).toUpperCase();
-                if (!firstIndex.has(letter)) firstIndex.set(letter, index);
-            });
+            const firstIndex = useMemo(() => {
+                const indices = new Map();
+                if (!usageSort) shown.forEach((skill, index) => {
+                    const letter = skillIndexLetter(skill);
+                    if (letter && !indices.has(letter)) indices.set(letter, index);
+                });
+                return indices;
+            }, [shown, usageSort]);
+            const activeLetter = usageSort ? "" : (visibleLetter ?? (rows.length ? skillIndexLetter(rows[0]) : ""));
+            const syncVisibleLetter = () => {
+                const scroller = scrollRef.current;
+                if (!scroller || usageSort) return;
+                const clamped = clampedJump.current;
+                if (clamped && Math.abs(scroller.scrollTop - clamped.top) < 1) {
+                    setVisibleLetter(clamped.letter);
+                    return;
+                }
+                clampedJump.current = null;
+                const top = scroller.getBoundingClientRect().top + scroller.clientTop;
+                const bottom = top + scroller.clientHeight;
+                const first = Array.from(scroller.querySelectorAll("[data-skill-initial]")).find(row => {
+                    const bounds = row.getBoundingClientRect();
+                    return bounds.bottom > top + 1 && bounds.top < bottom;
+                });
+                setVisibleLetter(first?.dataset.skillInitial ?? (scroller.scrollTop === 0 && rows.length ? skillIndexLetter(rows[0]) : ""));
+            };
+            const scrollToLetter = letter => {
+                const scroller = scrollRef.current;
+                const row = scroller.querySelector(`[data-skill-initial="${letter}"]`);
+                if (!row) throw new Error(`Skill 字母索引 ${letter} 在第 ${page + 1} 页没有目标行`);
+                const top = scroller.scrollTop + row.getBoundingClientRect().top - scroller.getBoundingClientRect().top - scroller.clientTop;
+                scroller.scrollTo({ top, behavior: "instant" });
+                // Near the end of a page the browser cannot align the target to the top.
+                // Keep that target current until the user moves the list again.
+                clampedJump.current = Math.abs(scroller.scrollTop - top) > 1 ? { letter, top: scroller.scrollTop } : null;
+                setVisibleLetter(letter);
+            };
+            const playLetterClick = button => {
+                letterAnimation.current?.cancel();
+                if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+                letterAnimation.current = button.animate([
+                    { transform: "scale(.88)" },
+                    { transform: "scale(1.15)", offset: .48 },
+                    { transform: "scale(1)" },
+                ], { duration: 230, easing: "ease-out" });
+            };
+            const jumpToLetter = letter => {
+                const index = firstIndex.get(letter);
+                if (index === undefined) return;
+                const targetPage = Math.floor(index / pageSize);
+                if (targetPage === page) scrollToLetter(letter);
+                else {
+                    pendingJump.current = { letter, page: targetPage, shown };
+                    onView({ page: targetPage });
+                }
+            };
+            useEffect(() => {
+                const jump = pendingJump.current;
+                pendingJump.current = null;
+                clampedJump.current = null;
+                if (jump?.page === page && jump.shown === shown) scrollToLetter(jump.letter);
+                else syncVisibleLetter();
+            }, [page, pageSize, shown]);
+            useEffect(() => {
+                const rail = alphabetRef.current;
+                const button = rail?.querySelector('[aria-current="true"]');
+                if (!button) return;
+                const frame = rail.getBoundingClientRect();
+                const bounds = button.getBoundingClientRect();
+                if (bounds.top < frame.top) rail.scrollTop -= frame.top - bounds.top;
+                else if (bounds.bottom > frame.bottom) rail.scrollTop += bounds.bottom - frame.bottom;
+            }, [activeLetter]);
             const directoryErrors = roots.filter(group => group.error && group.error !== "missing");
             return createElement("div", { style: { ...styles.skillPanel, flex: "1 1 auto", minHeight: 0 } }, [
                 createElement("div", { key: "header", style: styles.regHeader }, [
                     createElement(PageHeading, { key: "heading", title: "已注册 Skill", hint: "浏览本机技能与来源", actions: [
-                        createElement("button", { key: "refresh", type: "button", className: "omkt-btn", style: { ...styles.textBtn, color: T.brand }, disabled: busy, onClick: onRefresh }, busy ? "扫描中…" : "重新扫描"),
+                        createElement("button", { key: "refresh", type: "button", className: "omkt-btn", style: { ...styles.textBtn, color: T.brand }, disabled: busy, onClick: () => { if (usageSort) refreshUsage(); onRefresh(); } }, busy ? "扫描中…" : "重新扫描"),
                         createElement("button", { key: "directories", type: "button", style: { ...styles.button, display: "inline-flex", gap: 8, alignItems: "center" }, "aria-expanded": view.directories, onClick: () => onView({ directories: !view.directories }) }, [createElement(UiIcon, { key: "icon", name: "folder" }), "技能目录"]),
                     ] }),
                     data ? createElement("div", { key: "stats", style: styles.stats }, `${total} 个 Skill　 ${roots.length} 个来源　 ${data.duplicates ? `已合并 ${data.duplicates} 个重复副本` : ""}`) : null,
@@ -4234,11 +4354,22 @@ function CallsPanel({ space, data, error, busy, range, onRange, merge, onMerge, 
                             createElement("option", { key: "all", value: "" }, "全部来源"),
                             ...roots.map(group => createElement("option", { key: group.id, value: group.id }, `${group.label}（${group.found ?? group.count}）`)),
                         ]),
-                        createElement("select", { key: "order", className: "omkt-select", style: styles.select, value: view.order, "aria-label": "Skill 排序", onChange: event => onView({ order: event.target.value, page: 0 }) }, [
+                        createElement("select", { key: "order", className: "omkt-select", style: styles.select, value: view.order, "aria-label": "Skill 排序", onChange: event => {
+                            if (!usageSort) clearUsage();
+                            resetScroll();
+                            onView({ order: event.target.value, page: 0 });
+                        } }, [
                             createElement("option", { key: "asc", value: "asc" }, "名称 A–Z"),
                             createElement("option", { key: "desc", value: "desc" }, "名称 Z–A"),
+                            createElement("option", { key: "usage-count", value: "usage-count" }, "使用次数最多"),
+                            createElement("option", { key: "usage-recent", value: "usage-recent" }, "最近使用"),
                         ]),
                     ]),
+                    !usageSort && firstIndex.size ? createElement("select", { key: "letter-select", className: "omkt-select omkt-skill-letter-select", style: styles.select, "aria-label": "按字母跳转", value: activeLetter, onChange: event => jumpToLetter(event.target.value) }, [
+                        createElement("option", { key: "placeholder", value: "", disabled: true }, "按字母跳转"),
+                        ...SKILL_LETTERS.filter(letter => firstIndex.has(letter)).map(letter => createElement("option", { key: letter, value: letter }, letter)),
+                    ]) : null,
+                    usageSort ? createElement("div", { key: "usage-scope", style: styles.stats }, "按近 7 天保留的本机记录统计，包含成功加载和斜杠引用；同名 Skill 共用统计。") : null,
                     createElement("div", { key: "sources", style: styles.toolbar }, [
                         createElement("button", { key: "all", type: "button", style: { ...styles.sourceMiniBtn, fontSize: 15, borderRadius: 18, padding: "4px 16px", ...(!root ? { background: MCP_SOFT, color: T.brand } : {}) }, "aria-pressed": !root, onClick: () => changeRoot("") }, `全部 ${total}`),
                         ...roots.slice().sort((a,b) => Number(a.id === "plugin") - Number(b.id === "plugin")).map(group => createElement("button", { key: group.id, type: "button", style: { ...styles.sourceMiniBtn, fontSize: 15, borderRadius: 18, padding: "4px 16px", ...(root === group.id ? { background: MCP_SOFT, color: T.brand } : {}) }, "aria-pressed": root === group.id, onClick: () => changeRoot(group.id) }, `${group.label} ${group.found ?? group.count ?? 0}`)),
@@ -4246,23 +4377,25 @@ function CallsPanel({ space, data, error, busy, range, onRange, merge, onMerge, 
                 ]),
                 error ? createElement("div", { key: "error", role: "alert", style: styles.error }, error) : null,
                 !data ? createElement("div", { key: "loading", style: styles.emptyBox }, busy ? "正在扫描 Skill 目录…" : "还没有读到 Skill 目录。") : null,
-                createElement("div", { key: "scroll", ref: scrollRef, "data-omkt": "scroller", style: styles.regScroll }, [
+                createElement("div", { key: "list-layout", style: { display: "flex", gap: 12, flex: "1 1 auto", minHeight: 0 } }, [
+                createElement("div", { key: "scroll", ref: scrollRef, "data-omkt": "scroller", style: styles.regScroll, onScroll: usageSort ? undefined : syncVisibleLetter }, [
                     (view.directories || directoryErrors.length) ? createElement("div", { key: "source-details", style: { ...styles.sourceBox, display: "grid", gap: 6, marginBottom: 12 } },
                         (view.directories ? roots : directoryErrors).map(group => createElement("div", { key: group.id, role: group.error && group.error !== "missing" ? "alert" : undefined, style: { ...styles.sectionHint, overflowWrap: "anywhere" } }, [
                             createElement("strong", { key: "label" }, group.label),
                             ` · ${group.dir || "未报告目录"}${group.error === "missing" ? " · 目录尚未创建" : group.error ? ` · 读取失败：${group.error}` : ""}${group.folded > 0 ? ` · ${group.folded} 个重复副本已折叠` : ""}`,
                         ]))) : null,
-                    shown.length ? createElement("div", { key: "list-layout", style: { display: "flex", gap: 14, alignItems: "flex-start" } }, [
-                        createElement("div", { key: "list", className: "omkt-skill-list", style: { flex: "1 1 auto", minWidth: 0 } }, [createElement(RegistryColumns, { key: "columns", skill: true }), ...rows.map(skill => createElement(SkillCard, { key: `${skill.root}:${skill.dir}`, skill, rootLabel: rootLabelOf(data, skill.root), busy, onOpen, onReveal, onRemove }))]),
-                        createElement("nav", { key: "letters", className: "omkt-skill-alphabet", "aria-label": "按字母跳转" }, Array.from("ABCDEFGHIJKLMNOPQRSTUVWXYZ").map(letter => createElement("button", {
-                            key: letter, type: "button", disabled: !firstIndex.has(letter), title: `跳转到 ${letter}`, style: { ...styles.textBtn, padding: 0, minWidth: 20, height: 16, fontSize: 11, lineHeight: 1 }, onClick: () => {
-                                const index = firstIndex.get(letter);
-                                setPage(Math.floor(index / pageSize));
-                            },
-                        }, letter))),
-                    ]) : data ? createElement("div", { key: "empty", style: styles.emptyBox }, needle ? "没有匹配的 Skill。" : "当前来源没有独有的 Skill。") : null,
+                    usageSort && !usage ? createElement("div", { key: "usage-status", role: usageError ? "alert" : "status", style: usageError ? styles.error : styles.emptyBox }, usageError ? `读取 Skill 使用记录失败：${usageError}` : "正在读取 Skill 使用记录…")
+                    : shown.length ? createElement("div", { key: "list", className: "omkt-skill-list" }, [createElement(RegistryColumns, { key: "columns", skill: true, skillMetric: usageSort ? (view.order === "usage-count" ? "使用次数" : "最近使用") : "文件" }), ...rows.map(skill => createElement(SkillCard, { key: `${skill.root}:${skill.dir}`, skill, initial: usageSort ? undefined : skillIndexLetter(skill), rootLabel: rootLabelOf(data, skill.root), usageLabel: usageSort ? usageLabel(skill) : undefined, busy, onOpen, onReveal, onRemove }))])
+                    : data ? createElement("div", { key: "empty", style: styles.emptyBox }, needle ? "没有匹配的 Skill。" : "当前来源没有独有的 Skill。") : null,
                 ]),
-                data ? createElement(PageFooter, { key: "pager", page, pageCount, pageSize, onPageSize: setPageSize, onPage: setPage, note: rows.length ? `显示 ${start + 1}–${start + rows.length} 项，共 ${shown.length} 项` : "显示 0 项" }) : null,
+                !usageSort && firstIndex.size ? createElement("nav", { key: "letters", ref: alphabetRef, className: "omkt-skill-alphabet", "aria-label": "按字母跳转" }, SKILL_LETTERS.map(letter => createElement("button", {
+                    key: letter, type: "button", disabled: !firstIndex.has(letter), title: `跳转到 ${letter}`, "aria-current": letter === activeLetter ? "true" : undefined,
+                    className: "omkt-btn", style: { ...styles.textBtn, padding: 0, width: 22, height: 18, fontSize: 12, lineHeight: 1, borderRadius: 5,
+                        ...(letter === activeLetter ? { background: T.brand, color: "#fff", fontWeight: 700 } : {}),
+                        ...(!firstIndex.has(letter) ? { opacity: .45, cursor: "default" } : {}) }, onClick: event => { playLetterClick(event.currentTarget); jumpToLetter(letter); },
+                }, letter))) : null,
+                ]),
+                data && (!usageSort || usage) ? createElement(PageFooter, { key: "pager", page, pageCount, pageSize, onPageSize: setPageSize, onPage: setPage, note: rows.length ? `显示 ${start + 1}–${start + rows.length} 项，共 ${shown.length} 项` : "显示 0 项" }) : null,
             ]);
         }
 

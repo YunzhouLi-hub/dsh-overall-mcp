@@ -7,7 +7,7 @@
 <p align="center">中文 | <a href="README.md">English</a></p>
 
 <p align="center">
- <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.4-4d6bfe" alt="version 1.0.4"></a>
+ <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.5-4d6bfe" alt="version 1.0.5"></a>
  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4d6bfe" alt="license MIT"></a>
  <img src="https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-4d6bfe" alt="node ^22.19 || >=24">
 </p>
@@ -21,15 +21,15 @@
 | **MCP · 已注册** | 扫描宿主机 MCP 配置，查看连接状态，启用、停用、配置、检查或移除服务器。支持来源筛选、分组和按来源批量操作。 |
 | **MCP · 市场** | 聚合官方 Registry、Smithery、Docker MCP、GitHub MCP、Awesome 远程与 Awesome 清单，去重后搜索、分类、收藏和安装。 |
 | **Skill · 已注册** | 扫描 `$DSH_HOME/skills`、`~/.agents/skills`、`~/.claude/skills`、`~/.codex/skills`，查看说明、来源、文件和目录。支持搜索、排序与字母定位。 |
-| **Skill · 市场** | 浏览 ClawHub、Anthropic 官方技能、腾讯 SkillHub 官方、SkillHub 和 GitHub；支持本地索引、分类、来源筛选、热门排序与安装。 |
+| **Skill · 市场** | 浏览 ClawHub、Anthropic 官方技能、SkillHub 和 GitHub；支持本地索引、分类、来源筛选、热门排序与安装。 |
 | **MCP · 调用记录** | 查看工具请求与响应、成功或失败、耗时及连接异常，按近 1 小时、24 小时或 7 天筛选。 |
 | **Skill · 调用记录** | 查看工具加载与斜杠命令引用，筛选事件、合并重复引用并分页查看。引用按实际次数计入触发完成数，平均耗时只统计有实测时长的工具加载。 |
 
 两个「已注册」列表默认每页 20 条，可选择 **20 / 50 / 100** 条。MCP 与 Skill 在同一行切换，并保留当前页面类型。
 
-在 Skill 市场和「已注册」列表中，有来源网址的技能可点击名称打开原网页。「查看」仍可打开本地技能详情。
+「已注册 Skill」支持按使用次数和最近使用时间排序，统计近 7 天保留的本机记录，包括成功加载与斜杠引用。同名 Skill 共用统计，暂无记录的排在最后。
 
-「腾讯 SkillHub 官方」读取 [Tencent/skillhub 的开源技能目录](https://github.com/Tencent/skillhub/tree/main/skills)，与「SkillHub」平台目录分开筛选。混合结果中，同一技能优先展示官方仓库版本。
+在 Skill 市场和「已注册」列表中，有来源网址的技能可点击名称打开原网页。「查看」仍可打开本地技能详情。
 
 ### 统计与排序
 
@@ -78,11 +78,12 @@
 需要 **Node.js `^22.19.0 || >=24.0.0`** 和 DeepSeek Harness。
 
 ```sh
-git clone https://github.com/YunzhouLi-hub/dsh-overall-mcp.git
-dsh plugin --profile <profile> add /path/to/dsh-overall-mcp
+dsh plugin --profile desktop add "github:YunzhouLi-hub/dsh-overall-mcp#main"
 ```
 
-将 `<profile>` 换成你的 DSH 配置名称，目录换成本机检出路径，然后重启 DSH。后续本地检出通过 `git pull` 更新并重启；通过 npm 安装的插件可使用面板自更新。GitHub 上的代码更新与 npm 发包是两件独立的事。
+正式安装或升级请用 DSH 安装完整的 GitHub 插件包（可在 `#` 后指定提交），然后完全退出并重开 DSH。不要手动覆盖托管配置的 `node_modules` 中的个别文件；DSH 更新时可能从锁文件恢复旧版。开发请使用独立配置。
+
+运行命令前请完全退出 DSH。如果你使用其他配置，将 `desktop` 换成对应配置名。通过 npm 安装的插件可使用面板自更新。GitHub 上的代码更新与 npm 发包是两件独立的事。
 
 **Skill 在会话启动时由宿主加载。** 新增或移除后需重启 DSH，并在新会话中使用；已注册列表不表示当前会话已经加载，也没有 Skill 启用开关。
 

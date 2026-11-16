@@ -7,7 +7,7 @@
 <p align="center"><a href="README.zh-CN.md">中文</a> | English</p>
 
 <p align="center">
- <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.4-4d6bfe" alt="version 1.0.4"></a>
+ <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.5-4d6bfe" alt="version 1.0.5"></a>
  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4d6bfe" alt="license MIT"></a>
  <img src="https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-4d6bfe" alt="node ^22.19 || >=24">
 </p>
@@ -21,15 +21,15 @@
 | **MCP · Registered** | Scan host MCP configurations, inspect connections, enable, disable, configure, check, or remove servers. Filter and group by source, with source-wide bulk actions. |
 | **MCP · Market** | Search, categorize, bookmark, and install deduplicated entries from the official Registry, Smithery, Docker MCP, GitHub MCP, Awesome Remote, and Awesome List. |
 | **Skill · Registered** | Read `$DSH_HOME/skills`, `~/.agents/skills`, `~/.claude/skills`, and `~/.codex/skills`. Inspect descriptions, origins, files, and directories, with search, sorting, and an alphabet index. |
-| **Skill · Market** | Browse ClawHub, Anthropic official skills, Tencent SkillHub official skills, SkillHub, and GitHub. Use a local index, categories, source filters, popularity ranking, and installation. |
+| **Skill · Market** | Browse ClawHub, Anthropic official skills, SkillHub, and GitHub. Use a local index, categories, source filters, popularity ranking, and installation. |
 | **MCP · Calls** | Inspect tool requests, responses, outcomes, latency, and connection failures over the last hour, 24 hours, or 7 days. |
 | **Skill · Calls** | Inspect tool loads and slash-command references, filter events, fold repeated references, and page through results. References count with their actual multiplicity; latency averages only measured tool loads. |
 
 Both Registered lists default to 20 entries and offer **20 / 50 / 100** per page. MCP and Skill share one navigation row and preserve the selected view type when switching.
 
-In the Skill market and Registered list, click a skill name to open its source page when one is available. **查看** still opens the local skill details.
+Registered Skills can be sorted by use count or last used. Both use retained local records from the past seven days, including successful loads and slash references. Skills with the same name share usage stats, and skills without records sort last.
 
-The Tencent SkillHub official source reads the [open-source Skill directories](https://github.com/Tencent/skillhub/tree/main/skills) separately from the SkillHub platform. Combined results prefer the repository copy when both sources list the same Skill.
+In the Skill market and Registered list, click a skill name to open its source page when one is available. **查看** still opens the local skill details.
 
 ### Counters and ranking
 
@@ -78,11 +78,12 @@ Connection state, source, and actions share a compact list; details open on dema
 Requires **Node.js `^22.19.0 || >=24.0.0`** and DeepSeek Harness.
 
 ```sh
-git clone https://github.com/YunzhouLi-hub/dsh-overall-mcp.git
-dsh plugin --profile <profile> add /path/to/dsh-overall-mcp
+dsh plugin --profile desktop add "github:YunzhouLi-hub/dsh-overall-mcp#main"
 ```
 
-Replace `<profile>` with your DSH profile name and the directory with your local checkout, then restart DSH. Update a checkout with `git pull` and a restart. Packages installed through npm can use the panel's self-update action. Updating GitHub code does not publish an npm package.
+Install or upgrade the complete GitHub package with DSH (use the desired commit after `#` for a reproducible install), then fully quit and reopen DSH. Do not copy selected files into a managed profile’s `node_modules`; DSH can restore files from its lockfile during later updates. For local development, use a separate profile.
+
+Quit DSH before running the command. Use your profile name in place of `desktop` if needed. Packages installed through npm can use the panel's self-update action. Updating GitHub code does not publish an npm package.
 
 **The host loads Skills when a session starts.** After adding or removing a Skill, restart DSH and use a new session. Discovery does not mean a running session has loaded it; Skills have no enable switch.
 
