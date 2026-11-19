@@ -7,12 +7,15 @@
 <p align="center"><a href="README.zh-CN.md">中文</a> | English</p>
 
 <p align="center">
- <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.5-4d6bfe" alt="version 1.0.5"></a>
+ <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.6-4d6bfe" alt="version 1.0.6"></a>
  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4d6bfe" alt="license MIT"></a>
  <img src="https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-4d6bfe" alt="node ^22.19 || >=24">
 </p>
 
 **Manage MCP servers and Skills in DeepSeek Harness: discover local capabilities, install from several marketplaces, and inspect actual usage.** Open **全局 MCP & Skill** below Plugins in the sidebar.
+
+
+Validated compatibility target: **DSH 0.2.2-rc.5**. Call and action-log persistence failures are reported separately from tool outcomes; unsaved entries can be retried. Malformed API responses are shown as errors instead of empty lists.
 
 ## Features
 

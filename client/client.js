@@ -59,7 +59,7 @@ window.__ModuleLoader__.load({
 		// probe also checks CHANGELOG.md's newest section is this version, since
 		// a release note that stops at an older build tells a reader what
 		// changed in code they are not running.
-		const CLIENT_VERSION = "1.0.5";
+		const CLIENT_VERSION = "1.0.6";
 		// Where 「点个 star」 points. A constant, not a config: it is this
 		// plugin's own repository, and a panel that could be pointed at another
 		// repository would be asking for a star it does not deserve.
@@ -106,8 +106,16 @@ window.__ModuleLoader__.load({
 					...init,
 					...(controller ? { signal: controller.signal } : {}),
 				});
-				const body = await res.json().catch(() => ({}));
+				let body;
+				try { body = await res.json(); } catch {
+					throw new Error(`${path} 返回了无法解析的 JSON（HTTP ${res.status}），请查看宿主运行日志。`);
+				}
+				if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error(`${path} 返回的数据结构无效，应为 JSON 对象。`);
 				if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+				const route = path.split("?", 1)[0];
+				const lists = { "/catalog": "items", "/skills": "skills", "/skills/usage": "usage", "/skills/market": "items", "/servers": "servers", "/events": "events", "/calls": "rows" };
+				if (lists[route] && !Array.isArray(body[lists[route]])) throw new Error(`${route} 返回的数据缺少有效的 ${lists[route]} 列表，请查看宿主运行日志。`);
+				if (route === "/calls" && (!Array.isArray(body.rail) || !body.stats || typeof body.stats !== "object" || Array.isArray(body.stats))) throw new Error("调用记录响应缺少有效的统计或资源列表。");
 				return body;
 			} catch (err) {
 				if (controller?.signal.aborted) {
@@ -4048,7 +4056,7 @@ function CallCard({ row, open, onToggle }) {
 
 const CALL_VIEW_DEFAULT = { mode: "all", id: null, page: 0, limit: 5 };
 
-function CallsPanel({ space, data, error, busy, range, onRange, merge, onMerge, query, onQuery, filter, onFilter, onExport, note, view, onView, onDiagnostics }) {
+function CallsPanel({ space, data, error, busy, range, onRange, merge, onMerge, query, onQuery, filter, onFilter, onExport, note, view, onView, onDiagnostics, onRetryStorage }) {
     const selectedMode = view.mode;
     const isMcp = space === "mcp";
     const rail = Array.isArray(data?.rail) ? data.rail : [];
@@ -4089,6 +4097,10 @@ function CallsPanel({ space, data, error, busy, range, onRange, merge, onMerge, 
         ]),
         !isMcp ? createElement("div", { key: "hint", style: { ...callStyles.hint, background: T.soft, borderRadius: 8, padding: "8px 12px" } }, [createElement(UiIcon, { key: "icon", name: "info", size: 16 }), "斜杠命令引用计入触发完成数，合并后仍按实际引用次数计。引用没有实测耗时。新增或移除 Skill 后需重启 DSH。"]) : null,
         error ? createElement("div", { key: "error", role: "alert", style: styles.error }, error) : null,
+        data?.coverage?.persistence?.ok === false ? createElement("div", { key: "storage-error", role: "alert", style: styles.error }, [
+            createElement("span", { key: "reason" }, "调用记录未完整保存，重启可能丢失未保存记录。" + (data.coverage.persistence.errors ?? []).map(item => item.message).join("；")),
+            createElement("button", { key: "retry", type: "button", style: styles.button, disabled: busy, onClick: onRetryStorage }, "重试保存"),
+        ]) : null,
         note ? createElement("div", { key: "note", style: styles.message }, note) : null,
         createElement("div", { key: "toolbar", style: callStyles.toolbar }, [
             createElement("div", { key: "range", className: "omkt-call-ranges", style: { display: "flex", alignItems: "center", gap: 3, padding: 2, borderRadius: 14, border: `1px solid ${T.line}`, background: T.cardBg } },
@@ -4992,6 +5004,8 @@ function Section({ close }) {
 						events: Array.isArray(body.events) ? body.events : [],
 						damaged: Number(body.damaged) || 0,
 						total: Number(body.total) || 0,
+							note: body.persistence?.ok === false ? body.persistence.error : "",
+							persistence: body.persistence,
 					});
 				} catch (err) {
 					const text = String(err.message || err);
@@ -6494,16 +6508,21 @@ function Section({ close }) {
 										+ (eventLog.damaged ? ` · ${eventLog.damaged} 行损坏` : "")),
 							createElement("button", {
 								key: "log-r", type: "button", className: "omkt-btn omkt-btn-text",
-								style: styles.textBtn, disabled: logBusy, onClick: loadEvents,
-							}, logBusy ? "读取中…" : "刷新"),
+									style: styles.textBtn, disabled: logBusy, onClick: async () => {
+                                        if (eventLog?.persistence?.ok !== false) return loadEvents();
+                                        setLogBusy(true);
+                                        try { await api("/events/retry", { method: "POST" }); await loadEvents(); }
+                                        catch (err) { setEventLog(previous => ({ ...previous, note: String(err.message || err) })); }
+                                        finally { setLogBusy(false); }
+                                    },
+								}, logBusy ? "读取中…" : eventLog?.persistence?.ok === false ? "重试保存日志" : "刷新"),
 						]),
+                            eventLog?.note ? createElement("div", { key: "log-note", role: "alert", style: styles.error }, eventLog.note) : null,
 						createElement("div", { key: "log-body", style: styles.logBody },
 							eventLog === null
 								? "读取中…"
-								: eventLog.note
-									? eventLog.note
-									: eventLog.events.length === 0
-										? "这次运行还没有记录。"
+								: eventLog.events.length === 0
+										? eventLog.note ? "暂无可读取的日志，请查看上方错误。" : "这次运行还没有记录。"
 										: eventLog.events.slice().reverse().map((event, index) => createElement("div", {
 											key: `ev-${index}`,
 										}, formatEvent(event)))),
@@ -6605,6 +6624,10 @@ function Section({ close }) {
                         view: callView,
                         onView: patch => setCallView(previous => ({ ...previous, ...patch })),
                         onDiagnostics: () => { if (!logOpen) toggleLog(); },
+                        onRetryStorage: async () => {
+                            try { await api("/calls/retry", { method: "POST" }); await loadCalls({}); }
+                            catch (err) { setCallsError(String(err.message || err)); }
+                        },
 					}),
 				]) : null,
 				// ---------------- skill market tab ----------------
@@ -7503,9 +7526,9 @@ function Section({ close }) {
 			render() {
 				if (!this.state.error) return this.props.children ?? null;
 				const retry = () => this.setState({ error: null });
-				const rescan = () => {
-					fetch("/api/overall-mcp/scan", { method: "POST" }).catch(() => {});
-					retry();
+				const rescan = async () => {
+					try { await api("/scan", { method: "POST" }); retry(); }
+					catch (error) { this.setState({ error }); }
 				};
 				return createElement("div", { style: { padding: 20, display: "grid", gap: 10 } }, [
 					createElement("strong", { key: "t" }, "全局 MCP & Skill 面板渲染失败"),

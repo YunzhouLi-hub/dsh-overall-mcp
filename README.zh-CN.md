@@ -7,12 +7,15 @@
 <p align="center">中文 | <a href="README.md">English</a></p>
 
 <p align="center">
- <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.5-4d6bfe" alt="version 1.0.5"></a>
+ <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.6-4d6bfe" alt="version 1.0.6"></a>
  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4d6bfe" alt="license MIT"></a>
  <img src="https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-4d6bfe" alt="node ^22.19 || >=24">
 </p>
 
 **在 DeepSeek Harness 中统一管理 MCP 与 Skill：发现本机已有能力，从多个市场安装，并查看实际调用记录。** 入口位于侧栏「插件」下方。
+
+
+适配目标：**DSH 0.2.2-rc.5**。调用记录及运行日志保存失败会单独提示，可重试待写内容；损坏的接口响应会显示错误，不再伪装为空列表。
 
 ## 功能
 

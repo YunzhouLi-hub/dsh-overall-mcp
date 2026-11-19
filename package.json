@@ -1,6 +1,6 @@
 {
   "name": "dsh-overall-mcp",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Overall MCP for DeepSeek Harness: first-run host-wide MCP config scan + auto-import, plus live aggregation of open MCP catalogs (official registry / Smithery / Docker MCP / awesome-remote / awesome-mcp-servers) for search and one-click install.",
   "keywords": [
     "deepseek-harness",
@@ -71,9 +71,9 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.4",
-    "@deepseek-ai/dsh-llm": "^0.2.0-rc.2",
-    "@deepseek-ai/dsh-mcp-client": "^0.2.0-rc.2",
-    "@deepseek-ai/dsh-tools": "^0.2.0-rc.2"
+    "@deepseek-ai/dsh-llm": "^0.2.0-rc.2 || ^0.2.2-rc.5",
+    "@deepseek-ai/dsh-mcp-client": "^0.2.0-rc.2 || ^0.2.2-rc.5",
+    "@deepseek-ai/dsh-tools": "^0.2.0-rc.2 || ^0.2.2-rc.5"
   },
   "publishConfig": {
     "access": "public"

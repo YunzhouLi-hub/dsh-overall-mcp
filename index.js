@@ -6,11 +6,11 @@ import { readFileSync as readReleaseFile } from "node:fs";
   const manifestUrl = new URL("./package.json", import.meta.url);
   try {
     const manifest = JSON.parse(readReleaseFile(manifestUrl, "utf8"));
-    if (manifest.version !== "1.0.5") throw new Error("package.json version does not match the host");
+    if (manifest.version !== "1.0.6") throw new Error("package.json version does not match the host");
     const digest = releaseHash("sha256").update(readReleaseFile(clientUrl)).digest("hex");
-    if (digest !== "7f6472a6469cb34282ada474644ae9d1489fb1e47c56ff8c54fd7ff108532a77") throw new Error("client/client.js does not match the host");
+    if (digest !== "1ebdf39d66342f00c1fbd8ebaccb89d4c1258f36ba0c55af829511bf503d4651") throw new Error("client/client.js does not match the host");
   } catch (cause) {
-    throw new Error("dsh-overall-mcp 1.0.5: 插件文件不完整或版本不一致，请用 DSH 重新安装完整插件包。原因：" + cause.message, { cause });
+    throw new Error("dsh-overall-mcp 1.0.6: 插件文件不完整或版本不一致，请用 DSH 重新安装完整插件包。原因：" + cause.message, { cause });
   }
 }
 
@@ -678,6 +678,7 @@ async function checkAllUpdates(entries, opts = {}) {
 // lib/events.js
 import fs2 from "node:fs/promises";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 // lib/install-diagnosis.js
 var DIAGNOSIS_MAX_CHARS = 600;
@@ -825,23 +826,62 @@ var EVENT_LIMIT_BYTES = 256 * 1024;
 var MAX_FIELD_CHARS = 600;
 var MAX_ARRAY_ITEMS = 20;
 var sink = null;
-function setEventSink(fn) {
+var reportSinkError = (error) => console.error("[overall-mcp] \u64CD\u4F5C\u65E5\u5FD7\u5931\u8D25\uFF1A" + redactSecrets(String(error?.message ?? error)));
+function setEventSink(fn, { onError } = {}) {
   sink = typeof fn === "function" ? fn : null;
+  reportSinkError = onError ?? ((error) => console.error("[overall-mcp] \u64CD\u4F5C\u65E5\u5FD7\u5931\u8D25\uFF1A" + redactSecrets(String(error?.message ?? error))));
 }
 function emit(event) {
   if (!sink || !event) return;
   try {
-    sink(event);
-  } catch {
+    const result = sink(event);
+    if (result?.then) result.catch(reportSinkError);
+  } catch (error) {
+    reportSinkError(error);
   }
 }
 var chains = /* @__PURE__ */ new Map();
+var persistence = /* @__PURE__ */ new Map();
+var pendingEvents = /* @__PURE__ */ new Map();
+function eventPersistence(file) {
+  return { ...persistence.get(file) ?? { ok: true, error: null, at: null }, pending: pendingEvents.get(file)?.lines.length ?? 0 };
+}
+async function flushEvents(file) {
+  let tail;
+  do {
+    tail = chains.get(file);
+    if (tail) await tail;
+  } while (chains.get(file) && chains.get(file) !== tail);
+  if (pendingEvents.has(file)) await enqueue(file, () => persistPendingEvents(file));
+  const state = eventPersistence(file);
+  if (!state.ok) throw new Error(state.error);
+}
+async function persistPendingEvents(file) {
+  const pending = pendingEvents.get(file);
+  if (!pending) return null;
+  const existing = (await readText(file)).split("\n").filter((line) => line.trim() !== "");
+  const { lines, dropped } = retained(existing, pending.lines, pending.limits);
+  await writeLines(file, lines);
+  pendingEvents.delete(file);
+  return { written: pending.lines.length, lines: lines.length, dropped };
+}
 function enqueue(file, task) {
   const previous = chains.get(file) ?? Promise.resolve();
-  const next = previous.then(task, task);
-  chains.set(file, next.then(() => {
+  const next = previous.then(task, task).then((value) => {
+    persistence.set(file, { ok: true, error: null, at: (/* @__PURE__ */ new Date()).toISOString() });
+    return value;
+  }, (cause) => {
+    const error = new Error("\u64CD\u4F5C\u65E5\u5FD7\u5199\u5165\u5931\u8D25\uFF1A" + redactSecrets(String(cause?.message ?? cause)), { cause });
+    persistence.set(file, { ok: false, error: error.message, at: (/* @__PURE__ */ new Date()).toISOString() });
+    throw error;
+  });
+  const observed = next.then(() => {
   }, () => {
-  }));
+  });
+  chains.set(file, observed);
+  void observed.then(() => {
+    if (chains.get(file) === observed) chains.delete(file);
+  });
   return next;
 }
 function clip(value, depth = 0) {
@@ -877,16 +917,21 @@ function normalizeEvent(event, at = /* @__PURE__ */ new Date()) {
 async function readText(file) {
   try {
     return await fs2.readFile(file, "utf8");
-  } catch {
-    return "";
+  } catch (cause) {
+    if (cause.code === "ENOENT") return "";
+    throw new Error("\u64CD\u4F5C\u65E5\u5FD7\u8BFB\u53D6\u5931\u8D25\uFF1A" + redactSecrets(String(cause?.message ?? cause)), { cause });
   }
 }
 async function writeLines(file, lines) {
   await fs2.mkdir(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp`;
-  await fs2.writeFile(tmp, lines.length > 0 ? `${lines.join("\n")}
-` : "", "utf8");
-  await fs2.rename(tmp, file);
+  const tmp = `${file}.${randomUUID()}.tmp`;
+  try {
+    await fs2.writeFile(tmp, lines.length > 0 ? `${lines.join("\n")}
+` : "", { encoding: "utf8", flag: "wx", mode: 384 });
+    await fs2.rename(tmp, file);
+  } finally {
+    await fs2.rm(tmp, { force: true });
+  }
 }
 function retained(existing, appended, { maxLines, maxBytes }) {
   const lines = [...existing, ...appended];
@@ -911,21 +956,16 @@ function appendEvents(file, events, { maxLines = EVENT_LIMIT_LINES, maxBytes = E
   const list = (Array.isArray(events) ? events : [events]).filter(Boolean);
   if (list.length === 0) return Promise.resolve(null);
   return enqueue(file, async () => {
-    try {
-      const appended = list.map((event) => {
-        try {
-          return JSON.stringify(normalizeEvent(event));
-        } catch {
-          return JSON.stringify({ at: (/* @__PURE__ */ new Date()).toISOString(), kind: "log", action: "unserializable" });
-        }
-      });
-      const existing = (await readText(file)).split("\n").filter((line) => line.trim() !== "");
-      const { lines, dropped } = retained(existing, appended, { maxLines, maxBytes });
-      await writeLines(file, lines);
-      return { written: appended.length, lines: lines.length, dropped };
-    } catch {
-      return null;
-    }
+    const appended = list.map((event) => {
+      try {
+        return JSON.stringify(normalizeEvent(event));
+      } catch {
+        return JSON.stringify({ at: (/* @__PURE__ */ new Date()).toISOString(), kind: "log", action: "unserializable" });
+      }
+    });
+    const buffered = retained(pendingEvents.get(file)?.lines ?? [], appended, { maxLines, maxBytes });
+    pendingEvents.set(file, { lines: buffered.lines, limits: { maxLines, maxBytes } });
+    return persistPendingEvents(file);
   });
 }
 async function readEvents(file, { limit = 100 } = {}) {
@@ -957,11 +997,12 @@ async function eventFileFacts(file) {
       at: stat.mtime.toISOString(),
       lines: total,
       damaged,
-      lastAt: typeof events.at(-1)?.at === "string" ? events.at(-1).at : null
+      lastAt: typeof events.at(-1)?.at === "string" ? events.at(-1).at : null,
+      persistence: eventPersistence(file)
     };
   } catch (err) {
     if (err?.code === "ENOENT") return { bytes: 0, at: null, lines: 0, damaged: 0, lastAt: null };
-    return null;
+    return { error: redactSecrets(String(err?.message ?? err)), persistence: eventPersistence(file) };
   }
 }
 
@@ -5305,7 +5346,11 @@ async function readRoot(root, fs6) {
     let modifiedAt = null;
     try {
       text = await fs6.readFile(file, "utf8");
-    } catch {
+    } catch (error) {
+      if (error?.code !== "ENOENT") {
+        const issue = `${name2}/${SKILL_FILE} \u8BFB\u53D6\u5931\u8D25\uFF1A${String(error?.message ?? error)}`;
+        out.error = out.error ? `${out.error}\uFF1B${issue}` : issue;
+      }
       continue;
     }
     try {
@@ -6712,6 +6757,7 @@ function querySkillRows(rows, { query = "", source = "all", category = "all", so
 // lib/calls.js
 import fs4 from "node:fs/promises";
 import path6 from "node:path";
+import { randomUUID as randomUUID2 } from "node:crypto";
 var CALL_KEEP_MS = 7 * 24 * 60 * 60 * 1e3;
 var CALL_LIMIT_LINES = 2e4;
 var CALL_LIMIT_BYTES = 8 * 1024 * 1024;
@@ -6997,8 +7043,9 @@ function summarize(rows, { space = "mcp", range = "24h", filter = "", q = "", me
     rows: view.slice(0, 300)
   };
 }
+var callWriteChains = /* @__PURE__ */ new Map();
 var CallStore = class {
-  constructor({ file, now = () => Date.now(), memoryLimit = CALL_MEMORY_LIMIT, fileLimits = {} } = {}) {
+  constructor({ file, now = () => Date.now(), memoryLimit = CALL_MEMORY_LIMIT, fileLimits = {}, onError = (error) => console.error(error.message) } = {}) {
     this.file = file;
     this.now = now;
     this.memoryLimit = memoryLimit;
@@ -7012,11 +7059,51 @@ var CallStore = class {
     this.sig = null;
     this.appends = 0;
     this.chain = Promise.resolve();
+    this.pending = [];
+    this.storageErrors = /* @__PURE__ */ new Map();
+    this.onError = onError;
+    this.lastSavedAt = null;
   }
-  /** Read the file once. Failures mean "an empty feed", never a broken plugin. */
+  storageFailure(operation, cause) {
+    const error = new Error(`\u8C03\u7528\u8BB0\u5F55 ${operation} \u5931\u8D25\uFF1A${redactSecrets(String(cause?.message ?? cause))}`, { cause });
+    this.storageErrors.set(operation, { operation, message: error.message, at: new Date(this.now()).toISOString() });
+    this.onError(error);
+    return error;
+  }
+  enqueueWrite(operation, task) {
+    const previous = callWriteChains.get(this.file) ?? this.chain;
+    const result = previous.then(async () => {
+      try {
+        const value = await task();
+        this.storageErrors.delete(operation);
+        this.lastSavedAt = new Date(this.now()).toISOString();
+        return value;
+      } catch (error) {
+        throw this.storageFailure(operation, error);
+      }
+    });
+    this.chain = result.then(() => {
+    }, () => {
+    });
+    const observed = this.chain;
+    callWriteChains.set(this.file, observed);
+    void observed.then(() => {
+      if (callWriteChains.get(this.file) === observed) callWriteChains.delete(this.file);
+    });
+    return result;
+  }
+  async drainPending() {
+    if (!this.pending.length) return;
+    await fs4.mkdir(path6.dirname(this.file), { recursive: true });
+    while (this.pending.length) {
+      await fs4.appendFile(this.file, this.pending[0], "utf8");
+      this.pending.shift();
+    }
+    this.storageErrors.delete("append");
+  }
+  /** Read failures remain visible and are retried on the next access. */
   async load({ strict = false } = {}) {
     if (this.loaded) return this;
-    this.loaded = true;
     return this.readFromDisk({ strict });
   }
   /**
@@ -7027,16 +7114,20 @@ var CallStore = class {
    * the file on every scroll.
    */
   async refresh({ strict = false } = {}) {
+    await this.chain;
     if (!this.loaded) return this.load({ strict });
     if (!this.file) return this;
     let stat = null;
     try {
       stat = await fs4.stat(this.file);
     } catch (error) {
-      if (strict && error.code !== "ENOENT") throw error;
+      if (error.code !== "ENOENT") {
+        const failure = this.storageFailure("read", error);
+        if (strict) throw failure;
+      } else this.storageErrors.delete("read");
       return this;
     }
-    if (`${stat.size}:${stat.mtimeMs}` === this.sig) return this;
+    if (`${stat.size}:${stat.mtimeMs}` === this.sig && !this.storageErrors.has("read")) return this;
     return this.readFromDisk({ strict });
   }
   async readFromDisk({ strict = false } = {}) {
@@ -7045,9 +7136,18 @@ var CallStore = class {
     try {
       raw = await fs4.readFile(this.file, "utf8");
     } catch (error) {
-      if (strict && error.code !== "ENOENT") throw error;
+      if (error.code === "ENOENT") {
+        this.loaded = true;
+        this.storageErrors.delete("read");
+        return this;
+      }
+      const failure = this.storageFailure("read", error);
+      if (strict) throw failure;
       return this;
     }
+    this.loaded = true;
+    this.storageErrors.delete("read");
+    this.damaged = 0;
     const stat = await fs4.stat(this.file).catch(() => null);
     if (stat) this.sig = `${stat.size}:${stat.mtimeMs}`;
     const oldest = this.now() - CALL_KEEP_MS;
@@ -7166,13 +7266,8 @@ var CallStore = class {
     if (!this.file) return;
     const line = `${JSON.stringify(row)}
 `;
-    this.chain = this.chain.then(async () => {
-      try {
-        await fs4.mkdir(path6.dirname(this.file), { recursive: true });
-        await fs4.appendFile(this.file, line, "utf8");
-      } catch {
-      }
-    });
+    this.pending.push(line);
+    this.enqueueWrite("append", () => this.drainPending());
     this.appends += 1;
     if (this.appends % PRUNE_EVERY === 0) void this.prune();
   }
@@ -7201,43 +7296,74 @@ var CallStore = class {
    * holds fewer rows than the file may, so "memory is small" is not evidence
    * that the file is small.
    */
-  async prune() {
+  prune() {
+    if (!this.file) return Promise.resolve(null);
+    return this.enqueueWrite("prune", () => this.pruneOnDisk());
+  }
+  async pruneOnDisk() {
     if (!this.file) return null;
+    await this.drainPending();
     let raw = "";
     try {
       raw = await fs4.readFile(this.file, "utf8");
-    } catch {
-      return null;
+    } catch (error) {
+      if (error.code === "ENOENT") return null;
+      throw error;
     }
     const onDisk = raw.split("\n").filter((line) => line.trim() !== "").length;
     const diskBytes = Buffer.byteLength(raw, "utf8");
     if (onDisk <= this.limits.lines && diskBytes <= this.limits.bytes) return null;
-    this.trim();
+    const latest = /* @__PURE__ */ new Map();
+    for (const text of raw.split("\n")) {
+      if (!text.trim()) continue;
+      let row;
+      try {
+        row = JSON.parse(text);
+      } catch {
+        throw new Error("\u8C03\u7528\u8BB0\u5F55\u5305\u542B\u635F\u574F JSON\uFF0C\u672A\u8986\u76D6\u539F\u6587\u4EF6");
+      }
+      if (!row || typeof row !== "object" || typeof row.id !== "string") throw new Error("\u8C03\u7528\u8BB0\u5F55\u7ED3\u6784\u635F\u574F\uFF0C\u672A\u8986\u76D6\u539F\u6587\u4EF6");
+      for (const field of ["req", "res", "note"]) if (typeof row[field] === "string") row[field] = redactSecrets(row[field]);
+      latest.set(row.id, row);
+    }
+    const oldest = this.now() - CALL_KEEP_MS;
+    const snapshot = [...latest.values()].filter((row) => Date.parse(row.startedAt) >= oldest);
     const kept = [];
     let size = 0;
-    for (const row of [...this.rows].reverse()) {
+    for (const row of snapshot.reverse()) {
       const line = JSON.stringify(row);
-      if (size + line.length + 1 > this.limits.bytes) break;
+      const bytes = Buffer.byteLength(line + "\n", "utf8");
+      if (size + bytes > this.limits.bytes) break;
       kept.unshift(row);
-      size += line.length + 1;
+      size += bytes;
       if (kept.length >= this.limits.lines) break;
     }
-    this.dropped += this.rows.length - kept.length;
-    this.rows = kept;
-    this.byId = new Map(kept.map((row) => [row.id, row]));
+    const tmp = `${this.file}.${randomUUID2()}.tmp`;
     try {
       await fs4.mkdir(path6.dirname(this.file), { recursive: true });
-      const tmp = `${this.file}.tmp`;
-      await fs4.writeFile(tmp, kept.map((row) => JSON.stringify(row)).join("\n") + (kept.length > 0 ? "\n" : ""), "utf8");
+      await fs4.writeFile(tmp, kept.map((row) => JSON.stringify(row)).join("\n") + (kept.length > 0 ? "\n" : ""), { encoding: "utf8", flag: "wx", mode: 384 });
       await fs4.rename(tmp, this.file);
-    } catch {
-      return null;
+    } finally {
+      await fs4.rm(tmp, { force: true });
     }
+    this.trim();
     return { kept: kept.length };
   }
   /** Wait for queued writes to land (tests and shutdown). */
+  async retryPersistence() {
+    await this.enqueueWrite("append", () => this.drainPending());
+    if (this.storageErrors.has("prune")) await this.prune();
+    if (this.storageErrors.has("read")) await this.refresh({ strict: true });
+    await this.flush();
+  }
   async flush() {
-    await this.chain;
+    let tail;
+    do {
+      tail = this.chain;
+      await tail;
+    } while (tail !== this.chain);
+    const failure = this.storageErrors.values().next().value;
+    if (failure) throw new Error(failure.message);
   }
   coverage() {
     const oldest = this.rows.length === 0 ? null : this.rows[0].startedAt;
@@ -7246,7 +7372,13 @@ var CallStore = class {
       kept: this.rows.length,
       dropped: this.dropped,
       damaged: this.damaged,
-      running: this.rows.filter((row) => row.status === "running").length
+      running: this.rows.filter((row) => row.status === "running").length,
+      persistence: {
+        ok: this.storageErrors.size === 0,
+        pending: this.pending.length,
+        lastSavedAt: this.lastSavedAt,
+        errors: [...this.storageErrors.values()]
+      }
     };
   }
 };
@@ -7424,11 +7556,9 @@ async function apply(ctx) {
   const aboutI18nFile = path7.join(dir, "about-i18n.json");
   const reportFile = path7.join(dir, "scan-report.json");
   const eventsFile = path7.join(dir, "events.ndjson");
-  setEventSink((event) => {
-    void appendEvents(eventsFile, [event]);
-  });
+  setEventSink((event) => appendEvents(eventsFile, [event]), { onError: (error) => log?.error?.(`overall-mcp: ${error.message}`) });
   const callsFile = path7.join(dir, "calls.jsonl");
-  const callStore = new CallStore({ file: callsFile });
+  const callStore = new CallStore({ file: callsFile, onError: (error) => log?.error?.(`overall-mcp: ${error.message}`) });
   void callStore.load();
   const prefsFile = path7.join(dir, "ui-prefs.json");
   const CALL_MERGE_MAX = 7 * 24 * 3600 * 1e3;
@@ -9892,7 +10022,11 @@ async function apply(ctx) {
         const url = new URL(req.url);
         const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 100, 1), 500);
         const { events, damaged, total } = await readEvents(eventsFile, { limit });
-        return json({ events, damaged, total });
+        return json({ events, damaged, total, persistence: eventPersistence(eventsFile) });
+      })],
+      ["/api/overall-mcp/events/retry", ["POST"], guard(async () => {
+        await flushEvents(eventsFile);
+        return json({ ok: true, persistence: eventPersistence(eventsFile) });
       })],
       ["/api/overall-mcp/servers", ["GET"], guard(async () => json(await serversPayload()))],
       // The skill space: directories on this machine, read into the same panel.
@@ -10043,6 +10177,10 @@ async function apply(ctx) {
           }),
           coverage: callStore.coverage()
         });
+      })],
+      ["/api/overall-mcp/calls/retry", ["POST"], guard(async () => {
+        await callStore.retryPersistence();
+        return json({ ok: true, coverage: callStore.coverage() });
       })],
       ["/api/overall-mcp/scan", ["GET", "POST"], guard(async () => json(await doScan()))],
       ["/api/overall-mcp/catalog", ["GET", "POST"], guard(async (req) => {
@@ -10381,7 +10519,7 @@ async function apply(ctx) {
     startupRuns.then(warnFailed).catch(() => {
     });
   }
-  ctx.effect(() => () => {
+  ctx.effect(() => async () => {
     if (disposed) return;
     disposed = true;
     stopCensus("dispose");
@@ -10397,6 +10535,8 @@ async function apply(ctx) {
     }
     fibers.clear();
     starting.clear();
+    setEventSink(null);
+    await Promise.all([callStore.flush(), flushEvents(eventsFile)]);
   }, "overall-mcp.cleanup");
 }
 export {
