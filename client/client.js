@@ -283,15 +283,19 @@ window.__ModuleLoader__.load({
 		// page reads as native in BOTH themes — a hard-coded white card on the
 		// dark theme is the single most obvious "this does not belong here" tell.
 		const T = {
-			cardBg: "var(--dsw-alias-bg-primary, #fff)",
-			soft: "rgba(128,128,128,0.08)",
-			soft2: "rgba(128,128,128,0.12)",
-			text: "var(--dsw-alias-text-primary, #18202e)",
-			text2: "var(--dsw-alias-text-secondary, #526071)",
-			text3: "var(--dsw-alias-text-tertiary, #667085)",
-			text4: "var(--dsw-alias-text-quaternary, #a9aeb8)",
-			line: "rgba(114,130,167,.24)",
-			line2: "rgba(114,130,167,.15)",
+			// DSH's real theme tokens. The previous names (--dsw-alias-text-*,
+			// --dsw-alias-bg-primary) do not exist in the shell, so every surface
+			// silently fell back to the light literals and the page painted a
+			// white card wall and a near-black title on the dark canvas.
+			cardBg: "var(--dsw-alias-card-fill, #fff)",
+			soft: "var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,0.08))",
+			soft2: "var(--dsw-alias-interactive-bg-active, rgba(128,128,128,0.12))",
+			text: "var(--dsw-alias-label-primary, #18202e)",
+			text2: "var(--dsw-alias-label-secondary, #526071)",
+			text3: "var(--dsw-alias-label-tertiary, #667085)",
+			text4: "var(--dsw-alias-label-caption, #a9aeb8)",
+			line: "var(--dsw-alias-border-l2, rgba(114,130,167,.24))",
+			line2: "var(--dsw-alias-border-l1, rgba(114,130,167,.15))",
 			brand: "#4566e9",
 			green: "#00b42a",
 			amber: "#ff7d00",
@@ -301,12 +305,12 @@ window.__ModuleLoader__.load({
 
 		// Both resource types share the host's blue accent; status colors are
 		// reserved for health and outcomes, never used to distinguish tabs.
-		const MCP_SOFT = "#e8eefc";
+		const MCP_SOFT = "rgba(69,102,233,.14)";
 		const SKILL_ACCENT = T.brand;
 		const SKILL_INK = T.brand;
 		const SKILL_SOFT = MCP_SOFT;
 		const SKILL_MARKET_LABELS = { clawhub: "ClawHub", official: "Anthropic 官方技能", skillhub: "SkillHub", github: "GitHub" };
-		const SKILL_LINE = "rgba(69,102,233,.18)";
+		const SKILL_LINE = "rgba(69,102,233,.28)";
 
 		const styles = {
 			smallPrimary: { padding: "6px 12px", minHeight: 30, fontSize: 13, lineHeight: 1.25, fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0, cursor: "pointer", fontWeight: 500, borderRadius: 7, border: `1px solid ${T.brand}`, background: T.brand, color: "#fff", boxShadow: "0 2px 4px rgba(69,102,233,.12)" },
@@ -549,13 +553,13 @@ window.__ModuleLoader__.load({
 				display: "flex", flexDirection: "column", gap: 2,
 				flexShrink: 0, width: 16, paddingTop: 2,
 			},
-			marketStatus: { display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", padding: "10px 2px 2px", fontSize: 12, color: "#6b7280" },
+			marketStatus: { display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", padding: "10px 2px 2px", fontSize: 12, color: T.text3 },
 			marketChip: {
 				display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 8px",
 				borderRadius: 999, border: `1px solid ${SKILL_LINE}`, background: SKILL_SOFT,
 				fontSize: 11, color: SKILL_INK,
 			},
-			marketChipBad: { borderColor: "#f2d4cf", background: "#fdf2f1", color: "#a3392f" },
+			marketChipBad: { borderColor: "rgba(245,63,63,.35)", background: "rgba(245,63,63,.12)", color: T.red },
 			// Skill 市场（原型 v5）：提示行 → 搜索 → 筛选 → 统计行 → 两张 spotlight
 			// → 卡片网格 → 脚注。只用主题变量与固定 rgba，深色主题下不会翻车。
 			smHintRow: {
@@ -564,7 +568,7 @@ window.__ModuleLoader__.load({
 			},
 			smHintChip: {
 				fontSize: 11, fontWeight: 600, padding: "1px 7px", borderRadius: 6,
-				background: "#fff9ef", color: "#a07a3a", border: "1px solid #f3e8d4",
+				background: "rgba(255,125,0,.10)", color: T.text2, border: "1px solid rgba(255,125,0,.25)",
 			},
 			// The search box, the filters and the count line stay at the top of the
 			// tab body while the cards scroll under them. `top: 0` is the scroll
@@ -592,7 +596,7 @@ window.__ModuleLoader__.load({
 			smChips: { display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginLeft: "auto" },
 			smSrcPill: {
 				fontSize: 10.5, fontWeight: 620, padding: "2px 7px", borderRadius: 999,
-				background: "#f2f3f5", color: "#646a73", border: "1px solid transparent",
+				background: T.soft, color: T.text2, border: "1px solid transparent",
 				whiteSpace: "nowrap",
 			},
 			smSpotlight: { display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 16, marginBottom: 0 },
@@ -605,7 +609,7 @@ window.__ModuleLoader__.load({
 			smN: { fontSize: 12, color: T.text3, whiteSpace: "nowrap" },
 			smBadge: {
 				fontSize: 11, fontWeight: 600, padding: "2px 7px", borderRadius: 6,
-				background: SKILL_SOFT, color: SKILL_INK, border: "1px solid #e3e0f6",
+				background: SKILL_SOFT, color: SKILL_INK, border: `1px solid ${SKILL_LINE}`,
 			},
 			smCard: { display: "flex", flexDirection: "column", gap: 5, padding: "10px 16px", minHeight: 150, borderRadius: 12, background: T.cardBg, border: `1px solid ${T.line}`, boxShadow: "0 2px 4px rgba(20,26,40,.035)", minWidth: 0 },
 			smTop: { display: "flex", alignItems: "flex-start", gap: 10, minWidth: 0 },
@@ -622,7 +626,7 @@ window.__ModuleLoader__.load({
 			smAct: { marginLeft: "auto" },
 			smNote: {
 				marginTop: 14, padding: "11px 13px", borderRadius: 12,
-				background: "rgba(255,255,255,0.75)", border: "1px solid " + T.line2,
+				background: T.soft, border: "1px solid " + T.line2,
 				color: T.text3, fontSize: 12, lineHeight: 1.6,
 			},
 			smCode: {
@@ -632,15 +636,15 @@ window.__ModuleLoader__.load({
 
 			marketCard: {
 				display: "flex", gap: 10, alignItems: "flex-start", padding: 12, minWidth: 0,
-				border: "1px solid " + "#ebecef", borderRadius: 10, background: "#fff",
+				border: "1px solid " + T.line, borderRadius: 10, background: T.cardBg,
 			},
-			marketName: { fontSize: 13, fontWeight: 600, color: "#1f2329", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+			marketName: { fontSize: 13, fontWeight: 600, color: T.text, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
 			marketDesc: {
-				fontSize: 12, lineHeight: 1.5, color: "#4b5563", margin: "2px 0 0",
+				fontSize: 12, lineHeight: 1.5, color: T.text2, margin: "2px 0 0",
 				display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
 			},
-			marketMeta: { fontSize: 11, color: "#9aa1ac", marginTop: 4 },
-			marketFoot: { fontSize: 12, color: "#6b7280", padding: "10px 2px 0", lineHeight: 1.6 },
+			marketMeta: { fontSize: 11, color: T.text3, marginTop: 4 },
+			marketFoot: { fontSize: 12, color: T.text3, padding: "10px 2px 0", lineHeight: 1.6 },
 						skillRailLetter: { fontSize: 10.5, fontWeight: 700, color: T.text4, lineHeight: 1.3 },
 			// The space's body: a toolbar, one count line, then one framed group
 			// per root. Groups are framed because the roots are the only real
@@ -724,7 +728,7 @@ window.__ModuleLoader__.load({
 			},
 			skillHintChip: {
 				flex: "0 0 auto", padding: "1px 7px", borderRadius: 999,
-				background: "rgba(240,180,41,0.16)", color: "#8a6412", fontWeight: 500,
+				background: "rgba(240,180,41,0.16)", color: T.text, fontWeight: 500,
 			},
 			skillFoot: { display: "flex", gap: 8, justifyContent: "flex-end", paddingTop: 2 },
 			// Removing a skill is a move into our own trash directory, and the
@@ -747,7 +751,7 @@ window.__ModuleLoader__.load({
 			dialogFoot: { display: "flex", gap: 8, justifyContent: "flex-end", padding: "14px 18px" },
 			// The one destructive-looking button on the page. Colour, not weight:
 			// it sits beside 取消 and must not read as the default action.
-			dangerBtn: { color: "#c4453b", borderColor: "#e7c3bf" },
+			dangerBtn: { color: T.red, borderColor: "rgba(245,63,63,.35)" },
 			// Underline tabs: the label sits on a rule and the active rule is
 			// ink, not accent. The rule is drawn by the injected sheet on
 			// `.omkt-tab[aria-selected="true"]::after` rather than as an inline
@@ -935,7 +939,7 @@ window.__ModuleLoader__.load({
 			// exactly like "you never added a server".
 			registryWarn: {
 				padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.line}`,
-				background: T.soft2, color: "#f53f3f", fontSize: 12.5, lineHeight: 1.7,
+				background: T.soft2, color: T.red, fontSize: 12.5, lineHeight: 1.7,
 			},
 			// An install that reached the registry but did not mount. Needs
 			// `pre-wrap`: this block is the host's raw error, the model's
@@ -970,8 +974,8 @@ window.__ModuleLoader__.load({
 				// to a working one is indistinguishable from it — and that is
 				// exactly what happened to a mounted server with zero tools.
 				background: state === "on" ? T.green
-					: state === "error" || state === "starting" || state === "unhealthy" ? "#e0a020"
-						: state === "off" ? "#f53f3f"
+					: state === "error" || state === "starting" || state === "unhealthy" ? T.amber
+						: state === "off" ? T.red
 							: state === "external" ? T.blue
 								: "rgba(128,128,128,0.6)",
 			}),
@@ -1181,7 +1185,7 @@ window.__ModuleLoader__.load({
 			ghStatNum: { fontWeight: 700, fontSize: 15, color: T.text },
 			ghStatLab: { color: T.text3, fontSize: 11 },
 			message: { fontSize: 13, color: T.text2 },
-			error: { fontSize: 13, color: "#f53f3f" },
+			error: { fontSize: 13, color: T.red },
 			// 运行日志 — the host's own record of what the plugin did. It is read
 			// line by line when something went wrong and folded away the rest of
 			// the time, so it hangs under the head rather than owning a tab.
@@ -1344,7 +1348,7 @@ window.__ModuleLoader__.load({
             const tile = { width: size, height: size, flexShrink: 0, borderRadius: Math.round(size / 4), display: "grid", placeItems: "center", background: T.cardBg, border: `1px solid ${T.line2}`, color: T.brand, boxShadow: "0 2px 4px rgba(20,26,40,.06)" };
             let glyph;
             if (/context.?7/.test(name)) glyph = createElement("strong", { style: { fontSize: size * .48, fontStyle: "italic", color: "#3c73f7", letterSpacing: "-.12em", paddingRight: 4 } }, "C7");
-            else if (/^(github|github-mcp|github_mcp)/.test(name)) glyph = createElement("span", { style: { color: "#171b22" } }, githubMark(size * .65));
+            else if (/^(github|github-mcp|github_mcp)/.test(name)) glyph = createElement("span", { style: { color: T.text } }, githubMark(size * .65));
             else if (/brave/.test(name)) glyph = createElement("svg", { width: size * .72, height: size * .72, viewBox: "0 0 32 32", "aria-hidden": true }, [
                 createElement("path", { key: "mane", fill: "#ff6328", d: "M6 3 11 1h10l5 2 4 7-3 15-11 6L5 25 2 10Z" }),
                 createElement("path", { key: "face", fill: "white", d: "m7 8 5-3 4 3 4-3 5 3-2 8-7 9-7-9Z" }),
@@ -1612,7 +1616,7 @@ window.__ModuleLoader__.load({
 						server.health
 							? createElement("div", {
 								key: "health", className: "omkt-shealth",
-								style: { ...styles.meta, color: server.health.ok ? "#2f7d32" : "#b3261e", whiteSpace: "normal" },
+								style: { ...styles.meta, color: server.health.ok ? T.green : T.red, whiteSpace: "normal" },
 								title: (server.health.checks || []).map((c) => `${c.ok ? "✓" : "✗"} ${c.detail}`).join("\n") || undefined,
 							}, healthLine(server.health))
 							: null,
@@ -1623,7 +1627,7 @@ window.__ModuleLoader__.load({
 						server.health && !server.health.ok && server.channel === "cli-json"
 							? createElement("div", {
 								key: "legacycli",
-								style: { ...styles.meta, color: "#8a5a00", whiteSpace: "normal" },
+								style: { ...styles.meta, color: T.amber, whiteSpace: "normal" },
 							}, "这是旧装法（Smithery CLI 解析成远程端点，要浏览器登录）。移除后重新安装，会按它自己托管的方式装成远程 http。")
 							: null,
                 ]),
@@ -2167,7 +2171,7 @@ window.__ModuleLoader__.load({
 				// v4's card hover: a hair darker border and a soft lift, not an
 				// accent-coloured outline. One accent per screen is the rule.
 				".omkt-card{transition:border-color .18s ease,box-shadow .18s ease,transform .18s ease}",
-				".omkt-card:hover{border-color:#d9dde6;box-shadow:0 2px 6px rgba(20,26,40,.04),"
+				".omkt-card:hover{border-color:var(--dsw-alias-border-l3,#d9dde6);box-shadow:0 2px 6px rgba(20,26,40,.04),"
 					+ "0 10px 24px rgba(20,26,40,.06);transform:translateY(-2px)}",
 				".omkt-card:focus-visible{outline:2px solid #4d6bfe;outline-offset:2px}",
 				// A skill card is a card too, but it is not clickable as a whole
@@ -2177,7 +2181,7 @@ window.__ModuleLoader__.load({
 				// so it exists even though the paint lives in inline styles.
 				".omkt-skillhero{display:flex;flex-direction:column;gap:8px;min-width:0}",
 				".omkt-skillcard{transition:border-color .18s ease,box-shadow .18s ease,transform .18s ease}",
-				".omkt-skillcard:hover{border-color:#d9dde6;box-shadow:0 2px 6px rgba(20,26,40,.04),"
+				".omkt-skillcard:hover{border-color:var(--dsw-alias-border-l3,#d9dde6);box-shadow:0 2px 6px rgba(20,26,40,.04),"
 					+ "0 10px 24px rgba(20,26,40,.06);transform:translateY(-2px)}",
 				// The install button on a market card is a bare .omkt-primary, not
 				// the .omkt-btn family: it says one thing and never changes shape.
@@ -2195,9 +2199,9 @@ window.__ModuleLoader__.load({
 				// edge and must not stretch, or the row looks like a second card.
 				// The one control on a call row: ▸ 展开请求 / 响应. It sits at the right
 				// edge and never stretches, or the row looks like a second card.
-				".omkt-calltoggle{appearance:none;border:1px solid #e6e7eb;background:#fff;color:#1f2329;"
+				".omkt-calltoggle{appearance:none;border:1px solid var(--dsw-alias-border-l2,#e6e7eb);background:var(--dsw-alias-card-fill,#fff);color:var(--dsw-alias-label-primary,#1f2329);"
 					+ "border-radius:6px;padding:3px 9px;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}"
-					+ ".omkt-calltoggle:hover{border-color:#cfd1d6;background:#fafbfc}"
+					+ ".omkt-calltoggle:hover{border-color:var(--dsw-alias-border-l3,#cfd1d6);background:var(--dsw-alias-card-fill-hover,#fafbfc)}"
 					+ ".omkt-calltoggle:focus-visible{outline:2px solid #5b7cfa;outline-offset:1px}",
 				".omkt-spaceswitch:focus{outline:none!important}"
 				+ ".omkt-spaceswitch:focus-visible{outline:2px solid rgba(69,102,233,0.62)!important;outline-offset:2px}"
@@ -3879,7 +3883,7 @@ const callStyles = {
     // with thirty servers would otherwise push its own rows out of reach, since
     // the panel body is the box with overflow hidden.
     flex: "0 0 208px", display: "flex", flexDirection: "column", gap: 2,
-    background: "rgba(255,255,255,0.72)", border: "1px solid " + T.line,
+    background: T.soft, border: "1px solid " + T.line,
     borderRadius: 16, padding: "10px 8px",
     maxHeight: "100%", minHeight: 0, overflowY: "auto", overflowX: "hidden",
     boxShadow: "0 1px 2px rgba(31,35,41,.03), 0 6px 16px rgba(31,35,41,.04)",
@@ -3890,7 +3894,7 @@ const callStyles = {
     border: "1px solid transparent", background: "transparent", font: "inherit", fontSize: 14,
     color: T.text2, cursor: "pointer", textAlign: "left",
   },
-  railOnMcp: { background: MCP_SOFT, border: "1px solid #d5e0f8", color: "#3d5fd9" },
+  railOnMcp: { background: MCP_SOFT, border: `1px solid ${SKILL_LINE}`, color: T.brand },
   railName: { flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   railCount: { fontSize: 13, fontVariantNumeric: "tabular-nums", color: T.text3 },
   toolbar: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", width: "100%" },
@@ -4022,9 +4026,9 @@ function CallStatusBadge({ row }) {
     const reference = row.via === "用户引用";
     const success = !reference && row.status === "ok";
     const failure = !reference && (row.status === "fail" || row.status === "lost");
-    const tone = success ? "#168342" : failure ? "#a45c08" : T.text3;
+    const tone = success ? T.green : failure ? T.amber : T.text3;
     return createElement("span", { style: { display: "inline-flex", alignItems: "center", justifySelf: "start", gap: 5, whiteSpace: "nowrap", fontSize: 14, fontWeight: 500, padding: "0 7px", borderRadius: 10, color: tone, background: success ? "rgba(36,186,98,.12)" : failure ? "rgba(255,157,0,.15)" : T.soft } }, [
-        createElement("span", { key: "dot", "aria-hidden": true, style: { width: 7, height: 7, borderRadius: "50%", background: success ? "#23b960" : failure ? "#ea910b" : T.text4 } }), callStatus(row),
+        createElement("span", { key: "dot", "aria-hidden": true, style: { width: 7, height: 7, borderRadius: "50%", background: success ? T.green : failure ? T.amber : T.text4 } }), callStatus(row),
     ]);
 }
 
@@ -7532,7 +7536,7 @@ function Section({ close }) {
 				};
 				return createElement("div", { style: { padding: 20, display: "grid", gap: 10 } }, [
 					createElement("strong", { key: "t" }, "全局 MCP & Skill 面板渲染失败"),
-					createElement("div", { key: "e", style: { color: "#c33", fontSize: 13 } },
+					createElement("div", { key: "e", style: { color: T.red, fontSize: 13 } },
 						String(this.state.error?.message ?? this.state.error)),
 					createElement("div", { key: "h", style: { fontSize: 12, opacity: 0.7 } },
 						"后端仍然可用：对话里可以直接调用 overall_mcp_list / overall_mcp_scan。"),
