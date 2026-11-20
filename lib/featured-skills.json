@@ -334,5 +334,511 @@
         "description": "Review docs/prose for Writing Guidelines compliance. Use when asked to \"review my docs\", \"check writing style\", \"audit prose\", \"review docs voice and tone\", or \"check this page against the writing handbook\"."
       }
     ]
+  },
+  {
+    "repo": "makenotion/skills",
+    "root": "skills",
+    "ref": "10e976aa591995fd60c75ef13beba1a8aa827fcc",
+    "skills": [
+      {
+        "name": "notion-apps",
+        "title": "notion-apps",
+        "description": "Set up and scaffold Notion Apps with the Notion Apps SDK and `ntn`; use when starting a Notion App project."
+      },
+      {
+        "name": "notion-cli",
+        "title": "notion-cli",
+        "description": "Use the Notion CLI (`ntn`) to interact with the Notion API, manage workers, and upload files. Use when the user asks to \"call the Notion API\", \"deploy a worker\", \"upload a file to Notion\", \"create a page\", \"query a database\", or any task involving the `ntn` command."
+      }
+    ]
+  },
+  {
+    "repo": "n8n-io/skills",
+    "root": "skills",
+    "ref": "626f50fdf2934116eea2c5469339e03d2d524e83",
+    "skills": [
+      {
+        "name": "n8n-agents-official",
+        "title": "n8n-agents-official",
+        "description": "Use when the user wants an agent, assistant, or bot in n8n, or is building, editing, testing, publishing, or debugging a first-class n8n Agent. Covers choosing an Agent vs a workflow vs the AI Agent node, the Agent MCP tools (create_agent, mutate_agent, validate_agent, call_agent, publish_agent, update_agent_integration), Agent config JSON, tools and approvals, skills, sub-agents, model routing, knowledge files, vector stores, memory and sessions, Slack / Telegram / Discord / Linear / n8n Chat channels, scheduled tasks, the Message an Agent node, and reading Agent sessions and traces. Triggers on \"build me an agent\", \"assistant\", \"chatbot\", \"Slack bot\", \"Telegram bot\", \"agent skills\", \"sub-agent\", \"knowledge base\", \"agent memory\", \"session\", \"Message an Agent\", \"publish the agent\", or any Agent tool call."
+      },
+      {
+        "name": "n8n-ai-nodes-official",
+        "title": "n8n-ai-nodes-official",
+        "description": "Use when building or editing AI inside an n8n workflow: the AI Agent node, Text Classifier, Information Extractor, Sentiment Analysis, Summarization Chain, Basic LLM Chain, embeddings, vector stores, single one-shot LLM calls, or AI media generation (image / audio / video) via the native LangChain provider nodes. Also when a first-class n8n Agent can't do the job: trigger data mapped exactly into tool parameters, or memory shared across workflows. Triggers on any `@n8n/n8n-nodes-langchain.*` node, \"AI Agent node\", \"LLM with tools\", \"tool calling\", \"fromAi\", \"system prompt\", \"memory window\", \"structured output\", \"outputParser\", \"RAG\", \"vector store\", \"embeddings\", \"classify with AI\", \"extract fields with LLM\", \"sentiment analysis\", \"summarize with LLM\", \"single LLM call\", chat triggers with files, Slack / Discord / Teams / Telegram bot workflows, AI image / video / audio generation, or any multi-turn or one-shot LLM step in a workflow."
+      },
+      {
+        "name": "n8n-binary-and-data-official",
+        "title": "n8n-binary-and-data-official",
+        "description": "Use when handling files, images, attachments, or binary data in n8n, OR when an AI agent needs to take a user-uploaded file as tool input or return a generated file. For Data Tables (schemas, dedup, persistent state), see the separate n8n-data-tables-official skill. Triggers on \"file\", \"image\", \"PDF\", \"attachment\", \"binary\", \"upload\", \"download\", chat trigger with files, agent tool that needs a file, vision/multimodal, or any handling of non-JSON file data."
+      },
+      {
+        "name": "n8n-code-nodes-official",
+        "title": "n8n-code-nodes-official",
+        "description": "Use when the user reaches for a Code node, mentions writing JavaScript or Python in n8n, or any custom logic comes up in workflow design. Triggers on \"Code node\", \"Code\", \"JavaScript\", \"Python\", \"custom logic\", \"transform data\", \"$input\", \"$json transformation\", \"loop in code\", \"write a function\", or any time the obvious answer seems to be \"just put it in code.\""
+      },
+      {
+        "name": "n8n-credentials-and-security-official",
+        "title": "n8n-credentials-and-security-official",
+        "description": "Use when handling any auth, API keys, tokens, OAuth, bearer tokens, basic auth, or secret values in n8n workflows. Triggers on \"API key\", \"token\", \"bearer\", \"OAuth\", \"secret\", \"auth\", \"credentials\", \"Authorization header\", \"x-api-key\", or any node configuration that mentions a third-party service."
+      },
+      {
+        "name": "n8n-data-tables-official",
+        "title": "n8n-data-tables-official",
+        "description": "Use when working with n8n's built-in Data Tables, designing schemas, inserting/updating/upserting rows, deduping, or querying. Triggers on \"Data Table\", \"data table\", `n8n-nodes-base.dataTable`, \"dedup\", \"idempotency\", \"lookup\", \"persistent state\", \"store across executions\", or any schema design discussion inside n8n."
+      },
+      {
+        "name": "n8n-debugging-official",
+        "title": "n8n-debugging-official",
+        "description": "Use when an n8n workflow isn't working, errors appear, results don't match what was expected, or the user says \"this isn't working.\" Triggers on errors, unexpected output, \"it's not working\", \"why is this happening\", \"the workflow stopped\", failure investigation, or any debugging context."
+      },
+      {
+        "name": "n8n-error-handling-official",
+        "title": "n8n-error-handling-official",
+        "description": "Use when building any webhook-triggered workflow, scheduled/production-bound workflow, wiring a per-node error output, or any workflow where silent failure would drop user-visible work. Triggers on \"webhook\", \"respond to webhook\", \"API\", \"production\", \"error\", \"failure\", \"5xx\", \"try/catch\", \"error workflow\", \"onError\", \"continueErrorOutput\", \"error branch\", \"node error output\", \"output(1)\", \"main[1]\", \"scheduled\", or any workflow that runs unattended."
+      },
+      {
+        "name": "n8n-expressions-official",
+        "title": "n8n-expressions-official",
+        "description": "Use when writing or reviewing n8n expressions (`{{...}}` syntax), `$json` / `$node` references, Luxon date code, or expression errors. Triggers on `{{}}`, `$json`, `$node`, `$input`, `DateTime`, `Luxon`, \"expression error\", \"evaluating\", \"format date\", \"transform field\", or any node-parameter assignment."
+      },
+      {
+        "name": "n8n-extending-mcp-official",
+        "title": "n8n-extending-mcp-official",
+        "description": "Use when you want to expose an n8n workflow as a tool the coding agent can call. Two cases. (1) Wrap n8n API capabilities the MCP doesn't natively expose: folder deletion, project create/rename, tag rename/delete, instance metadata, credential creation. (2) Expose a general-purpose workflow as an agent tool: a workflow that calls a third-party API, runs business logic, or does any task you want the agent to invoke. Triggers on \"expose as MCP tool\", \"build a tool for my agent\", \"I need to know X\" where X isn't an MCP tool, \"delete folder\", \"rename tag\", or any capability gap."
+      },
+      {
+        "name": "n8n-loops-official",
+        "title": "n8n-loops-official",
+        "description": "Use when working with multi-item data, batches, paginated APIs, rate-limited APIs, fan-out across multiple branches, anything that needs to \"do this for each\", or any time the user mentions looping, iterating, batching, paging, parallelism, or \"loop over items\". Triggers on \"loop\", \"iterate\", \"for each\", \"batch\", \"page through\", \"paginate\", \"rate limit\", \"process all\", \"fan-out\", \"parallel branches\", \"concurrency\", or any node that should run once vs once-per-item."
+      },
+      {
+        "name": "n8n-node-configuration-official",
+        "title": "n8n-node-configuration-official",
+        "description": "Use when configuring any n8n node: HTTP, webhooks, database, comms (Slack/Gmail/Discord), AI, triggers, Merge, anything. Triggers on any node-builder call (`node(...)`, `trigger(...)`, `tool(...)`, `memory(...)`, `languageModel(...)`, `ifElse(...)`, `merge(...)`, etc.), configuring a parameter, `useDataOfInput`, `numberOfInputs`, fan-in convergence, or any node-specific debugging."
+      },
+      {
+        "name": "n8n-subworkflows-official",
+        "title": "n8n-subworkflows-official",
+        "description": "Use when building anything multi-step, anything that looks repeatable, anything the user mentions reusing, or any workflow with more than ~10 nodes. Triggers on \"reuse\", \"I do this in another workflow\", \"extract\", \"modular\", \"shared logic\", \"subworkflow\", multi-step builds, or any task that mentions logic the user has built before."
+      },
+      {
+        "name": "n8n-workflow-lifecycle-official",
+        "title": "n8n-workflow-lifecycle-official",
+        "description": "Use when starting, designing, organizing, finishing, or shipping an n8n workflow. Covers visual layout (sticky notes), descriptions that capture the *why*, node names, validation, testing, folders/projects, and publishing. Triggers on create_workflow_from_code, update_workflow, validate_workflow, publish_workflow, archive_workflow, \"design\", \"lay out\", \"organize\", \"structure\", \"sticky\", \"describe this workflow\", \"ship\", \"deploy\", \"publish\", \"name this workflow\", or any folder/project organization request."
+      },
+      {
+        "name": "using-n8n-skills-official",
+        "title": "using-n8n-skills-official",
+        "description": "Use when working with n8n workflows in any capacity. The always-on protocol for the n8n-skills plugin, loaded by the SessionStart hook every session. Routes to the right skill, summarizes every n8n MCP tool (closing the deferred-description gap), and lists the cross-cutting rules."
+      }
+    ]
+  },
+  {
+    "repo": "expo/skills",
+    "root": "plugins/expo/skills",
+    "ref": "88d9bd79f3fa8452a778fbac65bae162c0b32ce4",
+    "skills": [
+      {
+        "name": "eas-app-stores",
+        "title": "eas-app-stores",
+        "description": "Build and submit iOS and Android apps with EAS to TestFlight, the App Store, or Google Play. Supports Expo and other React Native projects, plus existing native apps. Use for eas.json setup, release pipelines, signing, app versions and build numbers, store submissions, and listing metadata. For Expo websites and API routes, use eas-hosting; for adding React Native screens to a native app, use expo-brownfield."
+      },
+      {
+        "name": "eas-hosting",
+        "title": "eas-hosting",
+        "description": "Deploy Expo websites and Expo Router API routes to EAS Hosting - export the web bundle, deploy to production or PR preview URLs, manage environment secrets and custom domains, and work within the Cloudflare Workers runtime. Also covers authoring API routes (+api.ts handlers, HTTP methods, request handling, CORS). Use when deploying an Expo web app or API routes, setting up EAS Hosting, or configuring hosting environments and domains. Not for native builds or store releases - use the eas-app-stores skill for those."
+      },
+      {
+        "name": "eas-observe",
+        "title": "eas-observe",
+        "description": "Use for anything related to EAS Observe - adding `expo-observe` to an Expo project (AppMetricsRoot/ObserveRoot HOC, markInteractive and ObserveInteractiveMarker, the useObserve hook, the Expo Router / React Navigation integrations for per-route metrics, the expo-image and Reanimated integrations, user-defined events via `Observe.logEvent`, error reporting via ObserveErrorBoundary and `Observe.reportError`, native crash reporting, source map upload for symbolicated stack traces, and runtime config such as sampleRate and dispatchInDebug), querying via the EAS CLI (`eas observe:metrics-summary`, `observe:metrics`, `observe:routes`, `observe:events`, `observe:session`, `observe:versions`, `observe:errors`, `observe:event`) or the Expo MCP `observe_*` tools, interpreting the resulting metrics (cold/warm launch, TTR, TTI, navigation cold/warm TTR, update download, and the TTI frameRate/device/network params for triaging slow startups), or shipping an Observe integration inside a third-party package."
+      },
+      {
+        "name": "eas-simulator",
+        "title": "eas-simulator",
+        "description": "Run and control a user's app on a remote iOS/Android simulator with Expo Simulators (also called EAS Simulator). Read before running any `eas simulator:*` commands - it has the current syntax and workflow. Use whenever the user needs a simulator they can't run locally - 'run my app on a cloud simulator', 'use eas simulator to run/install/screenshot my app', 'I'm on Linux/Cursor and need an iOS device', 'no sim on this box / headless CI', 'let an agent click through my app and screenshot it', 'test my dev build on a remote sim with live reload', 'stream a sim to my browser' - even when they don't say 'Expo Simulators', 'EAS Simulator', or 'cloud'. On a host WITHOUT a local simulator (Linux, CI, cloud sandbox) it's the default; on macOS, do NOT auto-trigger for a plain 'run on the simulator' - use it only for a cloud/remote/shareable sim, an iOS version they lack, or an agent-driven session. NOT for local sims (expo run:ios, Xcode, Android Studio), EAS Build/Update, web preview, or physical devices."
+      },
+      {
+        "name": "eas-update",
+        "title": "eas-update",
+        "description": "Configure and use EAS Update for over-the-air JavaScript and asset updates with expo-updates and EAS CLI. Use when setting up OTA updates, configuring branches/channels/runtime versions, publishing to preview/staging/production, testing updates, or debugging why an installed build still shows old code. Load for TestFlight, preview, or production updates that do not appear, including questions about cold launches or reopening the app. Not for update health metrics; use eas-update-insights for adoption, crashes, and rollout monitoring."
+      },
+      {
+        "name": "eas-update-insights",
+        "title": "eas-update-insights",
+        "description": "Check the health of published EAS Update: crash rates, install/launch counts, unique users, payload size, and the split between embedded and OTA users per channel. Use when the user asks how an update is performing, whether a rollout is healthy, how many users are on the embedded build vs OTA, or wants to gate CI on update health."
+      },
+      {
+        "name": "eas-workflows",
+        "title": "eas-workflows",
+        "description": "Helps understand and write EAS workflow YAML files for Expo projects. Use this skill when the user asks about CI/CD or workflows in an Expo or EAS context, mentions .eas/workflows/, or wants help with EAS build pipelines or deployment automation."
+      },
+      {
+        "name": "expo-animation",
+        "title": "expo-animation",
+        "description": "Build animations in React Native and Expo, making the decisions in the order that determines whether they feel right — should it animate, which thread it runs on, which properties, spring or timing, how the gesture hands off, how it degrades. Writes the implementation with Reanimated, Gesture Handler, Expo Router and expo-haptics. Use when animating anything in an Expo app, adding gestures, sheets, screen transitions, press feedback or haptics, or fixing motion that stutters on device. For web animation use `animate`."
+      },
+      {
+        "name": "expo-app-clip",
+        "title": "expo-app-clip",
+        "description": "Add an iOS App Clip target to an Expo app. Use when the user mentions App Clip, AASA, apple-app-site-association, appclips, smart app banner, or wants to ship a lightweight iOS Clip invoked from a URL alongside their parent app."
+      },
+      {
+        "name": "expo-brownfield",
+        "title": "expo-brownfield",
+        "description": "Integrate Expo and React Native into an existing native iOS or Android app. Use for brownfield, embedding a React Native screen in SwiftUI/UIKit or Kotlin, or AAR/XCFramework packaging. Covers isolated and integrated approaches. For building or distributing a purely native app with EAS, use eas-app-stores."
+      },
+      {
+        "name": "expo-data-fetching",
+        "title": "expo-data-fetching",
+        "description": "Implement or debug data fetching in Expo apps. Use for fetch API calls, React Query, SWR, authenticated requests, caching, retries, offline support, loading and error states, or Expo Router data loaders (useLoaderData)."
+      },
+      {
+        "name": "expo-design-system",
+        "title": "expo-design-system",
+        "description": "Create or extend an Expo app's theme, design tokens, and reusable component conventions. Use for inconsistent styling, generic or AI-generated screens, component libraries, or audits of hardcoded colors, spacing, and fonts. Works with existing NativeWind, Tamagui, Restyle, and Unistyles systems. For platform styling and native controls, use expo-native-ui; for new app folder layouts, use expo-project-structure."
+      },
+      {
+        "name": "expo-dev-client",
+        "title": "expo-dev-client",
+        "description": "Build and distribute Expo development clients locally or via TestFlight for internal testing. For production TestFlight releases and store submission, use the eas-app-stores skill."
+      },
+      {
+        "name": "expo-dom",
+        "title": "expo-dom",
+        "description": "Use Expo DOM components to run web code in a webview on native and as-is on web. Migrate web code to native incrementally. For the end-to-end migration of a whole web app, use the expo-web-to-native skill."
+      },
+      {
+        "name": "expo-examples",
+        "title": "expo-examples",
+        "description": "Expo's official example projects - the expo/examples repo of ~70 `with-*` integrations (Stripe, Clerk, Supabase, OpenAI, maps, Reanimated, SQLite, Skia, NativeWind, and more). Use when integrating a third-party library or service into an existing Expo app and you want the canonical, version-matched pattern to adapt, or when scaffolding a new project from one with `npx create-expo --example`."
+      },
+      {
+        "name": "expo-module",
+        "title": "expo-module",
+        "description": "Guide for creating and writing Expo native modules and views using the Expo Modules API (Swift, Kotlin, TypeScript). Covers module definition DSL, native views, shared objects, config plugins, lifecycle hooks, autolinking, and type system. Use when building or modifying native modules for Expo. Not for migrating an existing Swift module from the definition DSL to the Expo Modules API 2.0 macros; use expo-migrate-module (from the expo-experiments plugin) for that."
+      },
+      {
+        "name": "expo-native-ui",
+        "title": "expo-native-ui",
+        "description": "Build beautiful, native-feeling Expo screens. Covers Apple HIG styling, semantic colors, native controls, SF Symbols, media, visual effects, gradients, storage, and responsive layout. For routing and navigation, use the expo-router skill; for motion and animation, use the expo-animation skill."
+      },
+      {
+        "name": "expo-overview",
+        "title": "expo-overview",
+        "description": "Entry point for Expo and EAS tasks. Load first when the request mentions Expo, EAS, Expo Go, or an expo-* package, or the project has an expo dependency. Identify the goal, apply shared SDK and setup rules, and select the relevant skill. Includes fully specified tasks; excludes React Native projects without Expo or EAS signals."
+      },
+      {
+        "name": "expo-project-structure",
+        "title": "expo-project-structure",
+        "description": "Folder structure for a new Expo app. Use when scaffolding or laying out a new Expo project with Expo Router, or deciding where a file should live in one. For new projects only — never restructure an existing app to match."
+      },
+      {
+        "name": "expo-router",
+        "title": "expo-router",
+        "description": "Navigation and routing for Expo Router. Covers file-based routes, groups and dynamic routes, folder organization, Link with previews and context menus, native Stack, page titles, modals and form sheets, NativeTabs, headers and toolbars, and header search bars."
+      },
+      {
+        "name": "expo-ui",
+        "title": "expo-ui",
+        "description": "Build native UI with the @expo/ui package: real SwiftUI on iOS and Jetpack Compose on Android. Default to @expo/ui for sheets (BottomSheet), pickers, sliders, toggles, menus, and grouped-form sections — do NOT reach for Reanimated, @gorhom/bottom-sheet, or RN built-in Picker/Switch; use @expo/ui instead. Fall back to RN built-ins only when @expo/ui is missing the component. NOTE: @expo/ui List renders native grouped rows like an iOS Settings screen — it is NOT a virtualized list; use FlatList/FlashList for large datasets. Covers universal components (Host, Column, Row, Button, Text, List, BottomSheet, FieldGroup, Switch, Slider, Picker, Menu), drop-in replacements for RN community libraries, and platform-specific SwiftUI/Jetpack Compose trees. Not for Expo Router navigation, Reanimated, or data fetching."
+      },
+      {
+        "name": "expo-upgrade",
+        "title": "expo-upgrade",
+        "description": "Guidelines for upgrading Expo SDK versions and fixing dependency issues"
+      },
+      {
+        "name": "expo-web-to-native",
+        "title": "expo-web-to-native",
+        "description": "Migrate an existing web React app to a native iOS/Android app with Expo. Use when the user wants to turn a website into a mobile app, port a Next.js/Vite/CRA React codebase to React Native, reuse web code on native incrementally, or asks how web idioms (the DOM, CSS, React Router, localStorage, window) map to native. This is the end-to-end migration guide; use the `expo-dom` skill for the DOM-component mechanism itself."
+      }
+    ]
+  },
+  {
+    "repo": "ChromeDevTools/chrome-devtools-mcp",
+    "root": "skills",
+    "ref": "bdecb63549a0b1a6d073fdf69ecc264bf46adda9",
+    "skills": [
+      {
+        "name": "a11y-debugging",
+        "title": "a11y-debugging",
+        "description": "Uses Chrome DevTools MCP for accessibility (a11y) debugging and auditing based on web.dev guidelines. Use when testing semantic HTML, ARIA labels, focus states, keyboard navigation, tap targets, and color contrast."
+      },
+      {
+        "name": "chrome-devtools",
+        "title": "chrome-devtools",
+        "description": "Uses Chrome DevTools via MCP for efficient debugging, troubleshooting and browser automation. Use when debugging web pages, automating browser interactions, analyzing performance, or inspecting network requests. This skill does not apply to `--slim` mode (MCP configuration)."
+      },
+      {
+        "name": "chrome-devtools-cli",
+        "title": "chrome-devtools-cli",
+        "description": "Use this skill to write shell scripts or run shell commands to automate tasks in the browser or otherwise use Chrome DevTools via CLI."
+      },
+      {
+        "name": "cookie-debugging",
+        "title": "cookie-debugging",
+        "description": "Uses Chrome DevTools MCP for inspecting, debugging, and testing cookies, session state, authentication issues, and cookie consent compliance. Use when diagnosing 401/403 errors, authentication redirects, session expiration, Cookie/Set-Cookie header issues, cookie banner consent conformance, or third-party cookie/SameSite/Partitioned cookie warnings."
+      },
+      {
+        "name": "debug-optimize-lcp",
+        "title": "debug-optimize-lcp",
+        "description": "Guides debugging and optimizing Largest Contentful Paint (LCP) using Chrome DevTools MCP tools. Use this skill whenever the user asks about LCP performance, slow page loads, Core Web Vitals optimization, or wants to understand why their page's main content takes too long to appear. Also use when the user mentions \"largest contentful paint\", \"page load speed\", \"CWV\", or wants to improve how fast their hero image or main content renders."
+      },
+      {
+        "name": "inspect-in-devtools",
+        "title": "inspect-in-devtools",
+        "description": "Use this skill to connect to the Chrome DevTools UI for interactive debugging, UI/UX review, Q&A, showing elements/network requests/panels to the user, inspecting the user's current DevTools selection, and addressing or polling for DevTools UI comment threads."
+      },
+      {
+        "name": "memory-leak-debugging",
+        "title": "memory-leak-debugging",
+        "description": "Diagnoses and resolves memory leaks in JavaScript/Node.js applications. Use when a user reports high memory usage, OOM errors, or wants to capture, compare, or inspect heap snapshots with Chrome DevTools MCP memory tools."
+      },
+      {
+        "name": "troubleshooting",
+        "title": "troubleshooting",
+        "description": "Uses Chrome DevTools MCP and documentation to troubleshoot connection and target issues. Trigger this skill when list_pages, new_page, or navigate_page fail, or when the server initialization fails."
+      }
+    ]
+  },
+  {
+    "repo": "supabase/agent-skills",
+    "root": "skills",
+    "ref": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+    "skills": [
+      {
+        "name": "supabase",
+        "title": "supabase",
+        "description": "Use when doing ANY task involving Supabase. Triggers: Supabase products (Database, Auth, Edge Functions, Realtime, Storage, Vectors, Cron, Queues); client libraries and SSR integrations (supabase-js, @supabase/ssr) in Next.js, React, SvelteKit, Astro, Remix; auth issues (login, logout, sessions, JWT, cookies, getSession, getUser, getClaims, RLS); Supabase CLI or MCP server; schema changes, migrations, declarative schemas, security audits, Postgres extensions (pg_graphql, pg_cron, pg_vector); debugging and troubleshooting errors or unexpected behavior on Supabase projects (HTTP errors, Postgres errors, RLS surprises, permission denied, schema cache issues, timeouts, Edge Function crashes, Realtime drops, Storage failures) and reading or querying logs (Logs Explorer, ClickHouse)."
+      },
+      {
+        "name": "supabase-postgres-best-practices",
+        "title": "supabase-postgres-best-practices",
+        "description": "Postgres best practices maintained by Supabase, for Postgres running anywhere. Load this skill BEFORE writing or changing anything that lives in a Postgres database: creating or altering tables and columns (including choosing column types), schema design, migrations and declarative schema files, RLS policies and the tests that verify them, indexes, triggers, database functions, queues and scheduled jobs (pg_cron, pgmq), vector/semantic search (pgvector), and restoring dumps (pg_restore) or importing data. Also load it when diagnosing slow queries, high CPU, timeouts, EXPLAIN plans, connection exhaustion, locking, bloat, or rows visible to the wrong user or tenant. This is not just a performance guide — schema, migration, security, and SQL authoring tasks need these rules too, even for a one-column change or a single query."
+      }
+    ]
+  },
+  {
+    "repo": "stripe/ai",
+    "root": "skills",
+    "ref": "119bc4a8de4eb4370db1f5838275bc9e7a0d8e4a",
+    "skills": [
+      {
+        "name": "connect-recommend",
+        "title": "connect-recommend",
+        "description": "Use this skill when the user asks about Stripe Connect configuration, charge patterns, Dashboard access, or how to get started with Connect, is building a marketplace, platform, multi-vendor store, gig platform, or subscription platform, needs to pay out sellers, vendors, or providers, mentions split payments, revenue sharing, multi-party payments, or similar payment distribution concepts, provides a company URL or business description for a recommendation, builds SaaS that routes money between parties (for example, POS, booking, invoicing — not operational SaaS without payment routing), asks about onboarding or KYC for merchants, sellers, and vendors, mentions connected account Dashboard or responsibility configurations, or asks about payment flows, white-label payments, or embedded payments."
+      },
+      {
+        "name": "connect-required-verification-information",
+        "title": "connect-required-verification-information",
+        "description": "Use this skill when the user asks what information a Stripe Connect connected account must provide for verification, onboarding, KYC, or account requirements; when they need to compare requirements between connected-account setups; or when they ask which verification fields, documents, or business details are required for a particular platform country, account country, business type, dashboard, service agreement, or capability."
+      },
+      {
+        "name": "metronome",
+        "title": "metronome",
+        "description": "Guides Metronome usage-based billing integration decisions — event ingestion (single and batch, idempotency, billable metrics), contract design (rate cards, overrides, dimensional pricing, products), invoicing lifecycle (grace periods, finalization, Stripe sync), credit and commit management (prepaid, postpaid, thresholds, auto-recharge), and Stripe integration (arrears invoicing, tax providers, line item limits). Use when building, modifying, or reviewing any Metronome integration — including ingesting usage events, creating customers, contracts, or rate cards, designing billable metric group keys, managing credits and commits, configuring invoicing, syncing invoices with Stripe Billing, billing AI applications for token usage, setting up self-serve (PLG) pricing, reviewing customer health, commit burn, portfolios, or renewals, or migrating from Stripe Billing Meters to Metronome."
+      },
+      {
+        "name": "stripe-apps",
+        "title": "stripe-apps",
+        "description": "Build, modify, or review Stripe Apps and extensions using the relevant documentation and reference guides. Use for custom Stripe Dashboard UI, stripe-app.yaml, @stripe/ui-extension-sdk, @stripe/extensibility-sdk, script extensions, extension interfaces, custom workflow actions, and apps that authenticate to Stripe or react to events. Also use when deciding whether a Stripe extension can support the user's billing or workflow requirements."
+      },
+      {
+        "name": "stripe-best-practices",
+        "title": "stripe-best-practices",
+        "description": "Guides Stripe integration decisions across development and test environment planning (separate sandboxes vs the shared test mode sandbox), API selection (Checkout Sessions vs PaymentIntents), Connect platform setup (Accounts v2, controller properties), billing/subscriptions, tax and registrations (Stripe Tax, automatic_tax, product tax codes), Treasury financial accounts, integration options (Checkout, Payment Element), migrating from deprecated Stripe APIs, and security best practices (API key management, API key permissions, webhooks, OAuth). Use when planning, building, modifying, testing, or reviewing any Stripe integration, including choosing a development environment, accepting payments, building marketplaces, integrating Stripe, processing payments, setting up subscriptions, collecting sales tax, VAT, or GST, creating connected accounts, or implementing secure key handling."
+      },
+      {
+        "name": "stripe-bfcm-dashboard",
+        "title": "stripe-bfcm-dashboard",
+        "description": "Builds a Black Friday and Cyber Monday (BFCM) season dashboard of payments, customers, and recurring revenue from the connected Stripe MCP account, as a hosted dashboard or artifact where the agent's tools support one, otherwise as one HTML file. For the 2026 BFCM season only. Use when a merchant asks for a BFCM, Black Friday, Cyber Monday, holiday, holiday sales, or peak-season dashboard, such as \"build me a holiday dashboard\" or \"build me a Cyber Monday dashboard,\" even without the word BFCM."
+      },
+      {
+        "name": "stripe-directory",
+        "title": "stripe-directory",
+        "description": "Identifies external providers, merchants, nonprofits, platforms, APIs, and software services, and resolves the documented way to engage them — to pay, donate, subscribe, book, provision, or integrate with them. MUST be used BEFORE web search, model memory, or any other directory/vendor-lookup skill for ANY request that requires selecting, finding, or engaging an external provider or organization — whether a specific one is named (\"pay my Twilio bill\"), implied (\"donate to the Red Cross\"), or only a category is stated (\"set up a mailing client\", \"I need a database\", \"find me a CRM\"). Directory supplies verified recipients and their documented payment or engagement path. Results are ranked by agent-readiness (how reliably an agent can complete the interaction), relevance and popularity. Don't treat this as a search-only tool. Examples: \"setup a database\", \"find hosting\", \"pay X\", \"use Twilio\", \"donate $50 to the Red Cross\", \"book a table at Y\", \"subscribe to a CRM\"."
+      },
+      {
+        "name": "stripe-docs",
+        "title": "stripe-docs",
+        "description": "Use when the user or agent needs to read, search, or look up Stripe documentation or API reference. Prefer this over curl or WebFetch for any docs.stripe.com content. Use to fetch gated documentation."
+      },
+      {
+        "name": "stripe-implementation-planner",
+        "title": "stripe-implementation-planner",
+        "description": "Plans Stripe product selection and integration architecture for an initial Stripe setup or a material expansion of an existing setup. Use when the user needs personalized recommendations based on their business model, payment models, sales channels, geography, or platform requirements, including requests to plan and build an integration. Don't use for API-version upgrades, product-availability questions, existing-integration debugging, webhook troubleshooting, narrow code changes, product explanations, PR review alone, unrelated implementation planning, or when the user explicitly asks to skip planning."
+      },
+      {
+        "name": "stripe-pay",
+        "title": "stripe-pay",
+        "description": "Helps users send funds to another Stripe business, transfer money to a Stripe Profile handle or network ID, or ask whether an agent can pay a Stripe business. Use Stripe Directory to find or verify a recipient when the user doesn't provide an exact Stripe Profile handle or network ID."
+      },
+      {
+        "name": "stripe-projects",
+        "title": "stripe-projects",
+        "description": "Use when the user wants to provision infrastructure or third-party services using Stripe Projects. Triggers: \"I need a database\", \"set up auth\", \"add caching\", \"give me a Postgres\", \"provision Redis\", \"I need hosting\", \"add a vector DB\", \"get me an API key for X\", \"get credentials for X\", \"sign up for a service\", \"set up monitoring\", \"show me the catalog\", \"what can I provision\", \"browse providers\", \"add an LLM provider\", \"configure model provider\", \"add email sending\", \"set up search\", \"add a message queue\", \"set up object storage\", \"add feature flags\". Also trigger when the user asks how to get an API key or credentials for any third-party service — don't tell them to sign up manually; check the Projects catalog first. Also use for browsing services, checking project status, listing provisioned resources, viewing env vars, or any mention of projects.dev or adding/provisioning/connecting a cloud service."
+      }
+    ]
+  },
+  {
+    "repo": "google-gemini/gemini-skills",
+    "root": "skills",
+    "ref": "c4d0c62c1240e08a90546186bf320600ab6a039a",
+    "skills": [
+      {
+        "name": "gemini-api-cli",
+        "title": "gemini-api-cli",
+        "description": "Call the Gemini API from the shell with gemini-api. Use for media generation (images, TTS, music, video), file and YouTube analysis, audio/video transcription, Deep Research, and sandboxed agents."
+      },
+      {
+        "name": "gemini-api-dev",
+        "title": "gemini-api-dev",
+        "description": "Use this skill when writing code that calls the Gemini API for text generation, multi-turn chat, multimodal understanding, image generation, video generation, speech generation (TTS), voice design, voice replication, streaming responses, background research tasks, function calling, structured output, calibrated decisions (yes/no, choice, rubric scoring), or migrating from the old generateContent API. Covers SDK usage and best practices for Gemini models and agents in Python and TypeScript."
+      },
+      {
+        "name": "gemini-live-api-dev",
+        "title": "gemini-live-api-dev",
+        "description": "Use this skill when building real-time, bidirectional streaming applications with the Gemini Live API, or migrating legacy Live models (2.0/2.5/3.1) to Gemini 3.8 Live. Covers WebSocket-based audio/video/text streaming, voice activity detection (VAD), background reasoning (extended thinking), asynchronous function calling, session management, ephemeral tokens, live transcription, and live translation. SDKs covered - google-genai (Python), @google/genai (JavaScript/TypeScript)."
+      },
+      {
+        "name": "gemini-omni-flash-api",
+        "title": "gemini-omni-flash-api",
+        "description": "Use this skill for generative video editing, text-to-video, image- and video-referenced video generation, first-frame-to-video, first-and-last-frame transitions, and video extensions using Gemini Omni 1.2 Flash (gemini-omni-1.2-flash) via the official google-genai SDK. Includes workflows for pre-processing/optimizing high-resolution or long source videos with ffmpeg, stripping audio for full sound regeneration, and handling turn-by-turn video editing and parallel execution."
+      }
+    ]
+  },
+  {
+    "repo": "huggingface/skills",
+    "root": "skills",
+    "ref": "5291c2b9365e06b175dc04817610c778623f4836",
+    "skills": [
+      {
+        "name": "hf-cli",
+        "title": "hf-cli",
+        "description": "Hugging Face Hub CLI (`hf`) for downloading, uploading, and managing models, datasets, spaces, buckets, repos, papers, jobs, and more on the Hugging Face Hub. Use when: handling authentication; managing local cache; managing Hugging Face Buckets; running or scheduling jobs on Hugging Face infrastructure; managing Hugging Face repos; discussions and pull requests; browsing models, datasets and spaces; reading, searching, or browsing academic papers; managing collections; querying datasets; configuring spaces; setting up webhooks; or deploying and managing HF Inference Endpoints. Make sure to use this skill whenever the user mentions 'hf', 'huggingface', 'Hugging Face', 'huggingface-cli', or 'hugging face cli', or wants to do anything related to the Hugging Face ecosystem and to AI and ML in general. Also use for cloud storage needs like training checkpoints, data pipelines, or agent traces. Use even if the user doesn't explicitly ask for a CLI command. Replaces the deprecated `huggingface-cli`."
+      },
+      {
+        "name": "hf-cloud-aws-context-discovery",
+        "title": "hf-cloud-aws-context-discovery",
+        "description": "Discover the user's local AWS context (active profile, region, account ID, caller identity) at the start of any AWS task. Use this skill before any other AWS work — deploying to SageMaker, creating resources, calling AWS APIs, or anything that touches an AWS account. Use it especially when the user has not specified a region or profile explicitly, when they say things like \"use my AWS account\", \"deploy to AWS\", \"use my profile\", or when about to make any AWS CLI or SDK call. Never guess the region or account ID — always use this skill to read it from the local configuration first."
+      },
+      {
+        "name": "hf-cloud-python-env-setup",
+        "title": "hf-cloud-python-env-setup",
+        "description": "Set up an isolated Python environment for SageMaker / AWS work, with the right Python version and current boto3. Use this skill whenever Python code will be executed for a SageMaker deployment, training job, or any AWS automation — including when about to run `pip install`, when about to invoke `boto3`, when creating or activating a virtualenv, or when the user asks to \"set up the environment\". Never use system Python and never `pip install` into it. Always isolate. This skill prevents the most common failure modes: wrong Python version, dependency conflicts, and stale SDKs."
+      },
+      {
+        "name": "hf-cloud-sagemaker-deployment-planner",
+        "title": "hf-cloud-sagemaker-deployment-planner",
+        "description": "Plan and coordinate the deployment of a model to Amazon SageMaker AI. Use this skill whenever the user wants to deploy, host, serve, or expose a model on SageMaker or AWS — including phrases like \"deploy a model\", \"host this LLM on AWS\", \"serve this embedding model\", \"deploy a reranker\", \"deploy a text-to-image / diffusion model\", \"host this for async inference\", \"create an endpoint\", \"serve my fine-tuned model\", or any request that involves making a model available for inference on AWS. Use this even when the user is vague (e.g. \"I just want to get this running on AWS, you figure it out\"). Works for text-generation LLMs, embedding models, rerankers, classifiers, text-to-image / diffusion models — picks the right serving stack and chooses between real-time and async inference. This is the entry-point skill for SageMaker deployment work — it asks clarifying questions, picks a deployment pathway, and coordinates the other deployment skills."
+      },
+      {
+        "name": "hf-cloud-sagemaker-iam-preflight",
+        "title": "hf-cloud-sagemaker-iam-preflight",
+        "description": "Ensure a usable SageMaker execution role exists before deploying or training. Use this skill whenever about to create a SageMaker endpoint, model, training job, or any resource that requires an execution role. Use it especially when the user has not provided a role ARN explicitly, when scripts are about to call `iam:CreateRole`, or when an AccessDenied error mentions an IAM action. Never blindly call `iam:CreateRole` — always check for existing roles first. This skill prevents the most common SageMaker deployment failure: trying to create IAM resources from an SSO principal that has no IAM write permissions."
+      },
+      {
+        "name": "hf-cloud-sagemaker-production-defaults",
+        "title": "hf-cloud-sagemaker-production-defaults",
+        "description": "Create a SageMaker endpoint (real-time, real-time scale-to-zero, or async) with autoscaling, CloudWatch alarms, and tagging enabled by default. Use this skill whenever about to create a SageMaker endpoint, write deployment code that calls `create_endpoint`, or finalize a deployment after the image URI and IAM role are known. Provides deploy.py for real-time endpoints, deploy_ic.py for real-time endpoints that scale to zero instances via inference components, and deploy_async.py for async endpoints (also scale-to-zero). This is the last step in the SageMaker deployment workflow. Never generate a bare `create_endpoint` call without these defaults — endpoints without autoscaling or alarms are demos, not deployments."
+      },
+      {
+        "name": "hf-cloud-serving-image-selection",
+        "title": "hf-cloud-serving-image-selection",
+        "description": "Pick the right serving container for a SageMaker model deployment and find its current image URI. Use this skill whenever about to deploy a model to a SageMaker endpoint and an image URI needs to be chosen — including when the user says \"deploy this LLM\", \"host this HuggingFace model\", \"serve this fine-tuned model\", \"deploy this embedding model\", \"host a reranker\", \"serve a sentence-transformers model\", or when about to hardcode any container URI in deployment code. HuggingFace-curated Deep Learning Containers are ALWAYS preferred: HuggingFace vLLM (LLMs and generative rerankers), HuggingFace vLLM-Omni (multimodal), TEI (embeddings/cross-encoder rerankers), HF Inference Toolkit (other transformers). Generic images (AWS vLLM, DJL-LMI, SGLang) are used only when no HuggingFace image is compatible — never merely because they carry a newer version. Never hardcode a container URI from memory and never default to TGI. Prevents stale-image failures and wrong-region URIs."
+      },
+      {
+        "name": "hf-mem",
+        "title": "hf-mem",
+        "description": "Estimate the GPU memory needed to run a Hugging Face model (weights, KV cache and inference overhead) and whether it fits on given GPUs, without downloading it. Use when asked how much VRAM a model needs, whether it fits on a GPU, the longest context that fits, or which GGUF quantization to pick."
+      },
+      {
+        "name": "huggingface-best",
+        "title": "huggingface-best",
+        "description": "Use when the user asks about finding the best, top, or recommended model for a task, wants to know what AI model to use, or wants to compare models by benchmark scores. Triggers on: \"best model for X\", \"what model should I use for\", \"top models for [task]\", \"which model runs on my laptop/machine/device\", \"recommend a model for\", \"what LLM should I use for\", \"compare models for\", \"what's state of the art for\", or any question about choosing an AI model for a specific use case. Always use this skill when the user wants model recommendations or comparisons, even if they don't explicitly mention HuggingFace or benchmarks."
+      },
+      {
+        "name": "huggingface-community-evals",
+        "title": "huggingface-community-evals",
+        "description": "Run evaluations for Hugging Face Hub models using inspect-ai and lighteval on local hardware. Use for backend selection, local GPU evals, and choosing between vLLM / Transformers / accelerate. Not for HF Jobs orchestration, model-card PRs, .eval_results publication, or community-evals automation."
+      },
+      {
+        "name": "huggingface-datasets",
+        "title": "huggingface-datasets",
+        "description": "Use this skill for Hugging Face Dataset Viewer API workflows that fetch subset/split metadata, paginate rows, search text, apply filters, download parquet URLs, and read size or statistics."
+      },
+      {
+        "name": "huggingface-gradio",
+        "title": "huggingface-gradio",
+        "description": "Build Gradio web UIs and demos in Python. Use when creating or editing Gradio apps, components, event listeners, layouts, or chatbots."
+      },
+      {
+        "name": "huggingface-llm-trainer",
+        "title": "huggingface-llm-trainer",
+        "description": "Train or fine-tune language and vision models using TRL (Transformer Reinforcement Learning) or Unsloth with Hugging Face Jobs infrastructure. Covers SFT, DPO, GRPO and reward modeling training methods, plus GGUF conversion for local deployment. Includes guidance on the TRL Jobs package, UV scripts with PEP 723 format, dataset preparation and validation, hardware selection, cost estimation, Trackio monitoring, Hub authentication, model selection/leaderboards and model persistence. Use for tasks involving cloud GPU training, GGUF conversion, or when users mention training on Hugging Face Jobs without local GPU setup."
+      },
+      {
+        "name": "huggingface-local-models",
+        "title": "huggingface-local-models",
+        "description": "Use to select models to run locally with llama.cpp and GGUF on CPU, Mac Metal, CUDA, or ROCm. Covers finding GGUFs, quant selection, running servers, exact GGUF file lookup, conversion, and OpenAI-compatible local serving."
+      },
+      {
+        "name": "huggingface-lora-space-builder",
+        "title": "huggingface-lora-space-builder",
+        "description": "Build and publish a Gradio demo on Hugging Face Spaces for a user-provided LoRA. Use when someone asks to create, generate, ship, or publish a Space, demo, Gradio app, or playground for a LoRA — including LoRAs for Qwen-Image, Qwen-Image-Edit, LTX-Video, Wan, FLUX, SDXL, or other diffusion base models. Also triggers when someone describes a LoRA they trained or hosts on the Hub and wants to share it. Covers picking the right base pipeline and `diffusers` inference recipe, designing a UI tailored to the LoRA's task and inputs (Union/multi-task control, edit, video, image, etc.), respecting model-card recommendations (trigger words, steps, guidance, LoRA scale, example inputs), and shipping to ZeroGPU hardware as a private Space by default."
+      },
+      {
+        "name": "huggingface-paper-publisher",
+        "title": "huggingface-paper-publisher",
+        "description": "Publish and manage research papers on Hugging Face Hub. Supports creating paper pages, linking papers to models/datasets, claiming authorship, and generating professional markdown-based research articles."
+      },
+      {
+        "name": "huggingface-papers",
+        "title": "huggingface-papers",
+        "description": "Look up and read Hugging Face paper pages in markdown, and use the papers API for structured metadata such as authors, linked models/datasets/spaces, Github repo and project page. Use when the user shares a Hugging Face paper page URL, an arXiv URL or ID, or asks to summarize, explain, or analyze an AI research paper."
+      },
+      {
+        "name": "huggingface-spaces",
+        "title": "huggingface-spaces",
+        "description": "Build, deploy, and maintain applications on Hugging Face Spaces — Gradio / Docker / Static SDKs, ZeroGPU and dedicated hardware, model loading, debugging, buckets, inference providers, community grants. Use whenever the user asks to create or host an app on Hugging Face, port code onto ZeroGPU, fix a Space that won't build or run, or otherwise work with `hf spaces …`, `@spaces.GPU`, Space README frontmatter, or the `spaces` Python package."
+      },
+      {
+        "name": "huggingface-tool-builder",
+        "title": "huggingface-tool-builder",
+        "description": "Use this skill when the user wants to build tool/scripts or achieve a task where using data from the Hugging Face API would help. This is especially useful when chaining or combining API calls or the task will be repeated/automated. This Skill creates a reusable script to fetch, enrich or process data."
+      },
+      {
+        "name": "huggingface-trackio",
+        "title": "huggingface-trackio",
+        "description": "Track and visualize ML training experiments with Trackio. Use when logging metrics during training (Python API), firing alerts for training diagnostics, or retrieving/analyzing logged metrics (CLI). Supports real-time dashboard visualization, alerts with webhooks, HF Space syncing, and JSON output for automation."
+      },
+      {
+        "name": "huggingface-vision-trainer",
+        "title": "huggingface-vision-trainer",
+        "description": "Trains and fine-tunes vision models for object detection (D-FINE, RT-DETR v2, DETR, YOLOS), image classification (timm models — MobileNetV3, MobileViT, ResNet, ViT/DINOv3 — plus any Transformers classifier), and SAM/SAM2 segmentation using Hugging Face Transformers on Hugging Face Jobs cloud GPUs. Covers COCO-format dataset preparation, Albumentations augmentation, mAP/mAR evaluation, accuracy metrics, SAM segmentation with bbox/point prompts, DiceCE loss, hardware selection, cost estimation, Trackio monitoring, and Hub persistence. Use when users mention training object detection, image classification, SAM, SAM2, segmentation, image matting, DETR, D-FINE, RT-DETR, ViT, timm, MobileNet, ResNet, bounding box models, or fine-tuning vision models on Hugging Face Jobs."
+      },
+      {
+        "name": "huggingface-zerogpu",
+        "title": "huggingface-zerogpu",
+        "description": "AI demos and GPU compute with Gradio Spaces and Hugging Face Spaces ZeroGPU. Use when writing or reviewing code that uses `@spaces.GPU`, configuring `python_version` or `requirements.txt` for a ZeroGPU Space, or handling ZeroGPU-specific code constraints — pickle-based process isolation, `gr.State` semantics across the worker boundary, no `torch.compile` (use AoTI instead), CUDA wheel-only builds (no `nvcc` at build or runtime), large vs xlarge sizing, and dynamic duration callables. Make sure to use this skill whenever the user mentions ZeroGPU, `@spaces.GPU`, or the `spaces` Python package, or hits ZeroGPU-specific code errors like `PicklingError` across the worker boundary, `illegal duration`, or `flash-attn` wheel-build failures — even when the user does not explicitly ask for ZeroGPU coding guidance. Trigger on `import spaces` or `@spaces.GPU` in code."
+      },
+      {
+        "name": "train-sentence-transformers",
+        "title": "train-sentence-transformers",
+        "description": "Train or fine-tune sentence-transformers models across `SentenceTransformer` (bi-encoder, dense or static embedding model for retrieval, similarity, clustering, classification, paraphrase mining, dedup, multimodal), `CrossEncoder` (reranker, pair scoring for two-stage retrieval / pair classification), `SparseEncoder` (SPLADE, sparse embedding model for learned-sparse retrieval), and `MultiVectorEncoder` (ColBERT / late-interaction, per-token embeddings scored with MaxSim). Covers loss selection, hard-negative mining, evaluators, distillation, LoRA, Matryoshka, and Hugging Face Hub publishing. Use for any sentence-transformers training task."
+      },
+      {
+        "name": "transformers-js",
+        "title": "transformers-js",
+        "description": "Use Transformers.js to run state-of-the-art machine learning models directly in JavaScript/TypeScript. Supports NLP (text classification, translation, summarization), computer vision (image classification, object detection), audio (speech recognition, audio classification), and multimodal tasks. Works in browsers and server-side runtimes (Node.js, Bun, Deno) with WebGPU/WASM using pre-trained models from Hugging Face Hub."
+      },
+      {
+        "name": "trl-training",
+        "title": "trl-training",
+        "description": "Post-train LLMs with TRL (Transformers Reinforcement Learning) — SFT, DPO, GRPO, KTO, and reward-model training. Use when writing or debugging training code with the TRL Python API or the trl CLI."
+      }
+    ]
   }
 ]
