@@ -6,11 +6,11 @@ import { readFileSync as readReleaseFile } from "node:fs";
   const manifestUrl = new URL("./package.json", import.meta.url);
   try {
     const manifest = JSON.parse(readReleaseFile(manifestUrl, "utf8"));
-    if (manifest.version !== "1.0.6") throw new Error("package.json version does not match the host");
+    if (manifest.version !== "1.0.7") throw new Error("package.json version does not match the host");
     const digest = releaseHash("sha256").update(readReleaseFile(clientUrl)).digest("hex");
-    if (digest !== "9eff5d1a7ffcfc6202ab61b172a7d2b6f98f4c626f8f17c1d37aa06f10fd9856") throw new Error("client/client.js does not match the host");
+    if (digest !== "0d4da17fa0e6685a6cfe1471955224472f542e3dc089fe8746b6d11c16f41022") throw new Error("client/client.js does not match the host");
   } catch (cause) {
-    throw new Error("dsh-overall-mcp 1.0.6: 插件文件不完整或版本不一致，请用 DSH 重新安装完整插件包。原因：" + cause.message, { cause });
+    throw new Error("dsh-overall-mcp 1.0.7: 插件文件不完整或版本不一致，请用 DSH 重新安装完整插件包。原因：" + cause.message, { cause });
   }
 }
 
@@ -5119,6 +5119,7 @@ function readZipFiles(buffer, { accept } = {}) {
 // lib/skills.js
 import os2 from "node:os";
 import path4 from "node:path";
+import { createHash } from "node:crypto";
 var SKILL_FILE = "SKILL.md";
 var SKILL_ICON_METADATA = ".overall-mcp-icon.json";
 var SKILL_ICON_BYTES = 64 * 1024;
@@ -5172,7 +5173,7 @@ async function readSkillIconFile(dir, relative, fs6, limit) {
     await handle.close();
   }
 }
-async function skillIconMeta(meta, dir, fs6, rootId) {
+async function skillIconMeta(meta, dir, fs6) {
   const issueText = (error) => error.code ? `\u8BFB\u53D6\u6280\u80FD\u56FE\u6807\u5931\u8D25\uFF1A${error.code}` : error.message;
   const issues = [];
   let icon = declaredIcon(meta) ?? declaredIcon(meta.metadata);
@@ -5199,7 +5200,7 @@ async function skillIconMeta(meta, dir, fs6, rootId) {
       issues.push(issueText(error));
     }
   }
-  if (rootId === "plugin") {
+  {
     try {
       const raw = await readSkillIconFile(dir, SKILL_ICON_METADATA, fs6, 16 * 1024);
       const stored = JSON.parse(raw.toString("utf8"));
@@ -5373,7 +5374,7 @@ async function readRoot(root, fs6) {
       license: typeof meta.license === "string" ? meta.license.trim() : "",
       author: typeof meta.author === "string" ? meta.author.trim() : "",
       homepage: typeof meta.homepage === "string" ? meta.homepage.trim() : "",
-      ...await skillIconMeta(meta, dir, fs6, root.id),
+      ...await skillIconMeta(meta, dir, fs6),
       tools: typeof meta.tools === "string" ? meta.tools.trim() : "",
       toolsOff: meta["disable-model-invocation"] === "true",
       files,
@@ -5399,7 +5400,7 @@ async function readSkills({ dshHome, home: home2, roots, fs: fs6, now = () => Da
   const wanted = roots ?? skillRoots({ dshHome, home: home2 });
   const groups = [];
   for (const root of wanted) groups.push(await readRoot(root, impl));
-  const seen = /* @__PURE__ */ new Map();
+  const seen = /* @__PURE__ */ new Set();
   const skills = [];
   const shadowed = /* @__PURE__ */ new Map();
   const installedMarketIds = /* @__PURE__ */ new Set();
@@ -5407,13 +5408,14 @@ async function readSkills({ dshHome, home: home2, roots, fs: fs6, now = () => Da
   for (const group of groups) {
     for (const skill of group.skills) {
       if (skill.marketId) installedMarketIds.add(skill.marketId);
-      const key = `${skill.name}\0${skill.description}`;
+      const key = skill.marketId ? `market\0${skill.marketId}` : `local\0${skill.name}\0${skill.description}`;
       if (seen.has(key)) {
         duplicates += 1;
         shadowed.set(group.id, (shadowed.get(group.id) ?? 0) + 1);
         continue;
       }
-      seen.set(key, skill);
+      seen.add(key);
+      if (skill.marketId) seen.add(`local\0${skill.name}\0${skill.description}`);
       skills.push(skill);
     }
   }
@@ -5441,32 +5443,113 @@ async function readSkills({ dshHome, home: home2, roots, fs: fs6, now = () => Da
     scannedAt: new Date(now()).toISOString()
   };
 }
+var trashMoves = /* @__PURE__ */ new Set();
 async function moveToTrash({ skill, trashRoot, stamp, fs: fs6 } = {}) {
   if (!skill || typeof skill.dir !== "string" || !skill.dir) return { ok: false, error: "unknown skill" };
   if (!trashRoot || !stamp) return { ok: false, error: "no trash directory" };
   const impl = fs6 ?? (await import("node:fs")).promises;
   const folder = path4.join(String(trashRoot), String(stamp));
   let dest = path4.join(folder, `${skill.root}-${skill.dirName}`);
-  const exists = async (target) => {
-    try {
-      await impl.lstat(target);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  for (let suffix = 2; await exists(dest); suffix += 1) {
-    dest = path4.join(folder, `${skill.root}-${skill.dirName}-${suffix}`);
-  }
-  await impl.mkdir(folder, { recursive: true });
+  const source = path4.resolve(skill.dir);
+  const key = process.platform === "win32" ? source.toLowerCase() : source;
+  if (trashMoves.has(key)) return { ok: false, status: 409, error: "\u6B64 Skill \u6B63\u5728\u79FB\u9664" };
+  trashMoves.add(key);
   try {
-    await impl.rename(skill.dir, dest);
-  } catch (err) {
-    if (err?.code !== "EXDEV" && err?.code !== "EPERM" && err?.code !== "EACCES") throw err;
-    await impl.cp(skill.dir, dest, { recursive: true, force: true, errorOnExist: false });
-    await impl.rm(skill.dir, { recursive: true, force: true });
+    for (let suffix = 2; await statIfPresent(impl, dest); suffix += 1) {
+      dest = path4.join(folder, `${skill.root}-${skill.dirName}-${suffix}`);
+    }
+    await impl.mkdir(folder, { recursive: true });
+    try {
+      await impl.rename(source, dest);
+      return { ok: true, dest };
+    } catch (error) {
+      if (error?.code !== "EXDEV") throw error;
+    }
+    const retirement = await impl.mkdtemp(path4.join(path4.dirname(source), ".skill-trash-"));
+    const retired = path4.join(retirement, "skill");
+    try {
+      await impl.rename(source, retired);
+    } catch (error) {
+      try {
+        await impl.rmdir(retirement);
+      } catch (cleanup) {
+        throw new Error(`${error.message}\u3002\u4E34\u65F6\u76EE\u5F55\u672A\u6E05\u7406\uFF1A${retirement}\uFF08${cleanup.message}\uFF09`, { cause: error });
+      }
+      throw error;
+    }
+    const warnings = [];
+    let stage;
+    try {
+      stage = await impl.mkdtemp(path4.join(folder, ".copy-"));
+      const copy = path4.join(stage, "skill");
+      await impl.cp(retired, copy, { recursive: true, force: false, errorOnExist: true, verbatimSymlinks: true });
+      if (await statIfPresent(impl, dest)) throw new Error("\u56DE\u6536\u8DEF\u5F84\u5DF2\u88AB\u5360\u7528\uFF0C\u8BF7\u91CD\u8BD5");
+      await impl.rename(copy, dest);
+    } catch (error) {
+      const notes = [`\u8DE8\u76D8\u56DE\u6536\u5931\u8D25\uFF1A${error.message}`];
+      if (stage) {
+        try {
+          await impl.rm(stage, { recursive: true, force: true });
+        } catch (cleanup) {
+          notes.push(`\u4E34\u65F6\u76EE\u5F55\u672A\u6E05\u7406\uFF1A${stage}\uFF08${cleanup.message}\uFF09`);
+        }
+      }
+      try {
+        if (await statIfPresent(impl, source)) throw new Error("\u6E90\u76EE\u5F55\u5DF2\u91CD\u65B0\u521B\u5EFA");
+        await impl.rename(retired, source);
+      } catch (restore) {
+        notes.push(`\u539F\u76EE\u5F55\u672A\u6062\u590D\uFF1A${restore.message}`);
+        return { ok: false, dest: retired, error: notes.join("\u3002") };
+      }
+      try {
+        await impl.rmdir(retirement);
+      } catch (cleanup) {
+        notes.push(`\u4E34\u65F6\u76EE\u5F55\u672A\u6E05\u7406\uFF1A${retirement}\uFF08${cleanup.message}\uFF09`);
+      }
+      return { ok: false, error: notes.join("\u3002") };
+    }
+    try {
+      await impl.rm(stage, { recursive: true, force: true });
+    } catch (error) {
+      warnings.push(`\u56DE\u6536\u4E34\u65F6\u76EE\u5F55\u672A\u6E05\u7406\uFF1A${stage}\uFF08${error.message}\uFF09`);
+    }
+    try {
+      await impl.rm(retirement, { recursive: true, force: true });
+    } catch (error) {
+      warnings.push(`\u539F\u76EE\u5F55\u7684\u4E34\u65F6\u526F\u672C\u672A\u6E05\u7406\uFF1A${retired}\uFF08${error.message}\uFF09`);
+    }
+    return { ok: true, dest, ...warnings.length ? { warning: warnings.join("\u3002") } : {} };
+  } finally {
+    trashMoves.delete(key);
   }
-  return { ok: true, dest };
+}
+async function statIfPresent(fs6, target) {
+  try {
+    return await fs6.lstat(target);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    return null;
+  }
+}
+async function marketSkillTarget(root, folder, marketId, fs6) {
+  const primary = path4.join(root, folder);
+  const suffix = createHash("sha256").update(marketId).digest("hex").slice(0, 16);
+  const alternate = path4.join(root, `${folder.slice(0, 200)}--${suffix}`);
+  const occupied = await statIfPresent(fs6, alternate);
+  if (occupied) throw Object.assign(new Error(`Skill \u5B89\u88C5\u76EE\u5F55\u5DF2\u5B58\u5728\uFF1A${alternate}`), { status: 409 });
+  const current = await statIfPresent(fs6, primary);
+  if (!current) return primary;
+  if (current.isDirectory()) {
+    try {
+      const raw = await readSkillIconFile(primary, SKILL_ICON_METADATA, fs6, 16 * 1024);
+      if (JSON.parse(raw.toString("utf8")).marketId === marketId) {
+        throw Object.assign(new Error("\u8FD9\u4E2A Skill \u5DF2\u5B89\u88C5\u5230\u6240\u9009\u76EE\u5F55"), { status: 409 });
+      }
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+  return alternate;
 }
 
 // lib/skill-market.js
@@ -6845,6 +6928,8 @@ function runningRowOf(sessionId, event, at = Date.now()) {
     startedAt: new Date(at).toISOString(),
     ms: null,
     session: shortSession(sessionId),
+    ...Number.isInteger(data.turn) ? { callTurn: data.turn } : {},
+    ...Number.isInteger(data.step) ? { callStep: data.step } : {},
     req: textOf(data.arguments),
     res: null,
     note: null
@@ -7045,10 +7130,11 @@ function summarize(rows, { space = "mcp", range = "24h", filter = "", q = "", me
 }
 var callWriteChains = /* @__PURE__ */ new Map();
 var CallStore = class {
-  constructor({ file, now = () => Date.now(), memoryLimit = CALL_MEMORY_LIMIT, fileLimits = {}, onError = (error) => console.error(error.message) } = {}) {
+  constructor({ file, now = () => Date.now(), memoryLimit = CALL_MEMORY_LIMIT, pendingLimit = CALL_MEMORY_LIMIT, fileLimits = {}, onError = (error) => console.error(error.message) } = {}) {
     this.file = file;
     this.now = now;
     this.memoryLimit = memoryLimit;
+    this.pendingLimit = pendingLimit;
     this.limits = { lines: fileLimits.lines ?? CALL_LIMIT_LINES, bytes: fileLimits.bytes ?? CALL_LIMIT_BYTES };
     this.rows = [];
     this.byId = /* @__PURE__ */ new Map();
@@ -7060,14 +7146,22 @@ var CallStore = class {
     this.appends = 0;
     this.chain = Promise.resolve();
     this.pending = [];
+    this.pendingBytes = 0;
+    this.pendingDropped = 0;
+    this.appendScheduled = false;
+    this.pruneScheduled = false;
+    this.repairedDamaged = 0;
+    this.warnedResultIssues = /* @__PURE__ */ new Set();
     this.storageErrors = /* @__PURE__ */ new Map();
     this.onError = onError;
     this.lastSavedAt = null;
   }
   storageFailure(operation, cause) {
     const error = new Error(`\u8C03\u7528\u8BB0\u5F55 ${operation} \u5931\u8D25\uFF1A${redactSecrets(String(cause?.message ?? cause))}`, { cause });
-    this.storageErrors.set(operation, { operation, message: error.message, at: new Date(this.now()).toISOString() });
-    this.onError(error);
+    if (this.storageErrors.get(operation)?.message !== error.message) {
+      this.storageErrors.set(operation, { operation, message: error.message, at: new Date(this.now()).toISOString() });
+      this.onError(error);
+    }
     return error;
   }
   enqueueWrite(operation, task) {
@@ -7095,9 +7189,33 @@ var CallStore = class {
   async drainPending() {
     if (!this.pending.length) return;
     await fs4.mkdir(path6.dirname(this.file), { recursive: true });
+    let separator = "";
+    let handle;
+    try {
+      handle = await fs4.open(this.file, "r");
+      const { size } = await handle.stat();
+      if (size > 0) {
+        const last = Buffer.alloc(1);
+        const { bytesRead } = await handle.read(last, 0, 1, size - 1);
+        if (bytesRead === 1 && last[0] !== 10) separator = "\n";
+      }
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    } finally {
+      await handle?.close();
+    }
     while (this.pending.length) {
-      await fs4.appendFile(this.file, this.pending[0], "utf8");
-      this.pending.shift();
+      const entry = this.pending.shift();
+      this.pendingBytes -= entry.bytes;
+      try {
+        await fs4.appendFile(this.file, separator + entry.line, "utf8");
+        separator = "";
+      } catch (error) {
+        this.pending.unshift(entry);
+        this.pendingBytes += entry.bytes;
+        this.boundPending();
+        throw error;
+      }
     }
     this.storageErrors.delete("append");
   }
@@ -7151,6 +7269,7 @@ var CallStore = class {
     const stat = await fs4.stat(this.file).catch(() => null);
     if (stat) this.sig = `${stat.size}:${stat.mtimeMs}`;
     const oldest = this.now() - CALL_KEEP_MS;
+    const diskOrder = /* @__PURE__ */ new Map();
     for (const line of raw.split("\n")) {
       const text = line.trim();
       if (text === "") continue;
@@ -7161,13 +7280,14 @@ var CallStore = class {
         this.damaged += 1;
         continue;
       }
-      if (!row || typeof row !== "object" || Array.isArray(row)) {
+      if (!row || typeof row !== "object" || typeof row.id !== "string" || !row.id || !Number.isFinite(Date.parse(row.startedAt))) {
         this.damaged += 1;
         continue;
       }
       if (row.kind === "\u4F1A\u8BDD\u52A0\u8F7D") continue;
       if (row.via === "\u7528\u6237\u5F15\u7528" && row.schema !== 2) continue;
-      if (!Number.isFinite(Date.parse(row.startedAt)) || Date.parse(row.startedAt) < oldest) continue;
+      if (Date.parse(row.startedAt) < oldest) continue;
+      if (!diskOrder.has(row.id)) diskOrder.set(row.id, diskOrder.size);
       for (const field of ["req", "res", "note"]) if (typeof row[field] === "string") row[field] = redactSecrets(row[field]);
       if (!this.ownedIds.has(row.id)) this.put(row, { write: false });
     }
@@ -7184,6 +7304,8 @@ var CallStore = class {
         row.note = "\u5BBF\u4E3B\u5728\u8FD9\u6B21\u8C03\u7528\u8FD4\u56DE\u524D\u9000\u51FA\u4E86\uFF0C\u7ED3\u679C\u6CA1\u80FD\u53D6\u5230";
       }
     }
+    const unsavedOrder = Number.MAX_SAFE_INTEGER;
+    this.rows.sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt) || (diskOrder.get(a.id) ?? unsavedOrder) - (diskOrder.get(b.id) ?? unsavedOrder));
     this.trim();
     return this;
   }
@@ -7198,7 +7320,10 @@ var CallStore = class {
       this.rows.push(merged);
     }
     this.byId.set(merged.id, merged);
-    if (write) this.appendToFile(merged);
+    if (write) {
+      if (this.rows.length > this.memoryLimit) this.trim();
+      this.appendToFile(merged);
+    }
     return merged;
   }
   /** Start a call. Returns the row, or null when the event was not ours. */
@@ -7239,14 +7364,31 @@ var CallStore = class {
       note: failed ? reason ?? "\u5DE5\u5177\u8FD4\u56DE\u5931\u8D25" : row.note ?? null
     });
   }
+  settleEvent(sessionId, event) {
+    if (event?.surfaceOp === "replace" || event?.surfaceOp?.op === "replace") return null;
+    const nested = event?.data?.message?.source?.callId;
+    const legacy = event?.data?.callId;
+    const callId = typeof nested === "string" && nested ? nested : legacy;
+    const conflict = typeof nested === "string" && nested && typeof legacy === "string" && legacy && nested !== legacy;
+    if (!sessionId || typeof callId !== "string" || !callId || conflict) {
+      const reason = conflict ? "\u8C03\u7528\u6807\u8BC6\u51B2\u7A81" : "\u7F3A\u5C11\u4F1A\u8BDD\u6216\u8C03\u7528\u6807\u8BC6";
+      if (!this.warnedResultIssues.has(reason)) {
+        this.warnedResultIssues.add(reason);
+        this.onError(new Error(`\u8C03\u7528\u7ED3\u679C\u672A\u8BB0\u5F55\uFF1A${reason}\u3002`));
+      }
+      return null;
+    }
+    const id = `${sessionId}#${callId}`;
+    const row = this.byId.get(id);
+    if (row?.status !== "running") return null;
+    if (Number.isInteger(row.callTurn) && Number.isInteger(event.data.turn) && row.callTurn !== event.data.turn) return null;
+    if (Number.isInteger(row.callStep) && Number.isInteger(event.data.step) && row.callStep !== event.data.step) return null;
+    return this.settle(id, settlementOf(event));
+  }
   /**
    * The newest still-running row of one session.
    *
-   * A `tool/result` event carries the response and the originating `callSeq`,
-   * not the call id, so a settle either matches by id (when the event happens to
-   * carry one) or takes this session's most recent open call — calls inside one
-   * session are ordered, and a wrong guess only ever affects a row that is about
-   * to be pruned anyway.
+   * A display lookup only. Result events must use the exact call ID.
    */
   newestRunning(sessionId) {
     const short = shortSession(sessionId);
@@ -7266,23 +7408,66 @@ var CallStore = class {
     if (!this.file) return;
     const line = `${JSON.stringify(row)}
 `;
-    this.pending.push(line);
-    this.enqueueWrite("append", () => this.drainPending());
+    const bytes = Buffer.byteLength(line, "utf8");
+    this.pending.push({ line, bytes });
+    this.pendingBytes += bytes;
+    this.boundPending();
+    this.scheduleAppend();
     this.appends += 1;
-    if (this.appends % PRUNE_EVERY === 0) void this.prune();
+    if (this.appends % PRUNE_EVERY === 0 && !this.pruneScheduled) {
+      this.pruneScheduled = true;
+      this.enqueueWrite("prune", async () => {
+        try {
+          await this.pruneOnDisk();
+        } finally {
+          this.pruneScheduled = false;
+        }
+      });
+    }
+  }
+  scheduleAppend() {
+    if (this.appendScheduled) return;
+    this.appendScheduled = true;
+    this.enqueueWrite("append", async () => {
+      try {
+        await this.drainPending();
+      } finally {
+        this.appendScheduled = false;
+      }
+      if (this.pending.length) this.scheduleAppend();
+    });
+  }
+  boundPending() {
+    while (this.pending.length > this.pendingLimit || this.pendingBytes > CALL_LIMIT_BYTES) {
+      this.pendingBytes -= this.pending.shift().bytes;
+      this.pendingDropped++;
+    }
   }
   /** Drop the old end of memory; returns how many rows went. */
   trim() {
     const oldest = this.now() - CALL_KEEP_MS;
-    const kept = [];
+    let kept = [];
     for (const row of this.rows) {
       const at = Date.parse(row.startedAt);
       if (Number.isFinite(at) && at >= oldest) kept.push(row);
       else this.dropped += 1;
     }
-    while (kept.length > this.memoryLimit) {
-      const gone = kept.shift();
-      if (gone) this.dropped += 1;
+    let excess = kept.length - this.memoryLimit;
+    if (excess > 0) {
+      kept = kept.filter((row) => {
+        if (excess <= 0 || row.status === "running" && this.ownedIds.has(row.id)) return true;
+        excess--;
+        this.dropped++;
+        return false;
+      });
+      if (excess > 0) {
+        this.dropped += excess;
+        kept = kept.slice(excess);
+        if (!this.warnedResultIssues.has("\u8FDB\u884C\u4E2D\u8C03\u7528\u8D85\u9650")) {
+          this.warnedResultIssues.add("\u8FDB\u884C\u4E2D\u8C03\u7528\u8D85\u9650");
+          this.onError(new Error("\u8FDB\u884C\u4E2D\u7684\u8C03\u7528\u8D85\u51FA\u8BB0\u5F55\u4E0A\u9650\uFF0C\u90E8\u5206\u8F83\u65E9\u8C03\u7528\u65E0\u6CD5\u7EE7\u7EED\u8DDF\u8E2A\u3002"));
+        }
+      }
     }
     this.rows = kept;
     this.byId = new Map(kept.map((row) => [row.id, row]));
@@ -7314,15 +7499,20 @@ var CallStore = class {
     const diskBytes = Buffer.byteLength(raw, "utf8");
     if (onDisk <= this.limits.lines && diskBytes <= this.limits.bytes) return null;
     const latest = /* @__PURE__ */ new Map();
+    let damaged = 0;
     for (const text of raw.split("\n")) {
       if (!text.trim()) continue;
       let row;
       try {
         row = JSON.parse(text);
       } catch {
-        throw new Error("\u8C03\u7528\u8BB0\u5F55\u5305\u542B\u635F\u574F JSON\uFF0C\u672A\u8986\u76D6\u539F\u6587\u4EF6");
+        damaged++;
+        continue;
       }
-      if (!row || typeof row !== "object" || typeof row.id !== "string") throw new Error("\u8C03\u7528\u8BB0\u5F55\u7ED3\u6784\u635F\u574F\uFF0C\u672A\u8986\u76D6\u539F\u6587\u4EF6");
+      if (!row || typeof row !== "object" || typeof row.id !== "string" || !row.id || !Number.isFinite(Date.parse(row.startedAt))) {
+        damaged++;
+        continue;
+      }
       for (const field of ["req", "res", "note"]) if (typeof row[field] === "string") row[field] = redactSecrets(row[field]);
       latest.set(row.id, row);
     }
@@ -7347,7 +7537,10 @@ var CallStore = class {
       await fs4.rm(tmp, { force: true });
     }
     this.trim();
-    return { kept: kept.length };
+    this.repairedDamaged += damaged;
+    this.damaged = 0;
+    if (damaged) this.onError(new Error(`\u8C03\u7528\u65E5\u5FD7\u6E05\u7406\u65F6\u79FB\u9664\u4E86 ${damaged} \u6761\u635F\u574F\u8BB0\u5F55\uFF0C\u5176\u4ED6\u6709\u6548\u8BB0\u5F55\u5DF2\u4FDD\u7559\u3002`));
+    return { kept: kept.length, damaged };
   }
   /** Wait for queued writes to land (tests and shutdown). */
   async retryPersistence() {
@@ -7372,10 +7565,12 @@ var CallStore = class {
       kept: this.rows.length,
       dropped: this.dropped,
       damaged: this.damaged,
+      ...this.repairedDamaged ? { repairedDamaged: this.repairedDamaged } : {},
       running: this.rows.filter((row) => row.status === "running").length,
       persistence: {
         ok: this.storageErrors.size === 0,
         pending: this.pending.length,
+        ...this.pendingDropped ? { dropped: this.pendingDropped } : {},
         lastSavedAt: this.lastSavedAt,
         errors: [...this.storageErrors.values()]
       }
@@ -7590,9 +7785,7 @@ async function apply(ctx) {
             return;
           }
           if (type === "tool/result") {
-            const callId = typeof event?.data?.callId === "string" ? event.data.callId : null;
-            const row = callId === null ? callStore.newestRunning(sessionId) : callStore.byId.get(`${sessionId}#${callId}`);
-            if (row && row.status === "running") callStore.settle(row.id, settlementOf(event));
+            callStore.settleEvent(sessionId, event);
             return;
           }
           if (type === "user/message") {
@@ -8136,15 +8329,23 @@ async function apply(ctx) {
     } catch (err) {
       return { ok: false, status: 500, error: String(err?.message ?? err) };
     }
-    if (!out.ok) return { ok: false, status: 500, error: out.error };
+    if (!out.ok) {
+      if (out.dest) skillsCache = null;
+      const error = out.dest ? `${out.error}\u3002\u6062\u590D\u526F\u672C\uFF1A${out.dest}` : out.error;
+      emit({ kind: "skill-remove", id, ok: false, error });
+      return { ok: false, status: out.status ?? 500, error, ...out.dest ? { trashedTo: out.dest } : {} };
+    }
     skillsCache = null;
     skillsCacheAt = 0;
-    return { ok: true, dir: skill.dir, trashedTo: out.dest, name: skill.name };
+    if (out.warning) emit({ kind: "skill-remove", id, ok: true, warning: out.warning });
+    return { ok: true, dir: skill.dir, trashedTo: out.dest, name: skill.name, warning: out.warning };
   }
   const MARKET_ITEM_TTL_MS = 30 * 6e4;
   let marketInstance = null;
   let marketIndexAt = 0;
   const marketIndex = /* @__PURE__ */ new Map();
+  const skillInstallQueues = /* @__PURE__ */ new Map();
+  const skillInstallIds = /* @__PURE__ */ new Set();
   function marketFor() {
     if (marketInstance) return marketInstance;
     const fetchImpl = (url, init) => fetch(url, { ...init, headers: withGithubAuth(url, init?.headers ?? {}) });
@@ -8160,6 +8361,7 @@ async function apply(ctx) {
   let skillWalkProgress = null;
   let skillWalkStop = null;
   let skillWalkEnded = null;
+  let skillWalkWriteError = null;
   async function readSkillIndex({ force = false } = {}) {
     if (!force && skillWalk && skillIndexLoaded) return skillIndexDoc;
     const stamp = await skillIndexFileStamp();
@@ -8183,6 +8385,8 @@ async function apply(ctx) {
   async function writeSkillIndex(doc) {
     await writeJson(skillIndexFile, doc);
     skillIndexKnownStamp = await skillIndexFileStamp();
+    skillIndexDoc = doc;
+    skillIndexLoaded = true;
   }
   async function skillIndexPayload({ refresh = false } = {}) {
     const doc = await readSkillIndex({ force: refresh });
@@ -8203,6 +8407,7 @@ async function apply(ctx) {
       walking: skillWalk !== null,
       progress: skillWalkProgress,
       ended: skillWalkEnded,
+      writeError: skillWalkWriteError,
       loaded: skillIndexLoaded,
       damaged: skillIndexDamaged ?? null
     };
@@ -8219,11 +8424,18 @@ async function apply(ctx) {
     const stop = { controller: new AbortController(), reason: null };
     skillWalkStop = stop;
     skillWalkEnded = null;
+    skillWalkWriteError = null;
     skillWalk = (async () => {
       log?.info?.(`overall-mcp: walking the skill index (${Object.entries(modes).filter(([, mode]) => mode === "full").map(([id]) => id).join(",") || "slices"})`);
       skillWalkProgress = { requests: 0, rows: 0, source: null, modes };
       emit({ kind: "skill-index", action: "start", force: force === true, modes });
       let lastWrite = 0;
+      let checkpoint = null;
+      const reportWriteFailure = (phase, error) => {
+        skillWalkWriteError = `Skill \u7D22\u5F15${phase}\u4FDD\u5B58\u5931\u8D25\uFF1A${redactSecrets(error?.message ?? error)}`;
+        log?.warn?.(skillWalkWriteError);
+        emit({ kind: "skill-index", action: "write-failed", phase, error: skillWalkWriteError });
+      };
       const walk = await walkSkillIndex({
         fetch: (url, init) => fetch(url, { ...init, headers: withGithubAuth(url, init?.headers ?? {}) }),
         cursors,
@@ -8248,14 +8460,14 @@ async function apply(ctx) {
         onProgress: ({ requests, rows: rows2, source, cursors: cursors2, items }) => {
           skillWalkProgress = { requests, rows: rows2, source };
           const stamp = Date.now();
-          if (rows2 === 0 || stamp - lastWrite < 5e3) return;
+          if (rows2 === 0 || checkpoint || stamp - lastWrite < 5e3) return;
           lastWrite = stamp;
           const at = new Date(stamp).toISOString();
           const merged = mergeSkillRows(skillIndexDoc?.rows ?? [], [...items.values()], {
             at,
             maxRows: limits.maxRows
           });
-          void writeSkillIndex(skillIndexDocumentOf({
+          checkpoint = writeSkillIndex(skillIndexDocumentOf({
             at,
             rows: merged,
             cursors: cursors2,
@@ -8264,7 +8476,10 @@ async function apply(ctx) {
             partial: `\u6B63\u5728\u6536\u5F55\uFF08\u5DF2\u6536 ${merged.length} \u884C\uFF09`,
             modes,
             minStars: minStarsForWalk({ previous: skillIndexDoc, modes, slices })
-          })).catch(() => {
+          })).then(() => {
+            skillWalkWriteError = null;
+          }).catch((error) => reportWriteFailure("\u8FDB\u5EA6", error)).finally(() => {
+            checkpoint = null;
           });
         }
       });
@@ -8291,9 +8506,14 @@ async function apply(ctx) {
         modes,
         minStars: minStarsForWalk({ previous: skillIndexDoc, modes, slices })
       });
-      await writeSkillIndex(doc);
-      skillIndexDoc = doc;
-      skillIndexLoaded = true;
+      await checkpoint;
+      try {
+        await writeSkillIndex(doc);
+        skillWalkWriteError = null;
+      } catch (error) {
+        reportWriteFailure("\u6700\u7EC8\u7ED3\u679C", error);
+        throw error;
+      }
       emit({ kind: "skill-index", action: "finish", rows: rows.length, requests: walk.requests, partial: doc.partial });
       return doc;
     })().catch((err) => {
@@ -8352,7 +8572,8 @@ async function apply(ctx) {
         // complete and which are still the top of a listing.
         modes: summary.modes
       } : null,
-      walk: skillWalkProgress ? { ...skillWalkProgress } : null
+      walk: skillWalkProgress ? { ...skillWalkProgress } : null,
+      walkWriteError: skillWalkWriteError
     };
   }
   async function indexedSkillMarket(index, options) {
@@ -8404,24 +8625,43 @@ async function apply(ctx) {
       return { ok: false, status: 400, error: item.installNote || "this source only publishes an index" };
     }
     await refreshGithubAuth();
-    const { roots } = await skillsPayload();
+    const roots = skillRoots({ dshHome: path7.dirname(dataDir()) });
     const bucket = roots.find((entry) => entry.id === root);
     if (!bucket) return { ok: false, status: 400, error: `unknown root: ${root}` };
     const folder = String(item.name || "").replace(/[^\w.@-]+/g, "-").replace(/^[-.]+/, "");
     if (!folder) return { ok: false, status: 400, error: "this item has no usable name" };
-    const targetDir = path7.join(bucket.dir, folder);
+    const targetKey = path7.resolve(bucket.dir, folder);
+    const key = process.platform === "win32" ? targetKey.toLowerCase() : targetKey;
+    const identity = JSON.stringify([bucket.id, id]);
+    if (skillInstallIds.has(identity)) return { ok: false, status: 409, error: "\u8FD9\u4E2A Skill \u6B63\u5728\u5B89\u88C5" };
+    skillInstallIds.add(identity);
+    const install = (skillInstallQueues.get(key) ?? Promise.resolve()).then(async () => {
+      const { installedMarketIds } = await readSkills({ roots: [bucket] });
+      if (installedMarketIds.includes(id)) {
+        throw Object.assign(new Error("\u8FD9\u4E2A Skill \u5DF2\u5B89\u88C5\u5230\u6240\u9009\u76EE\u5F55"), { status: 409 });
+      }
+      const targetDir = await marketSkillTarget(bucket.dir, folder, id, fs5);
+      return marketFor().install({ item, targetDir });
+    });
+    const pending = install.then(() => {
+    }, () => {
+    });
+    skillInstallQueues.set(key, pending);
     let out;
     try {
-      out = await marketFor().install({ item, targetDir });
+      out = await install;
     } catch (err) {
       const error = redactSecrets(err?.message ?? err);
       emit({ kind: "skill-install", itemId: id, source: item.source, ok: false, error });
       return { ok: false, status: err?.status ?? 502, error };
+    } finally {
+      skillInstallIds.delete(identity);
+      if (skillInstallQueues.get(key) === pending) skillInstallQueues.delete(key);
     }
     skillsCache = null;
     skillsCacheAt = 0;
     emit({ kind: "skill-install", itemId: id, source: item.source, ok: true, files: out.files?.length ?? 0 });
-    return { ok: true, dir: targetDir, name: item.name, source: item.source, files: out.files?.length ?? 0 };
+    return { ok: true, dir: out.dir, name: item.name, source: item.source, files: out.files?.length ?? 0 };
   }
   if (firstRun) {
     try {

@@ -59,7 +59,7 @@ window.__ModuleLoader__.load({
 		// probe also checks CHANGELOG.md's newest section is this version, since
 		// a release note that stops at an older build tells a reader what
 		// changed in code they are not running.
-		const CLIENT_VERSION = "1.0.6";
+		const CLIENT_VERSION = "1.0.7";
 		// Where 「点个 star」 points. A constant, not a config: it is this
 		// plugin's own repository, and a panel that could be pointed at another
 		// repository would be asking for a star it does not deserve.
@@ -967,7 +967,7 @@ window.__ModuleLoader__.load({
 				// to a working one is indistinguishable from it — and that is
 				// exactly what happened to a mounted server with zero tools.
 				background: state === "on" ? T.green
-					: state === "error" || state === "starting" || state === "unhealthy" ? T.amber
+				: state === "error" || state === "starting" || state === "unhealthy" ? "#e0a020"
 						: state === "off" ? T.red
 							: state === "external" ? T.blue
 								: "rgba(128,128,128,0.6)",
@@ -1609,7 +1609,7 @@ window.__ModuleLoader__.load({
 						server.health
 							? createElement("div", {
 								key: "health", className: "omkt-shealth",
-								style: { ...styles.meta, color: server.health.ok ? T.green : T.red, whiteSpace: "normal" },
+								style: { ...styles.meta, color: server.health.ok ? "light-dark(#2f7d32, #85db96)" : "light-dark(#b3261e, #ffa19b)", whiteSpace: "normal" },
 								title: (server.health.checks || []).map((c) => `${c.ok ? "✓" : "✗"} ${c.detail}`).join("\n") || undefined,
 							}, healthLine(server.health))
 							: null,
@@ -1620,7 +1620,7 @@ window.__ModuleLoader__.load({
 						server.health && !server.health.ok && server.channel === "cli-json"
 							? createElement("div", {
 								key: "legacycli",
-								style: { ...styles.meta, color: T.amber, whiteSpace: "normal" },
+								style: { ...styles.meta, color: "light-dark(#8a5a00, #ffc36a)", whiteSpace: "normal" },
 							}, "这是旧装法（Smithery CLI 解析成远程端点，要浏览器登录）。移除后重新安装，会按它自己托管的方式装成远程 http。")
 							: null,
                 ]),
@@ -4101,6 +4101,11 @@ function CallsPanel({ space, data, error, busy, range, onRange, merge, onMerge, 
             createElement("span", { key: "reason" }, "调用记录未完整保存，重启可能丢失未保存记录。" + (data.coverage.persistence.errors ?? []).map(item => item.message).join("；")),
             createElement("button", { key: "retry", type: "button", style: styles.button, disabled: busy, onClick: onRetryStorage }, "重试保存"),
         ]) : null,
+        data?.coverage?.persistence?.dropped > 0 ? createElement("div", { key: "storage-dropped", role: "alert", style: styles.error }, `本次运行有 ${data.coverage.persistence.dropped} 条写入记录超出待保存上限，无法恢复。`) : null,
+        data?.coverage?.damaged || data?.coverage?.repairedDamaged ? createElement("div", { key: "storage-damaged", role: "status", style: styles.message }, [
+            data.coverage.damaged ? `有 ${data.coverage.damaged} 条损坏日志无法读取。` : "",
+            data.coverage.repairedDamaged ? `本次运行已清理 ${data.coverage.repairedDamaged} 条损坏日志。` : "",
+        ]) : null,
         note ? createElement("div", { key: "note", style: styles.message }, note) : null,
         createElement("div", { key: "toolbar", style: callStyles.toolbar }, [
             createElement("div", { key: "range", className: "omkt-call-ranges", style: { display: "flex", alignItems: "center", gap: 3, padding: 2, borderRadius: 14, border: `1px solid ${T.line}`, background: T.cardBg } },
@@ -4913,7 +4918,7 @@ function Section({ close }) {
 						body: JSON.stringify({ id: skill.id ?? skill.name, confirm: true }),
 					});
 					if (out?.ok) {
-						setSkillNote(`已移到回收目录：${out.trashedTo ?? ""}`);
+						setSkillNote(`已移到回收目录：${out.trashedTo ?? ""}${out.warning ? `。${out.warning}` : ""}`);
 						setSkillRemove(null);
 						setSkillTarget(null);
 						await loadSkills({ refresh: true }).catch(err => {
@@ -6637,6 +6642,7 @@ function Section({ close }) {
 					key: "skillmarketbody", className: "omkt-tabbody", style: styles.market,
 				}, [
                     skillsError ? createElement("div", { key: "scan-error", role: "alert", style: styles.error }, `技能列表读取失败，已安装状态可能尚未同步：${skillsError}`) : null,
+                    skillMarket?.walkWriteError ? createElement("div", { key: "walk-write-error", role: "alert", style: styles.error }, skillMarket.walkWriteError) : null,
 					skillNote ? createElement("div", { key: "note", style: styles.message }, skillNote) : null,
                     skillMetricNote ? createElement("div", { key: "metrics-note", role: "status", style: styles.hint }, skillMetricNote) : null,
 					createElement(SkillMarket, {
