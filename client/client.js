@@ -277,23 +277,16 @@ window.__ModuleLoader__.load({
 		 */
 		const CENSUS_OPTION = ["census", "本地普查（索引）"];
 
-		// Theme-adaptive palette. The DSH shell owns the real tokens
-		// (--dsw-alias-*); the literals are fallbacks for a shell older than this
-		// bundle. Neutral surfaces are translucent grey rather than white so the
-		// page reads as native in BOTH themes — a hard-coded white card on the
-		// dark theme is the single most obvious "this does not belong here" tell.
+		// Let the host supply both themes. Early shells expose the background
+		// layer without the card token, and older palettes may use the text aliases.
 		const T = {
-			// DSH's real theme tokens. The previous names (--dsw-alias-text-*,
-			// --dsw-alias-bg-primary) do not exist in the shell, so every surface
-			// silently fell back to the light literals and the page painted a
-			// white card wall and a near-black title on the dark canvas.
-			cardBg: "var(--dsw-alias-card-fill, #fff)",
+			cardBg: "var(--dsw-alias-card-fill, var(--dsw-alias-bg-layer-1, var(--dsw-alias-bg-primary, #fff)))",
 			soft: "var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,0.08))",
 			soft2: "var(--dsw-alias-interactive-bg-active, rgba(128,128,128,0.12))",
-			text: "var(--dsw-alias-label-primary, #18202e)",
-			text2: "var(--dsw-alias-label-secondary, #526071)",
-			text3: "var(--dsw-alias-label-tertiary, #667085)",
-			text4: "var(--dsw-alias-label-caption, #a9aeb8)",
+			text: "var(--dsw-alias-label-primary, var(--dsw-alias-text-primary, #18202e))",
+			text2: "var(--dsw-alias-label-secondary, var(--dsw-alias-text-secondary, #526071))",
+			text3: "var(--dsw-alias-label-tertiary, var(--dsw-alias-text-tertiary, #667085))",
+			text4: "var(--dsw-alias-label-caption, var(--dsw-alias-text-quaternary, #a9aeb8))",
 			line: "var(--dsw-alias-border-l2, rgba(114,130,167,.24))",
 			line2: "var(--dsw-alias-border-l1, rgba(114,130,167,.15))",
 			brand: "#4566e9",
@@ -322,7 +315,7 @@ window.__ModuleLoader__.load({
 				display: "flex", flexDirection: "column", gap: 12,
 				fontSize: 15, lineHeight: 1.5, color: T.text,
 				fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif",
-				background: "var(--dsw-alias-bg-base, #fff)",
+				background: `var(--dsw-alias-bg-base, ${T.cardBg})`,
 				height: "100%", boxSizing: "border-box", overflow: "hidden",
 				width: "100%", maxWidth: 1120, marginInline: "auto", minWidth: 0,
 				minHeight: 0,
@@ -2150,6 +2143,8 @@ window.__ModuleLoader__.load({
 				".omkt-menu>summary{list-style:none;cursor:pointer;white-space:nowrap}.omkt-menu>summary::-webkit-details-marker{display:none}",
 				".omkt-menu[open]>summary{color:#4566e9;background:rgba(69,102,233,.08)}",
 				".omkt-menu button{text-align:left}.omkt-menu button:hover{background:rgba(69,102,233,.08)}",
+				// Match DSH's explicit appearance setting for native controls, including open select menus.
+				".omkt-page{color-scheme:light}body[data-ds-dark-theme] .omkt-page{color-scheme:dark}",
 				".omkt-page button:focus-visible,.omkt-page summary:focus-visible,.omkt-page [role=tab]:focus-visible{outline:2px solid #4566e9;outline-offset:3px}",
 				".omkt-page button:disabled{cursor:not-allowed;opacity:.55}.omkt-page h2{overflow-wrap:anywhere}",
 				".omkt-page .omkt-skill-list{display:flex;flex-direction:column;border:1px solid rgba(128,128,128,.18);border-radius:12px;overflow:hidden}",
@@ -2199,9 +2194,9 @@ window.__ModuleLoader__.load({
 				// edge and must not stretch, or the row looks like a second card.
 				// The one control on a call row: ▸ 展开请求 / 响应. It sits at the right
 				// edge and never stretches, or the row looks like a second card.
-				".omkt-calltoggle{appearance:none;border:1px solid var(--dsw-alias-border-l2,#e6e7eb);background:var(--dsw-alias-card-fill,#fff);color:var(--dsw-alias-label-primary,#1f2329);"
-					+ "border-radius:6px;padding:3px 9px;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}"
-					+ ".omkt-calltoggle:hover{border-color:var(--dsw-alias-border-l3,#cfd1d6);background:var(--dsw-alias-card-fill-hover,#fafbfc)}"
+				`.omkt-calltoggle{appearance:none;border:1px solid transparent;background:transparent;color:${T.text2};`
+					+ "border-radius:6px;padding:3px 0;font:inherit;font-size:16px;cursor:pointer;white-space:nowrap}"
+					+ `.omkt-calltoggle:hover{border-color:${T.line};background:${T.soft}}`
 					+ ".omkt-calltoggle:focus-visible{outline:2px solid #5b7cfa;outline-offset:1px}",
 				".omkt-spaceswitch:focus{outline:none!important}"
 				+ ".omkt-spaceswitch:focus-visible{outline:2px solid rgba(69,102,233,0.62)!important;outline-offset:2px}"
@@ -4026,9 +4021,10 @@ function CallStatusBadge({ row }) {
     const reference = row.via === "用户引用";
     const success = !reference && row.status === "ok";
     const failure = !reference && (row.status === "fail" || row.status === "lost");
-    const tone = success ? T.green : failure ? T.amber : T.text3;
-    return createElement("span", { style: { display: "inline-flex", alignItems: "center", justifySelf: "start", gap: 5, whiteSpace: "nowrap", fontSize: 14, fontWeight: 500, padding: "0 7px", borderRadius: 10, color: tone, background: success ? "rgba(36,186,98,.12)" : failure ? "rgba(255,157,0,.15)" : T.soft } }, [
-        createElement("span", { key: "dot", "aria-hidden": true, style: { width: 7, height: 7, borderRadius: "50%", background: success ? T.green : failure ? T.amber : T.text4 } }), callStatus(row),
+    const dotColor = success ? T.green : failure ? T.amber : T.text4;
+    // Readable host text on the tinted badge in either theme, with color carried by the dot.
+    return createElement("span", { style: { display: "inline-flex", alignItems: "center", justifySelf: "start", gap: 5, whiteSpace: "nowrap", fontSize: 14, fontWeight: 500, padding: "0 7px", borderRadius: 10, color: T.text, background: success ? "rgba(36,186,98,.12)" : failure ? "rgba(255,157,0,.15)" : T.soft } }, [
+        createElement("span", { key: "dot", "aria-hidden": true, style: { width: 7, height: 7, borderRadius: "50%", background: dotColor } }), callStatus(row),
     ]);
 }
 
@@ -4052,7 +4048,7 @@ function CallCard({ row, open, onToggle }) {
             isSkill ? createElement("span", { key: "event-type", className: "omkt-eventtype", style: { fontSize: 14, color: T.text2 } }, reference ? `命令引用${row.count > 1 ? ` ×${row.count}` : ""}` : "工具加载") : null,
             createElement(CallStatusBadge, { key: "status", row }),
             createElement("span", { key: "duration", className: "omkt-callduration", style: { fontSize: 14, fontVariantNumeric: "tabular-nums", color: T.text2 } }, reference ? "—" : durationText(row)),
-            createElement("button", { key: "toggle", type: "button", className: "omkt-calltoggle", style: { ...styles.textBtn, padding: "3px 0", fontSize: 16 }, "aria-expanded": open, "aria-label": `${open ? "收起" : "展开"} ${name} 请求和响应`, onClick: onToggle }, open ? "⌃" : "⌄"),
+            createElement("button", { key: "toggle", type: "button", className: "omkt-calltoggle", "aria-expanded": open, "aria-label": `${open ? "收起" : "展开"} ${name} 请求和响应`, onClick: onToggle }, open ? "⌃" : "⌄"),
         ]),
         open && isSkill ? createElement(CallDetail, { key: "detail", row, onClose: onToggle }) : null,
     ]);
