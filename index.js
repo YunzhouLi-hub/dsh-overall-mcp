@@ -6,11 +6,11 @@ import { readFileSync as readReleaseFile } from "node:fs";
   const manifestUrl = new URL("./package.json", import.meta.url);
   try {
     const manifest = JSON.parse(readReleaseFile(manifestUrl, "utf8"));
-    if (manifest.version !== "1.0.7") throw new Error("package.json version does not match the host");
+    if (manifest.version !== "1.0.8") throw new Error("package.json version does not match the host");
     const digest = releaseHash("sha256").update(readReleaseFile(clientUrl)).digest("hex");
-    if (digest !== "9c071c110dd5606d372211c060d74d3bd620fab9896b70e0ad3035349f485505") throw new Error("client/client.js does not match the host");
+    if (digest !== "23c1311b165bf1ef2c9a2e77ae0d52d742eec91dd3dee9abcdb77775a53626f2") throw new Error("client/client.js does not match the host");
   } catch (cause) {
-    throw new Error("dsh-overall-mcp 1.0.7: 插件文件不完整或版本不一致，请用 DSH 重新安装完整插件包。原因：" + cause.message, { cause });
+    throw new Error("dsh-overall-mcp 1.0.8: 插件文件不完整或版本不一致，请用 DSH 重新安装完整插件包。原因：" + cause.message, { cause });
   }
 }
 

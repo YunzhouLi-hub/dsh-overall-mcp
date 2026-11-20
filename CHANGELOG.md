@@ -17,6 +17,12 @@
   打印出来的那个数（它读 `git log` 里已有的最大号再加一）。这个仓库同时被不止一个会话编辑，
   各自记得「上一批是 42」就会各自写下 42——第 40、41、42、43 批都这样撞过一次。
 
+## 1.0.8 — 2026-11-20
+
+- Skill 市场内置来自 11 个 GitHub 仓库的 153 项技能，包括 Superpowers、OpenAI、Vercel、Notion、n8n、Expo、Chrome DevTools、Supabase、Stripe、Gemini 和 Hugging Face。
+- 按技能名或仓库名即可搜索，已有本地索引无需重建。每项技能链接到上游的固定提交和目录，支持单独安装，并提供套件仓库入口。
+- 修复全来源关键词搜索漏显 SkillHub 匹配项的问题。热门榜前 20 位的来源规则仅在未输入关键词时生效。
+
 ## 1.0.7 — 2026-11-20
 
 - 修复深色主题下的页头文字、下拉框和分页控件，兼容新旧 DSH 主题变量。提高调用状态文字在明暗主题下的对比度。感谢 [zjyHeart](https://github.com/zjyHeart) 提交 [#2](https://github.com/YunzhouLi-hub/dsh-overall-mcp/pull/2)。
