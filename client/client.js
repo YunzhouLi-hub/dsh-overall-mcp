@@ -3523,13 +3523,17 @@ function MarketCard({ item, stats, busy, installing, rank, usageSort, onInstall,
 						skillSourceLink({ item, name, style: styles.smNm, key: "n" })
 							?? createElement("div", { key: "n", style: styles.smNm, title: name }, name),
 						createElement("div", { key: "s", style: styles.smSrc }, [
-							createElement("span", { key: "p", title: [skillSourceOrigin(item.source), versionText(item.version), item.category].filter(Boolean).join(" · ") }, item.author || skillSourceOrigin(item.source)),
+							createElement("span", { key: "p", title: [skillSourceOrigin(item.source), versionText(item.version), item.category].filter(Boolean).join(" · ") }, item.collection || item.author || skillSourceOrigin(item.source)),
 						]),
 					]),
                     createElement(ActionMenu, { key: "detail", label: `查看 ${name} 详情` }, [
                         createElement("strong", { key: "name", style: { overflowWrap: "anywhere", maxWidth: 280 } }, name),
                         createElement("div", { key: "about", style: { maxWidth: 280, fontSize: 14, color: T.text2, overflowWrap: "anywhere" } }, item.summary || "来源未提供描述"),
                         createElement("div", { key: "facts", style: { fontSize: 13, color: T.text3 } }, [skillSourceOrigin(item.source), versionText(item.version)].filter(Boolean).join(" · ")),
+                        item.collection ? createElement("div", { key: "collection", style: { maxWidth: 280, fontSize: 13, color: T.text3 } }, [
+                            "安装当前技能。套件用法见 ",
+                            skillSourceLink({ item: { pageUrl: item.repository }, name: item.collection, key: "repo" }),
+                        ]) : null,
                     ]),
 				]),
 				createElement("p", { key: "d", style: styles.smDesc }, item.summary || "这个来源没给描述。"),
@@ -3618,15 +3622,16 @@ function MarketCard({ item, stats, busy, installing, rank, usageSort, onInstall,
 		 */
 		function skillMarketSourceSize(row) {
 			if (!row) return { text: "?", exact: false };
-			if (row.error) return { text: "暂不可用", exact: false };
+			const featured = Number(row.featured) > 0 ? " · 内置 " + compactCount(row.featured) : "";
+			if (row.error) return { text: (featured ? "实时查询暂不可用" : "暂不可用") + featured, exact: false };
 			// The upstream total and our own row count are two facts, not one:
 			// `total` is the population (when the source publishes it), `indexed`
 			// is what the local index holds. Printing the second as the first is
 			// the exact lie the "+" exists to avoid.
 			const indexed = Number(row.indexed);
 			const held = Number.isFinite(indexed) && indexed > 0 ? " · 已收录 " + compactCount(indexed) : "";
-			if (Number.isFinite(row.total)) return { text: compactCount(row.total) + held, exact: true };
-			return { text: compactCount(Number(row.count) || 0) + "+" + held, exact: false };
+			if (Number.isFinite(row.total)) return { text: compactCount(row.total) + held + featured, exact: true };
+			return { text: compactCount(Number(row.count) || 0) + "+" + held + featured, exact: false };
 		}
 		function skillMarketTotals(data) {
 			const sources = Array.isArray(data && data.sources) ? data.sources : [];
@@ -3672,7 +3677,13 @@ function MarketCard({ item, stats, busy, installing, rank, usageSort, onInstall,
                     createElement("div", { key: "text", style: { flex: 1, minWidth: 0 } }, [
                         skillSourceLink({ item, name, style: titleStyle }) ?? createElement("div", { key: "name", style: titleStyle, title: name }, name),
                         createElement("div", { key: "summary", style: styles.smHDesc, title: item.summary }, item.summary || "来源未提供描述"),
-                        createElement("span", { key: "source", title: [skillSourceOrigin(item.source), item.version && `v${item.version}`].filter(Boolean).join(" · "), style: { fontSize: 14, color: T.text3, display: "flex", alignItems: "center", gap: 6 } }, [createElement(UiIcon, { key: "source-icon", name: "layers", size: 15 }), skillSourceLabel(item.source)]),
+                        createElement("span", { key: "source", title: [skillSourceOrigin(item.source), item.version && `v${item.version}`].filter(Boolean).join(" · "), style: { fontSize: 14, color: T.text3, display: "flex", alignItems: "center", gap: 6 } }, [
+                            createElement(UiIcon, { key: "source-icon", name: "layers", size: 15 }),
+                            item.collection
+                                ? skillSourceLink({ item: { pageUrl: item.repository }, name: item.collection, key: "repo",
+                                    style: { minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } })
+                                : skillSourceLabel(item.source),
+                        ]),
                     ]),
                     installed ? createElement("span", { key: "installed", style: styles.smBadge }, "已安装")
                         : item.installable === false ? createElement("span", { key: "index", style: styles.smN, title: item.installNote }, "只提供索引")
@@ -5468,7 +5479,7 @@ function Section({ close }) {
 
             async function enrichSkillMetrics(items, refresh, listingId) {
                 const id = ++skillMetricRequest.current;
-                const ids = items.filter(item => ['clawhub', 'skillhub', 'github'].includes(item.source)).map(item => item.id);
+                const ids = items.filter(item => !item.collection && ['clawhub', 'skillhub', 'github'].includes(item.source)).map(item => item.id);
                 if (!ids.length) { setSkillMetricNote(""); return; }
                 setSkillMetricNote("正在更新本页下载量和 Star…");
                 try {

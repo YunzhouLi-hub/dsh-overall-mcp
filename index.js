@@ -8,7 +8,7 @@ import { readFileSync as readReleaseFile } from "node:fs";
     const manifest = JSON.parse(readReleaseFile(manifestUrl, "utf8"));
     if (manifest.version !== "1.0.7") throw new Error("package.json version does not match the host");
     const digest = releaseHash("sha256").update(readReleaseFile(clientUrl)).digest("hex");
-    if (digest !== "0d4da17fa0e6685a6cfe1471955224472f542e3dc089fe8746b6d11c16f41022") throw new Error("client/client.js does not match the host");
+    if (digest !== "9c071c110dd5606d372211c060d74d3bd620fab9896b70e0ad3035349f485505") throw new Error("client/client.js does not match the host");
   } catch (cause) {
     throw new Error("dsh-overall-mcp 1.0.7: 插件文件不完整或版本不一致，请用 DSH 重新安装完整插件包。原因：" + cause.message, { cause });
   }
@@ -5267,17 +5267,23 @@ function parseFrontmatter(text) {
       continue;
     }
     if (rest === "") {
-      const nested = {};
-      let sawNested = false;
+      const indented = [];
       while (index < body.length && /^\s+\S/.test(body[index])) {
-        const inner = /^\s+([A-Za-z][\w-]*):\s*(.*)$/.exec(body[index]);
-        if (inner) {
-          nested[inner[1]] = unquote(inner[2].trim());
-          sawNested = true;
-        }
+        indented.push(body[index].trim());
         index += 1;
       }
-      if (sawNested) out[key] = nested;
+      if (indented.length === 0) continue;
+      const mapping = /^([A-Za-z][\w-]*):(?:\s+(.*)|$)/;
+      if (mapping.test(indented[0])) {
+        const nested = {};
+        for (const entry of indented) {
+          const inner = mapping.exec(entry);
+          if (inner) nested[inner[1]] = unquote(inner[2] ?? "");
+        }
+        out[key] = nested;
+      } else {
+        out[key] = unquote(indented.join(" "));
+      }
       continue;
     }
     let value = unquote(rest);
@@ -5552,6 +5558,346 @@ async function marketSkillTarget(root, folder, marketId, fs6) {
   return alternate;
 }
 
+// lib/featured-skills.json
+var featured_skills_default = [
+  {
+    repo: "obra/superpowers",
+    root: "skills",
+    ref: "22f0b463e7a5e579904dd6211a520321035526f7",
+    skills: [
+      {
+        name: "brainstorming",
+        title: "brainstorming",
+        description: "You MUST use this before any creative work - creating features, building components, adding functionality, modifying behavior, or planning anything new, in software or out of it (a talk, a business, a renovation)."
+      },
+      {
+        name: "diagnosing-superpowers",
+        title: "diagnosing-superpowers",
+        description: `Use when a superpowers session went wrong and your human partner wants to know why \u2014 repeated work, ignored plans, stumbles, poor results, a skill that didn't fire, "it took too long", "why is it so expensive", "what is it doing" \u2014 or wants to build a bug report for the superpowers maintainers, for the current session or a past one identified by id or path, on any harness.`
+      },
+      {
+        name: "dispatching-parallel-agents",
+        title: "dispatching-parallel-agents",
+        description: "Use when facing 2+ independent tasks that can be worked on without shared state or sequential dependencies"
+      },
+      {
+        name: "executing-plans",
+        title: "executing-plans",
+        description: "Use when executing an implementation plan in the current session as the implementer yourself \u2014 your human partner chose inline execution, or no subagent tool is available"
+      },
+      {
+        name: "finishing-a-development-branch",
+        title: "finishing-a-development-branch",
+        description: "Use when implementation is complete, all tests pass, and you need to decide how to integrate the work"
+      },
+      {
+        name: "receiving-code-review",
+        title: "receiving-code-review",
+        description: "Use when receiving code review feedback, before implementing suggestions, especially if feedback seems unclear or technically questionable - requires technical rigor and verification, not performative agreement or blind implementation"
+      },
+      {
+        name: "requesting-code-review",
+        title: "requesting-code-review",
+        description: "Use when completing tasks, implementing major features, or before merging to verify work meets requirements"
+      },
+      {
+        name: "subagent-driven-development",
+        title: "subagent-driven-development",
+        description: "Use when executing implementation plans with independent tasks in the current session"
+      },
+      {
+        name: "systematic-debugging",
+        title: "systematic-debugging",
+        description: "Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes"
+      },
+      {
+        name: "test-driven-development",
+        title: "test-driven-development",
+        description: "Use when implementing any feature or bugfix, before writing implementation code"
+      },
+      {
+        name: "using-git-worktrees",
+        title: "using-git-worktrees",
+        description: "Use when starting feature work that needs isolation from current workspace or before executing implementation plans - ensures an isolated workspace exists via native tools or git worktree fallback"
+      },
+      {
+        name: "using-superpowers",
+        title: "using-superpowers",
+        description: "Use when starting any conversation - establishes how to find and use skills, requiring skill invocation before ANY response including clarifying questions"
+      },
+      {
+        name: "verification-before-completion",
+        title: "verification-before-completion",
+        description: "Use when about to claim work is complete, fixed, or passing, before committing or creating PRs - requires running verification commands and confirming output before making any success claims; evidence before assertions always"
+      },
+      {
+        name: "writing-plans",
+        title: "writing-plans",
+        description: "Use when you have a spec or requirements for a multi-step task, before touching code"
+      },
+      {
+        name: "writing-skills",
+        title: "writing-skills",
+        description: "Use when creating new skills, editing existing skills, or verifying skills work before deployment"
+      }
+    ]
+  },
+  {
+    repo: "openai/skills",
+    root: "skills/.curated",
+    ref: "49f948faa9258a0c61caceaf225e179651397431",
+    skills: [
+      {
+        name: "aspnet-core",
+        title: "aspnet-core",
+        description: "Build, review, refactor, or architect ASP.NET Core web applications using current official guidance for .NET web development. Use when working on Blazor Web Apps, Razor Pages, MVC, Minimal APIs, controller-based Web APIs, SignalR, gRPC, middleware, dependency injection, configuration, authentication, authorization, testing, performance, deployment, or ASP.NET Core upgrades."
+      },
+      {
+        name: "chatgpt-apps",
+        title: "chatgpt-apps",
+        description: "Build, scaffold, refactor, and troubleshoot ChatGPT Apps SDK applications that combine an MCP server and widget UI. Use when Codex needs to design tools, register UI resources, wire the MCP Apps bridge or ChatGPT compatibility APIs, apply Apps SDK metadata or CSP or domain settings, or produce a docs-aligned project scaffold. Prefer a docs-first workflow by invoking the openai-docs skill or OpenAI developer docs MCP tools before generating code."
+      },
+      {
+        name: "cli-creator",
+        title: "cli-creator",
+        description: "Build a composable CLI for Codex from API docs, an OpenAPI spec, existing curl examples, an SDK, a web app, an admin tool, or a local script. Use when the user wants Codex to create a command-line tool that can run from any repo, expose composable read/write commands, return stable JSON, manage auth, and pair with a companion skill."
+      },
+      {
+        name: "cloudflare-deploy",
+        title: "cloudflare-deploy",
+        description: "Deploy applications and infrastructure to Cloudflare using Workers, Pages, and related platform services. Use when the user asks to deploy, host, publish, or set up a project on Cloudflare."
+      },
+      {
+        name: "define-goal",
+        title: "define-goal",
+        description: "Help the user define a concrete, measurable goal before starting work, especially when they ask to use the goal tool, create a goal, set an objective, clarify success criteria, or turn a fuzzy intention into a quantitative outcome. Use this skill for goal creation and goal refinement only; it does not manage durable snapshots, decision logs, or long-running execution artifacts."
+      },
+      {
+        name: "figma",
+        title: "figma",
+        description: "Use the Figma MCP server to fetch design context, screenshots, variables, and assets from Figma, and to translate Figma nodes into production code. Trigger when a task involves Figma URLs, node IDs, design-to-code implementation, or Figma MCP setup and troubleshooting."
+      },
+      {
+        name: "figma-code-connect-components",
+        title: "figma-code-connect-components",
+        description: 'Connects Figma design components to code components using Code Connect mapping tools. Use when user says "code connect", "connect this component to code", "map this component", "link component to code", "create code connect mapping", or wants to establish mappings between Figma designs and code implementations. For canvas writes via `use_figma`, use `figma-use`.'
+      },
+      {
+        name: "figma-create-design-system-rules",
+        title: "figma-create-design-system-rules",
+        description: `Generates custom design system rules for the user's codebase. Use when user says "create design system rules", "generate rules for my project", "set up design rules", "customize design system guidelines", or wants to establish project-specific conventions for Figma-to-code workflows. Requires Figma MCP server connection.`
+      },
+      {
+        name: "figma-create-new-file",
+        title: "figma-create-new-file",
+        description: "Create a new blank Figma file. Use when the user wants to create a new Figma design or FigJam file, or when you need a new file before calling use_figma. Handles plan resolution via whoami if needed. Usage \u2014 /figma-create-new-file [editorType] [fileName] (e.g. /figma-create-new-file figjam My Whiteboard)"
+      },
+      {
+        name: "figma-generate-design",
+        title: "figma-generate-design",
+        description: "Use this skill alongside figma-use when the task involves translating an application page, view, or multi-section layout into Figma. Triggers: 'write to Figma', 'create in Figma from code', 'push page to Figma', 'take this app/page and build it in Figma', 'create a screen', 'build a landing page in Figma', 'update the Figma screen to match code'. This is the preferred workflow skill whenever the user wants to build or update a full page, screen, or view in Figma from code or a description. Discovers design system components, variables, and styles via search_design_system, imports them, and assembles screens incrementally section-by-section using design system tokens instead of hardcoded values."
+      },
+      {
+        name: "figma-generate-library",
+        title: "figma-generate-library",
+        description: "Build or update a professional-grade design system in Figma from a codebase. Use when the user wants to create variables/tokens, build component libraries, set up theming (light/dark modes), document foundations, or reconcile gaps between code and Figma. This skill teaches WHAT to build and in WHAT ORDER \u2014 it complements the `figma-use` skill which teaches HOW to call the Plugin API. Both skills should be loaded together."
+      },
+      {
+        name: "figma-implement-design",
+        title: "figma-implement-design",
+        description: 'Translates Figma designs into production-ready application code with 1:1 visual fidelity. Use when implementing UI code from Figma files, when user mentions "implement design", "generate code", "implement component", provides Figma URLs, or asks to build components matching Figma specs. For Figma canvas writes via `use_figma`, use `figma-use`.'
+      },
+      {
+        name: "figma-use",
+        title: "figma-use",
+        description: "**MANDATORY prerequisite** \u2014 you MUST invoke this skill BEFORE every `use_figma` tool call. NEVER call `use_figma` directly without loading this skill first. Skipping it causes common, hard-to-debug failures. Trigger whenever the user wants to perform a write action or a unique read action that requires JavaScript execution in the Figma file context \u2014 e.g. create/edit/delete nodes, set up variables or tokens, build components and variants, modify auto-layout or fills, bind variables to properties, or inspect file structure programmatically."
+      },
+      {
+        name: "gh-address-comments",
+        title: "gh-address-comments",
+        description: "Help address review/issue comments on the open GitHub PR for the current branch using gh CLI; verify gh auth first and prompt the user to authenticate if not logged in."
+      },
+      {
+        name: "gh-fix-ci",
+        title: "gh-fix-ci",
+        description: "Use when a user asks to debug or fix failing GitHub PR checks that run in GitHub Actions; use `gh` to inspect checks and logs, summarize failure context, draft a fix plan, and implement only after explicit approval. Treat external providers (for example Buildkite) as out of scope and report only the details URL."
+      },
+      {
+        name: "hatch-pet",
+        title: "hatch-pet",
+        description: "Create, repair, validate, visually QA, and package Codex-compatible animated pets and pet spritesheets from character art, generated images, company or prospect brand cues, or visual references. Use when a user wants a lightweight-worker Codex pet workflow, a non-pixel custom pet style, a prospect or company mascot pet, or a full 8x9 animated pet atlas with transparent unused cells, QA contact sheets, and pet.json packaging. This skill composes the installed $imagegen system skill for visual generation and uses bundled scripts for deterministic spritesheet assembly."
+      },
+      {
+        name: "jupyter-notebook",
+        title: "jupyter-notebook",
+        description: "Use when the user asks to create, scaffold, or edit Jupyter notebooks (`.ipynb`) for experiments, explorations, or tutorials; prefer the bundled templates and run the helper script `new_notebook.py` to generate a clean starting notebook."
+      },
+      {
+        name: "linear",
+        title: "linear",
+        description: "Manage issues, projects & team workflows in Linear. Use when the user wants to read, create or updates tickets in Linear."
+      },
+      {
+        name: "migrate-to-codex",
+        title: "migrate-to-codex",
+        description: "Migrate supported instruction files, skills, agents, and MCP config into Codex project and global files."
+      },
+      {
+        name: "netlify-deploy",
+        title: "netlify-deploy",
+        description: "Deploy web projects to Netlify using the Netlify CLI (`npx netlify`). Use when the user asks to deploy, host, publish, or link a site/repo on Netlify, including preview and production deploys."
+      },
+      {
+        name: "notion-knowledge-capture",
+        title: "notion-knowledge-capture",
+        description: "Capture conversations and decisions into structured Notion pages; use when turning chats/notes into wiki entries, how-tos, decisions, or FAQs with proper linking."
+      },
+      {
+        name: "notion-meeting-intelligence",
+        title: "notion-meeting-intelligence",
+        description: "Prepare meeting materials with Notion context and Codex research; use when gathering context, drafting agendas/pre-reads, and tailoring materials to attendees."
+      },
+      {
+        name: "notion-research-documentation",
+        title: "notion-research-documentation",
+        description: "Research across Notion and synthesize into structured documentation; use when gathering info from multiple Notion sources to produce briefs, comparisons, or reports with citations."
+      },
+      {
+        name: "notion-spec-to-implementation",
+        title: "notion-spec-to-implementation",
+        description: "Turn Notion specs into implementation plans, tasks, and progress tracking; use when implementing PRDs/feature specs and creating Notion plans + tasks from them."
+      },
+      {
+        name: "openai-docs",
+        title: "openai-docs",
+        description: "Use when the user asks how to build with OpenAI products or APIs, asks about Codex itself or choosing Codex surfaces, needs up-to-date official documentation with citations, help choosing the latest model for a use case, or model upgrade and prompt-upgrade guidance; use OpenAI docs MCP tools for non-Codex docs questions, use the Codex manual helper first for broad Codex self-knowledge, and restrict fallback browsing to official OpenAI domains."
+      },
+      {
+        name: "pdf",
+        title: "pdf",
+        description: "Use when tasks involve reading, creating, or reviewing PDF files where rendering and layout matter; prefer visual checks by rendering pages (Poppler) and use Python tools such as `reportlab`, `pdfplumber`, and `pypdf` for generation and extraction."
+      },
+      {
+        name: "playwright",
+        title: "playwright",
+        description: "Use when the task requires automating a real browser from the terminal (navigation, form filling, snapshots, screenshots, data extraction, UI-flow debugging) via `playwright-cli` or the bundled wrapper script."
+      },
+      {
+        name: "playwright-interactive",
+        title: "playwright-interactive",
+        description: "Persistent browser and Electron interaction through `js_repl` for fast iterative UI debugging."
+      },
+      {
+        name: "render-deploy",
+        title: "render-deploy",
+        description: "Deploy applications to Render by analyzing codebases, generating render.yaml Blueprints, and providing Dashboard deeplinks. Use when the user wants to deploy, host, publish, or set up their application on Render's cloud platform."
+      },
+      {
+        name: "screenshot",
+        title: "screenshot",
+        description: "Use when the user explicitly asks for a desktop or system screenshot (full screen, specific app or window, or a pixel region), or when tool-specific capture capabilities are unavailable and an OS-level capture is needed."
+      },
+      {
+        name: "security-best-practices",
+        title: "security-best-practices",
+        description: "Perform language and framework specific security best-practice reviews and suggest improvements. Trigger only when the user explicitly requests security best practices guidance, a security review/report, or secure-by-default coding help. Trigger only for supported languages (python, javascript/typescript, go). Do not trigger for general code review, debugging, or non-security tasks."
+      },
+      {
+        name: "security-ownership-map",
+        title: "security-ownership-map",
+        description: "Analyze git repositories to build a security ownership topology (people-to-file), compute bus factor and sensitive-code ownership, and export CSV/JSON for graph databases and visualization. Trigger only when the user explicitly wants a security-oriented ownership or bus-factor analysis grounded in git history (for example: orphaned sensitive code, security maintainers, CODEOWNERS reality checks for risk, sensitive hotspots, or ownership clusters). Do not trigger for general maintainer lists or non-security ownership questions."
+      },
+      {
+        name: "security-threat-model",
+        title: "security-threat-model",
+        description: "Repository-grounded threat modeling that enumerates trust boundaries, assets, attacker capabilities, abuse paths, and mitigations, and writes a concise Markdown threat model. Trigger only when the user explicitly asks to threat model a codebase or path, enumerate threats/abuse paths, or perform AppSec threat modeling. Do not trigger for general architecture summaries, code review, or non-security design work."
+      },
+      {
+        name: "sentry",
+        title: "sentry",
+        description: "Use when the user asks to inspect Sentry issues or events, summarize recent production errors, or pull basic Sentry health data via the Sentry CLI; perform read-only queries using the `sentry` command."
+      },
+      {
+        name: "speech",
+        title: "speech",
+        description: "Use when the user asks for text-to-speech narration or voiceover, accessibility reads, audio prompts, or batch speech generation via the OpenAI Audio API; run the bundled CLI (`scripts/text_to_speech.py`) with built-in voices and require `OPENAI_API_KEY` for live calls. Custom voice creation is out of scope."
+      },
+      {
+        name: "transcribe",
+        title: "transcribe",
+        description: "Transcribe audio files to text with optional diarization and known-speaker hints. Use when a user asks to transcribe speech from audio/video, extract text from recordings, or label speakers in interviews or meetings."
+      },
+      {
+        name: "vercel-deploy",
+        title: "vercel-deploy",
+        description: 'Deploy applications and websites to Vercel. Use when the user requests deployment actions like "deploy my app", "deploy and give me the link", "push this live", or "create a preview deployment".'
+      },
+      {
+        name: "winui-app",
+        title: "winui-app",
+        description: "Bootstrap, develop, and design modern WinUI 3 desktop applications with C# and the Windows App SDK using official Microsoft guidance, WinUI Gallery patterns, Windows App SDK samples, and CommunityToolkit components. Use when creating a brand new app, preparing a machine for WinUI, reviewing, refactoring, planning, troubleshooting, environment-checking, or setting up WinUI 3 XAML, controls, navigation, windowing, theming, accessibility, responsiveness, performance, deployment, or related Windows app design and development work."
+      },
+      {
+        name: "yeet",
+        title: "yeet",
+        description: "Use only when the user explicitly asks to stage, commit, push, and open a GitHub pull request in one flow using the GitHub CLI (`gh`)."
+      }
+    ]
+  },
+  {
+    repo: "vercel-labs/agent-skills",
+    root: "skills",
+    ref: "1a2c79d4e6c4a2283dc2c614b6538cbe1ed5ca62",
+    skills: [
+      {
+        name: "composition-patterns",
+        title: "vercel-composition-patterns",
+        description: "React composition patterns that scale. Use when refactoring components with boolean prop proliferation, building flexible component libraries, or designing reusable APIs. Triggers on tasks involving compound components, render props, context providers, or component architecture. Includes React 19 API changes."
+      },
+      {
+        name: "deploy-to-vercel",
+        title: "deploy-to-vercel",
+        description: 'Deploy applications and websites to Vercel. Use when the user requests deployment actions like "deploy my app", "deploy and give me the link", "push this live", or "create a preview deployment".'
+      },
+      {
+        name: "react-best-practices",
+        title: "vercel-react-best-practices",
+        description: "React and Next.js performance optimization guidelines from Vercel Engineering. This skill should be used when writing, reviewing, or refactoring React/Next.js code to ensure optimal performance patterns. Triggers on tasks involving React components, Next.js pages, data fetching, bundle optimization, or performance improvements."
+      },
+      {
+        name: "react-native-skills",
+        title: "vercel-react-native-skills",
+        description: "React Native and Expo best practices for building performant mobile apps. Use when building React Native components, optimizing list performance, implementing animations, or working with native modules. Triggers on tasks involving React Native, Expo, mobile performance, or native platform APIs."
+      },
+      {
+        name: "react-view-transitions",
+        title: "vercel-react-view-transitions",
+        description: "Guide for implementing smooth, native-feeling animations using React's View Transition API (`<ViewTransition>` component, `addTransitionType`, and CSS view transition pseudo-elements). Use this skill whenever the user wants to add page transitions, animate route changes, create shared element animations, animate enter/exit of components, animate list reorder, implement directional (forward/back) navigation animations, or integrate view transitions in Next.js. Also use when the user mentions view transitions, `startViewTransition`, `ViewTransition`, transition types, or asks about animating between UI states in React without third-party animation libraries."
+      },
+      {
+        name: "vercel-cli-with-tokens",
+        title: "vercel-cli-with-tokens",
+        description: 'Deploy and manage projects on Vercel using token-based authentication. Use when working with Vercel CLI using access tokens rather than interactive login \u2014 e.g. "deploy to vercel", "set up vercel", "add environment variables to vercel".'
+      },
+      {
+        name: "vercel-optimize",
+        title: "vercel-optimize",
+        description: "Use for Vercel cost and performance optimization on deployed projects, especially Next.js, SvelteKit, Nuxt, and limited Astro apps. Collect Vercel metrics, usage, project config, and code scan results first; investigate only metric-backed candidates; produce ranked recommendations grounded in verified files and version-aware Vercel/framework docs. Trigger for Vercel bill reduction, slow or expensive routes, caching opportunities, Function Invocations, Build Minutes, Fast Data Transfer, Core Web Vitals, Bot Management, Fluid compute, or cost breakdown requests."
+      },
+      {
+        name: "web-design-guidelines",
+        title: "web-design-guidelines",
+        description: 'Review UI code for Web Interface Guidelines compliance. Use when asked to "review my UI", "check accessibility", "audit design", "review UX", or "check my site against best practices".'
+      },
+      {
+        name: "writing-guidelines",
+        title: "writing-guidelines",
+        description: 'Review docs/prose for Writing Guidelines compliance. Use when asked to "review my docs", "check writing style", "audit prose", "review docs voice and tone", or "check this page against the writing handbook".'
+      }
+    ]
+  }
+];
+
 // lib/skill-market.js
 var SKILL_LIVE_REPO_SOURCES = ["official"];
 var SKILL_MARKET_SOURCES = ["clawhub", ...SKILL_LIVE_REPO_SOURCES, "skillhub", "github"];
@@ -5611,6 +5957,39 @@ function clip2(text, limit) {
   if (typeof text !== "string") return "";
   const flat = text.replace(/\s+/g, " ").trim();
   return flat.length > limit ? `${flat.slice(0, limit - 1)}\u2026` : flat;
+}
+var featuredRepos = new Set(featured_skills_default.map(({ repo }) => repo));
+var featuredSkills = new Map(featured_skills_default.flatMap(({ repo, root, ref, skills }) => skills.map(({ name: name2, title, description }) => {
+  const dir = `${root}/${name2}`;
+  const id = `github:${repo}:${dir}`;
+  const repository = `https://github.com/${repo}`;
+  return [id, {
+    id,
+    source: "github",
+    name: name2,
+    title,
+    summary: clip2(description, 240),
+    collection: repo,
+    repository,
+    icon: githubOwnerIcon(repo.split("/")[0]),
+    pageUrl: `${repository}/tree/${ref}/${dir}`,
+    installable: true,
+    install: { kind: "github-dir", repo, dir, ref }
+  }];
+})));
+var FEATURED_GITHUB_SKILL_COUNT = featuredSkills.size;
+var featuredGithubSkill = (id) => featuredSkills.get(id);
+function withFeaturedGithubSkills(rows, query = "") {
+  const discovered = rows.filter((row) => {
+    if (row.source !== "github") return true;
+    const repository = row.install?.repo;
+    if (typeof repository !== "string") return true;
+    const repo = repository.toLowerCase();
+    if (!featuredRepos.has(repo)) return true;
+    const dir = row.install.dir;
+    return dir !== "" && !featuredSkills.has(`github:${repo}:${dir}`);
+  });
+  return discovered.concat(filterByQuery([...featuredSkills.values()], query));
 }
 async function fetchWithTimeout(url, { headers = {}, timeout = REQUEST_TIMEOUT_MS, fetchImpl = fetch } = {}) {
   const response = await fetchImpl(url, {
@@ -5971,7 +6350,7 @@ function createSkillMarket({ token, metricsAuthKey = () => token ?? "", isGithub
       signal: init.signal ? AbortSignal.any([deadline, init.signal]) : deadline
     });
     const results = {};
-    const tasks = items.slice(0, 200).filter((item) => ["clawhub", "skillhub", "github"].includes(item.source));
+    const tasks = items.slice(0, 200).filter((item) => !item.collection && ["clawhub", "skillhub", "github"].includes(item.source));
     let cursor = 0;
     await Promise.all(Array.from({ length: Math.min(4, tasks.length) }, async () => {
       while (cursor < tasks.length) {
@@ -6079,7 +6458,12 @@ function createSkillMarket({ token, metricsAuthKey = () => token ?? "", isGithub
         sources.push({ id, label: SKILL_MARKET_LABELS[id], count: 0, error: clip2(error.message, 240) });
       }
     }
-    return { sources, items };
+    if (!wanted.includes("github")) return { sources, items };
+    const combined = withFeaturedGithubSkills(items, query);
+    const github = sources.find((row) => row.id === "github");
+    github.count = combined.filter((row) => row.source === "github").length;
+    github.featured = FEATURED_GITHUB_SKILL_COUNT;
+    return { sources, items: combined };
   }
   async function install({ item, targetDir }) {
     if (!item || !item.installable) throw new Error("\u8FD9\u4E2A\u6761\u76EE\u4E0D\u80FD\u76F4\u63A5\u5B89\u88C5");
@@ -8582,7 +8966,8 @@ async function apply(ctx) {
     const wanted = source && source !== "all" ? [source] : [...SKILL_MARKET_SOURCES];
     const live = await Promise.all(SKILL_LIVE_REPO_SOURCES.filter((id) => wanted.includes(id)).map((id) => marketFor().list({ source: id, limit: 60, refresh })));
     const liveSources = new Map(live.flatMap((result) => result.sources.map((row) => [row.id, row])));
-    const rows = index.rows.concat(live.flatMap((result) => result.items));
+    const heldRows = index.rows.concat(live.flatMap((result) => result.items));
+    const rows = wanted.includes("github") ? withFeaturedGithubSkills(heldRows) : heldRows;
     const { items, ...page } = querySkillRows(marketFor().applyMetrics(rows), options);
     const sources = SKILL_MARKET_SOURCES.filter((id) => wanted.includes(id)).map((id) => {
       const label = SKILL_MARKET_LABELS[id];
@@ -8603,7 +8988,7 @@ async function apply(ctx) {
         done: held.done === true,
         // The GitHub population is "repositories at or above this star floor",
         // so the chip can say what the total counts instead of implying all.
-        ...id === "github" ? { minStars: summary.minStars } : {},
+        ...id === "github" ? { minStars: summary.minStars, featured: FEATURED_GITHUB_SKILL_COUNT } : {},
         error: null
       };
     });
@@ -8614,7 +8999,7 @@ async function apply(ctx) {
     };
   }
   async function installMarketSkill(id, { root = "plugin" } = {}) {
-    let item = marketIndex.get(id);
+    let item = featuredGithubSkill(id) ?? marketIndex.get(id);
     if (!item) {
       const index = await skillIndexPayload();
       item = index?.rows?.find((row) => row.id === id);
