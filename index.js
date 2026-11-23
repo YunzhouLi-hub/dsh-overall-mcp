@@ -8,7 +8,7 @@ import { readFileSync as readReleaseFile } from "node:fs";
     const manifest = JSON.parse(readReleaseFile(manifestUrl, "utf8"));
     if (manifest.version !== "1.0.8") throw new Error("package.json version does not match the host");
     const digest = releaseHash("sha256").update(readReleaseFile(clientUrl)).digest("hex");
-    if (digest !== "23c1311b165bf1ef2c9a2e77ae0d52d742eec91dd3dee9abcdb77775a53626f2") throw new Error("client/client.js does not match the host");
+    if (digest !== "24e9913ead69c61b151b4b5f3ab149e386110a480cca4d649c5ceab1b836f4e2") throw new Error("client/client.js does not match the host");
   } catch (cause) {
     throw new Error("dsh-overall-mcp 1.0.8: 插件文件不完整或版本不一致，请用 DSH 重新安装完整插件包。原因：" + cause.message, { cause });
   }
@@ -571,6 +571,10 @@ function parsePackageInvocation(entry) {
   if (!split || !/^(?:@[A-Za-z0-9_.-]+\/)?[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(split.pkg)) return null;
   return { manager, ...split, argsIndex: offset + selected.at, ...selected.prefix ? { specPrefix: selected.prefix } : {} };
 }
+function publishedVersion(value) {
+  const version = typeof value === "string" ? value.trim().replace(/^v/i, "") : "";
+  return /^\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/u.test(version) ? version.split("+", 1)[0] : null;
+}
 function compareVersions(a, b) {
   const parse = (value) => String(value ?? "").split("-")[0].split(".").map((n) => Number.parseInt(n, 10) || 0);
   const pre = (value) => String(value ?? "").includes("-") ? String(value).split("-").slice(1).join("-") : "";
@@ -584,7 +588,19 @@ function compareVersions(a, b) {
   if (pa === pb) return 0;
   if (pa === "") return 1;
   if (pb === "") return -1;
-  return pa > pb ? 1 : -1;
+  const left = pa.split(".");
+  const right = pb.split(".");
+  for (let i = 0; i < Math.min(left.length, right.length); i++) {
+    const aNumeric = /^\d+$/.test(left[i]);
+    const bNumeric = /^\d+$/.test(right[i]);
+    if (left[i] === right[i]) continue;
+    if (aNumeric && bNumeric) {
+      const diff = Number(left[i]) - Number(right[i]);
+      if (diff) return Math.sign(diff);
+    } else if (aNumeric !== bNumeric) return aNumeric ? -1 : 1;
+    else return left[i] > right[i] ? 1 : -1;
+  }
+  return Math.sign(left.length - right.length);
 }
 function pinArgs(entry, version) {
   const args = Array.isArray(entry.args) ? entry.args.map(String) : [];
@@ -4768,12 +4784,18 @@ import { existsSync } from "node:fs";
 import path3 from "node:path";
 import { fileURLToPath } from "node:url";
 var PACKAGE_NAME = "dsh-overall-mcp";
+var PUBLIC_REPOSITORY = "YunzhouLi-hub/dsh-overall-mcp";
 var DEFAULT_CACHE_MS = 10 * 60 * 1e3;
 async function readSelfPackage(moduleUrl) {
   const dir = path3.dirname(fileURLToPath(moduleUrl));
   const raw = await readFile2(path3.join(dir, "package.json"), "utf8");
   const pkg = JSON.parse(raw);
-  return { name: typeof pkg.name === "string" && pkg.name ? pkg.name : PACKAGE_NAME, version: String(pkg.version ?? "") };
+  const repository = typeof pkg.repository === "string" ? pkg.repository : pkg.repository?.url;
+  return {
+    name: typeof pkg.name === "string" && pkg.name ? pkg.name : PACKAGE_NAME,
+    version: String(pkg.version ?? ""),
+    ...typeof repository === "string" ? { repository } : {}
+  };
 }
 function resolveInstall(modulePath) {
   const packageDir = path3.dirname(modulePath);
@@ -4808,7 +4830,25 @@ async function readInstalledSpec(profileDir, name2 = PACKAGE_NAME) {
 function isGitSpec(spec) {
   if (typeof spec !== "string") return false;
   const value = spec.trim();
-  return /^github:/i.test(value) || /^git\+/i.test(value) || /^git:/i.test(value) || /^https?:\/\/\S+\.git(#.*)?$/i.test(value);
+  return /^github:/i.test(value) || /^git\+/i.test(value) || /^git:/i.test(value) || /^(?:ssh:\/\/git@|git@)[^/:]+[:/]/i.test(value) || /^https?:\/\/\S+\.git(#.*)?$/i.test(value);
+}
+function isPublicGitInstall(spec) {
+  return /^(?:github:|(?:git\+)?(?:https?|git):\/\/github\.com\/|(?:git\+)?ssh:\/\/git@github\.com\/|git@github\.com:)yunzhouli-hub\/dsh-overall-mcp(?:\.git)?(?:#[\w./-]+)?$/i.test(spec.trim());
+}
+function isPublicReleaseArchive(spec, self) {
+  if (self.name !== PACKAGE_NAME || !isPublicGitInstall(self.repository ?? "")) return false;
+  return /^file:.+\.tgz$/i.test(spec) || /^https:\/\/github\.com\/yunzhouli-hub\/dsh-overall-mcp\/releases\/download\/[^/\s?#]+\/[^/\s?#]+\.tgz$/i.test(spec);
+}
+async function latestGitHubRelease(fetchImpl) {
+  const res = await fetchImpl(`https://api.github.com/repos/${PUBLIC_REPOSITORY}/releases/latest`, {
+    headers: { accept: "application/vnd.github+json", "user-agent": PACKAGE_NAME },
+    signal: AbortSignal.timeout(8e3)
+  });
+  if (!res.ok) throw new Error(`GitHub HTTP ${res.status}`);
+  const body = await res.json();
+  const latest = publishedVersion(body?.tag_name);
+  if (!latest || body.draft === true || body.prerelease === true) throw new Error("GitHub \u672A\u8FD4\u56DE\u6709\u6548\u7684\u6B63\u5F0F\u7248\u672C");
+  return { latest, tag: body.tag_name };
 }
 async function checkSelfUpdate({
   moduleUrl,
@@ -4848,7 +4888,18 @@ async function checkSelfUpdate({
       hint: "\u6240\u5C5E profile \u672A\u58F0\u660E\u672C\u63D2\u4EF6\u4F9D\u8D56\uFF0C\u65E0\u6CD5\u5B89\u5168\u786E\u5B9A\u66F4\u65B0\u76EE\u6807"
     };
   }
-  if (/^(link|file|workspace|portal):/.test(spec)) {
+  const archive = isPublicReleaseArchive(spec, self);
+  if (!archive && /^(?:file:|https?:\/\/).+\.tgz$/i.test(spec)) {
+    return {
+      ...base,
+      checked: false,
+      latest: null,
+      updateAvailable: false,
+      reason: "archive-source-unverified",
+      hint: "\u5B89\u88C5\u5305\u672A\u58F0\u660E\u53EF\u6838\u5BF9\u7684\u5B98\u65B9\u53D1\u5E03\u6765\u6E90"
+    };
+  }
+  if (!archive && /^(link|file|workspace|portal):/.test(spec)) {
     return {
       ...base,
       spec,
@@ -4859,7 +4910,8 @@ async function checkSelfUpdate({
       hint: `profile \u91CC\u58F0\u660E\u4E3A ${spec}\uFF0C\u672C\u5730\u76EE\u5F55\u5C31\u662F\u7248\u672C\u6765\u6E90`
     };
   }
-  if (spec && isGitSpec(spec)) {
+  const git = isPublicGitInstall(spec);
+  if (!git && isGitSpec(spec)) {
     return {
       ...base,
       spec,
@@ -4867,16 +4919,19 @@ async function checkSelfUpdate({
       latest: null,
       updateAvailable: false,
       reason: "git",
-      hint: `\u8BF7\u5B8C\u5168\u9000\u51FA DSH\uFF0C\u518D\u7528 dsh plugin --profile ${install.profileName} add ${spec.split("#", 1)[0]}#<\u65B0\u63D0\u4EA4\u6216\u6807\u7B7E> \u5B89\u88C5\u5B8C\u6574\u66F4\u65B0\u5305\uFF0C\u7136\u540E\u91CD\u5F00 DSH\u3002`
+      hint: "\u6B64 Git \u6765\u6E90\u6CA1\u6709\u914D\u7F6E\u53EF\u6838\u5BF9\u7684\u6B63\u5F0F\u53D1\u5E03\u6E20\u9053"
     };
   }
-  const key = `${self.name}@${self.version}`;
+  const key = `${self.name}@${self.version}:${spec}`;
   if (!force && cache && cacheMs > 0 && cache.key === key && Date.now() - cache.at < cacheMs) {
     return { ...cache.value, cached: true };
   }
-  let latest = null;
+  let latest;
+  let tag;
+  const githubRelease = git || archive;
   try {
-    latest = await latestPackageVersion("npm", self.name, { fetchImpl });
+    if (githubRelease) ({ latest, tag } = await latestGitHubRelease(fetchImpl));
+    else latest = await latestPackageVersion("npm", self.name, { fetchImpl });
   } catch (err) {
     const value2 = {
       ...base,
@@ -4885,19 +4940,20 @@ async function checkSelfUpdate({
       latest: null,
       updateAvailable: false,
       reason: "lookup-failed",
-      hint: `npm \u4E0A\u67E5\u4E0D\u5230 ${self.name} \u7684\u53D1\u5E03\u7248\u672C\uFF1A${String(err?.message ?? err)}`
+      hint: `${githubRelease ? "GitHub" : "npm"} \u4E0A\u67E5\u4E0D\u5230 ${self.name} \u7684\u53D1\u5E03\u7248\u672C\uFF1A${String(err?.cause?.message ?? err?.message ?? err)}`
     };
     if (cache) Object.assign(cache, { key, at: Date.now(), value: value2 });
     return value2;
   }
-  const updateAvailable = compareVersions(latest, self.version) > 0;
+  const updateAvailable = compareVersions(latest, publishedVersion(self.version) ?? self.version) > 0;
   const value = {
     ...base,
     spec,
     checked: true,
     latest,
     updateAvailable,
-    reason: updateAvailable ? "newer-published" : "up-to-date"
+    reason: updateAvailable ? "newer-published" : "up-to-date",
+    ...githubRelease ? { manual: true, releaseUrl: `https://github.com/${PUBLIC_REPOSITORY}/releases/tag/${encodeURIComponent(tag)}` } : {}
   };
   if (cache) Object.assign(cache, { key, at: Date.now(), value });
   return value;
@@ -4961,6 +5017,9 @@ async function updateSelf({ moduleUrl, fetchImpl = fetch, run = runSelfUpdateCom
   if (!check.updateAvailable) {
     return { ok: false, updated: false, reason: check.reason, version: check.version, latest: check.latest, command: null };
   }
+  if (check.manual) {
+    return { ok: false, updated: false, reason: "manual", command: null, hint: "\u8BF7\u6253\u5F00 GitHub \u53D1\u5E03\u9875\u67E5\u770B\u5B89\u88C5\u8BF4\u660E" };
+  }
   if (!check.profileName) {
     return { ok: false, updated: false, reason: "unknown-profile", hint: "\u65E0\u6CD5\u786E\u5B9A\u5F53\u524D profile \u540D\u79F0", command: null };
   }
@@ -4984,6 +5043,7 @@ async function updateSelf({ moduleUrl, fetchImpl = fetch, run = runSelfUpdateCom
 // lib/skill-market.js
 import nodeFs from "node:fs/promises";
 import path5 from "node:path";
+import { createHash as createHash2 } from "node:crypto";
 
 // lib/zip.js
 import zlib from "node:zlib";
@@ -5179,6 +5239,9 @@ async function skillIconMeta(meta, dir, fs6) {
   let icon = declaredIcon(meta) ?? declaredIcon(meta.metadata);
   let emoji = declaredEmoji(meta);
   let marketId;
+  let marketVersion;
+  let marketCommit;
+  let marketVersionIssue;
   let installedPage;
   const candidates = publisherIcons(meta.homepage, meta.metadata?.homepage, meta.repository, meta.metadata?.repository);
   if (!icon) {
@@ -5210,6 +5273,20 @@ async function skillIconMeta(meta, dir, fs6) {
       if (stored?.marketId != null) {
         if (typeof stored.marketId !== "string" || !stored.marketId.trim() || stored.marketId.length > 512) throw new Error("\u5B89\u88C5\u6765\u6E90\u6807\u8BC6\u65E0\u6548");
         marketId = stored.marketId;
+        if (stored.marketVersion != null) {
+          if (typeof stored.marketVersion === "string" && stored.marketVersion.length <= 128 && stored.marketVersion.trim()) {
+            marketVersion = stored.marketVersion;
+          } else {
+            marketVersionIssue = "\u5B89\u88C5\u65F6\u8BB0\u5F55\u7684\u5E02\u573A\u7248\u672C\u65E0\u6548";
+          }
+        }
+        if (stored.marketCommit != null) {
+          if (typeof stored.marketCommit !== "string" || !/^[a-f\d]{40}$/i.test(stored.marketCommit)) {
+            marketVersionIssue = "\u5B89\u88C5\u65F6\u8BB0\u5F55\u7684 GitHub \u63D0\u4EA4\u65E0\u6548";
+          } else {
+            marketCommit = stored.marketCommit;
+          }
+        }
       }
       if (stored?.pageUrl != null) {
         installedPage = skillSourcePage({ pageUrl: stored.pageUrl, source: marketId?.split(":", 1)[0] });
@@ -5225,7 +5302,29 @@ async function skillIconMeta(meta, dir, fs6) {
     }
   }
   const pageUrl = installedPage ?? skillSourcePage({ marketId }) ?? [meta, meta.metadata].map((fields) => skillSourcePage(fields ?? {})).find(Boolean);
-  return { icon, emoji, ...marketId ? { marketId } : {}, ...pageUrl ? { pageUrl } : {}, iconCandidates: cleanPublisherIcons(candidates), ...issues.length ? { iconIssue: issues.join("\uFF1B") } : {} };
+  const archiveSlug = /^(?:clawhub:(?:[\w.-]+\/)?|skillhub:)([\w.-]+)$/.exec(marketId ?? "")?.[1];
+  if (archiveSlug && !marketVersion && !marketVersionIssue) {
+    try {
+      const receipt = JSON.parse((await readSkillIconFile(dir, "_meta.json", fs6, 16 * 1024)).toString("utf8"));
+      if (receipt?.slug !== archiveSlug || typeof receipt.version !== "string" || receipt.version.length > 128) {
+        throw new Error("_meta.json \u7684\u6280\u80FD\u6807\u8BC6\u6216\u7248\u672C\u65E0\u6548");
+      }
+      marketVersion = receipt.version;
+    } catch (error) {
+      if (error?.code !== "ENOENT") marketVersionIssue = `\u65E0\u6CD5\u8BFB\u53D6 Skill \u5B89\u88C5\u7248\u672C\u51ED\u636E\uFF1A${error.message}`;
+    }
+  }
+  return {
+    icon,
+    emoji,
+    ...marketId ? { marketId } : {},
+    ...marketVersion ? { marketVersion } : {},
+    ...marketCommit ? { marketCommit } : {},
+    ...marketVersionIssue ? { marketVersionIssue } : {},
+    ...pageUrl ? { pageUrl } : {},
+    iconCandidates: cleanPublisherIcons(candidates),
+    ...issues.length ? { iconIssue: issues.join("\uFF1B") } : {}
+  };
 }
 var MAX_FILES_PER_SKILL = 500;
 function skillRoots({ dshHome, home: home2 = os2.homedir() } = {}) {
@@ -5306,11 +5405,12 @@ function unquote(value) {
   }
   return value;
 }
-async function measure(dir, fs6) {
+async function measure(dir, fs6, signal) {
   let files = 0;
   let bytes = 0;
   const queue = [dir];
   while (queue.length > 0 && files < MAX_FILES_PER_SKILL) {
+    signal?.throwIfAborted();
     const current = queue.shift();
     let entries;
     try {
@@ -5319,6 +5419,7 @@ async function measure(dir, fs6) {
       continue;
     }
     for (const entry of entries) {
+      signal?.throwIfAborted();
       if (files >= MAX_FILES_PER_SKILL) break;
       const full = path4.join(current, entry.name);
       if (entry.isDirectory()) {
@@ -5336,7 +5437,8 @@ async function measure(dir, fs6) {
   }
   return { files, bytes };
 }
-async function readRoot(root, fs6) {
+async function readRoot(root, fs6, signal) {
+  signal?.throwIfAborted();
   const out = { ...root, skills: [], bytes: 0, error: null };
   let entries;
   try {
@@ -5347,6 +5449,7 @@ async function readRoot(root, fs6) {
   }
   const dirs = entries.filter((entry) => entry.isDirectory() && !entry.name.startsWith(".")).map((entry) => entry.name).sort((a, b) => a.localeCompare(b));
   for (const name2 of dirs) {
+    signal?.throwIfAborted();
     const dir = path4.join(root.dir, name2);
     const file = path4.join(dir, SKILL_FILE);
     let text;
@@ -5367,7 +5470,7 @@ async function readRoot(root, fs6) {
       modifiedAt = null;
     }
     const meta = parseFrontmatter(text);
-    const { files, bytes } = await measure(dir, fs6);
+    const { files, bytes } = await measure(dir, fs6, signal);
     out.bytes += bytes;
     out.skills.push({
       id: `${root.id}:${name2}`,
@@ -5401,11 +5504,11 @@ function originOf(meta) {
   }
   return "";
 }
-async function readSkills({ dshHome, home: home2, roots, fs: fs6, now = () => Date.now() } = {}) {
+async function readSkills({ dshHome, home: home2, roots, fs: fs6, signal, includeMarketInstallations = false, now = () => Date.now() } = {}) {
   const impl = fs6 ?? (await import("node:fs")).promises;
   const wanted = roots ?? skillRoots({ dshHome, home: home2 });
   const groups = [];
-  for (const root of wanted) groups.push(await readRoot(root, impl));
+  for (const root of wanted) groups.push(await readRoot(root, impl, signal));
   const seen = /* @__PURE__ */ new Set();
   const skills = [];
   const shadowed = /* @__PURE__ */ new Map();
@@ -5428,6 +5531,7 @@ async function readSkills({ dshHome, home: home2, roots, fs: fs6, now = () => Da
   skills.sort((a, b) => a.name.localeCompare(b.name));
   return {
     skills,
+    ...includeMarketInstallations ? { marketInstallations: groups.flatMap((group) => group.skills.filter((skill) => skill.marketId)) } : {},
     installedMarketIds: [...installedMarketIds],
     duplicates,
     roots: groups.map((group) => ({
@@ -6548,6 +6652,16 @@ function clawhubItem(raw) {
     installNote: "\u5B89\u88C5\u65F6\u4ECE ClawHub \u53D6\u5B98\u65B9\u5206\u53D1\u7684 ZIP"
   };
 }
+async function clawHubSkill({ slug, owner }, fetchImpl) {
+  if (typeof slug !== "string" || !slug || slug.length > 200) throw new Error("\u6280\u80FD\u6765\u6E90\u7F3A\u5C11\u6709\u6548\u6807\u8BC6");
+  const url = `${CLAWHUB_BASE}/api/v1/skills/${encodeURIComponent(slug)}${owner ? `?ownerHandle=${encodeURIComponent(owner)}` : ""}`;
+  const body = await readJson(await fetchWithTimeout(url, { fetchImpl, timeout: 8e3 }), "ClawHub skill");
+  if (body?.skill?.slug !== slug) throw new Error("\u6765\u6E90\u8FD4\u56DE\u7684\u6280\u80FD\u6807\u8BC6\u4E0D\u5339\u914D");
+  if (owner && (typeof body?.owner?.handle !== "string" || body.owner.handle.toLowerCase() !== owner.toLowerCase())) {
+    throw new Error("\u6765\u6E90\u8FD4\u56DE\u7684\u6280\u80FD\u53D1\u5E03\u8005\u4E0D\u5339\u914D");
+  }
+  return body;
+}
 async function loadClawhub({ refresh = false, query, limit, state }) {
   const cached = state.clawhub;
   if (!refresh && cached && nowMs() - cached.at < CLAWHUB_TTL_MS && !cached.query && !query) return cached;
@@ -6791,12 +6905,70 @@ function pickGithubDir(files, dir) {
   if (!files.some((file) => file.path.toLowerCase() === `${prefix}skill.md`.toLowerCase())) return null;
   return prefix;
 }
+function installedSkillTarget(skill) {
+  const id = skill.marketId;
+  if (!id) return { reason: "\u672A\u8BB0\u5F55\u5E02\u573A\u6765\u6E90" };
+  if (id.startsWith("github:") || id.startsWith("official:")) {
+    const github = /^github:([\w.-]+\/[\w.-]+)(?::(.*))?$/.exec(id);
+    const official = /^official:([\w-]+)$/.exec(id);
+    const repo = github?.[1] ?? (official ? OFFICIAL_REPO : null);
+    const dir = official ? `skills/${official[1]}` : github?.[2] === "." ? "" : github?.[2] ?? "";
+    if (!repo || repo.split("/").some((part) => part === "." || part === "..") || dir && dir.split("/").some((part) => !part || part === "." || part === "..")) {
+      return { reason: "\u672A\u8BB0\u5F55\u6709\u6548\u7684 GitHub \u6280\u80FD\u76EE\u5F55" };
+    }
+    if (skill.marketVersionIssue) return { source: "github", receiptError: skill.marketVersionIssue };
+    if (/^[a-f\d]{40}$/i.test(skill.marketCommit ?? "")) return { source: "github", repo, dir, ref: skill.marketCommit };
+    const page2 = URL.parse(skill.pageUrl ?? "");
+    const pin = /^\/([\w.-]+\/[\w.-]+)\/(tree|blob)\/([a-f\d]{40})(?:\/(.*))?$/i.exec(page2?.pathname ?? "");
+    const expected = pin?.[2] === "blob" ? [dir, "SKILL.md"].filter(Boolean).join("/") : dir;
+    if (page2?.origin !== "https://github.com" || !pin || pin[1].toLowerCase() !== repo.toLowerCase() || (pin[4] ?? "") !== expected) {
+      return { reason: "\u672A\u8BB0\u5F55\u53EF\u9A8C\u8BC1\u7684 GitHub \u5B89\u88C5\u63D0\u4EA4" };
+    }
+    return { source: "github", repo, dir, ref: pin[3] };
+  }
+  const claw = /^clawhub:([\w.-]+)\/([\w.-]+)$/.exec(id);
+  const hub = /^skillhub:([\w.-]+)$/.exec(id);
+  const page = URL.parse(skill.pageUrl ?? "");
+  if (!claw && !(hub && page?.origin === "https://skillhub.cn" && /^\/skills\/[^/]+\/[^/]+$/.test(page.pathname))) {
+    return { reason: "\u7F3A\u5C11\u53EF\u6838\u5BF9\u7684\u53D1\u5E03\u8005\uFF0C\u6216\u6765\u6E90\u6682\u4E0D\u652F\u6301\u7248\u672C\u68C0\u67E5" };
+  }
+  const current = publishedVersion(skill.marketVersion);
+  const receiptError = skill.marketVersionIssue ?? (!current && skill.marketVersion != null ? "\u51ED\u636E\u4E2D\u7684\u5E02\u573A\u7248\u672C\u683C\u5F0F\u65E0\u6548" : null);
+  if (!current && !receiptError) return { reason: "\u672A\u8BB0\u5F55\u53EF\u6BD4\u8F83\u7684\u5DF2\u5B89\u88C5\u5E02\u573A\u7248\u672C" };
+  const source = claw ? { source: "clawhub", owner: claw[1], slug: claw[2], current } : { source: "skillhub", slug: hub[1], pageUrl: page.href, current };
+  return { ...source, receiptError };
+}
+function githubSkillTreeRevision(body, dir) {
+  if (body?.truncated || !Array.isArray(body?.tree)) throw new Error("GitHub \u672A\u8FD4\u56DE\u5B8C\u6574\u6587\u4EF6\u6811");
+  const prefix = dir ? dir + "/" : "";
+  if (!body.tree.some((entry) => entry.type === "blob" && entry.path === prefix + "SKILL.md")) {
+    throw new Error(`GitHub \u76EE\u5F55 ${dir || "\u6839\u76EE\u5F55"} \u672A\u627E\u5230 SKILL.md`);
+  }
+  if (!dir) {
+    const files = body.tree.map(({ path: path8, mode, sha }) => {
+      if (typeof path8 !== "string" || typeof mode !== "string" || !/^[a-f\d]{40}$/i.test(sha ?? "")) {
+        throw new Error("GitHub \u6587\u4EF6\u6811\u5305\u542B\u65E0\u6CD5\u6BD4\u8F83\u7684\u6761\u76EE");
+      }
+      return [path8, mode, sha];
+    }).sort((a, b) => a[0].localeCompare(b[0], "en"));
+    return createHash2("sha256").update(JSON.stringify(files)).digest("hex");
+  }
+  const revision = body.tree.find((entry) => entry.type === "tree" && entry.path === dir)?.sha;
+  if (!/^[a-f\d]{40}$/i.test(revision ?? "")) throw new Error("GitHub \u672A\u8FD4\u56DE\u53EF\u6BD4\u8F83\u7684\u76EE\u5F55\u7248\u672C");
+  return revision;
+}
 async function githubDirFiles(item, state) {
   const target = item.install || {};
   const ref = target.ref || (await githubJson(`https://api.github.com/repos/${target.repo}`, "GitHub repository", state)).default_branch;
   if (typeof ref !== "string" || !ref) throw new Error("GitHub did not provide a default branch");
+  const commit = /^[a-f\d]{40}$/i.test(ref) ? ref : (await githubJson(
+    `https://api.github.com/repos/${target.repo}/commits/${encodeURIComponent(ref)}`,
+    "GitHub skill install commit",
+    state
+  )).sha;
+  if (typeof commit !== "string" || !/^[a-f\d]{40}$/i.test(commit)) throw new Error("GitHub \u672A\u8FD4\u56DE\u6709\u6548\u7684 Skill \u5B89\u88C5\u63D0\u4EA4");
   const tree = await githubJson(
-    `https://api.github.com/repos/${target.repo}/git/trees/${encodeURIComponent(ref)}?recursive=1`,
+    `https://api.github.com/repos/${target.repo}/git/trees/${commit}?recursive=1`,
     "GitHub tree",
     state
   );
@@ -6810,7 +6982,7 @@ async function githubDirFiles(item, state) {
   let totalBytes = 0;
   for (const filePath of wanted) {
     const raw = await fetchWithTimeout(
-      `https://raw.githubusercontent.com/${target.repo}/${encodeURIComponent(ref)}/${filePath.split("/").map(encodeURIComponent).join("/")}`,
+      `https://raw.githubusercontent.com/${target.repo}/${commit}/${filePath.split("/").map(encodeURIComponent).join("/")}`,
       { fetchImpl: state.fetch }
     );
     if (!raw.ok) throw new Error(`raw.githubusercontent returned ${raw.status} for ${filePath}`);
@@ -6819,7 +6991,7 @@ async function githubDirFiles(item, state) {
     files.push({ path: filePath.slice(prefix.length), bytes });
   }
   if (files.length === 0) throw new Error("\u76EE\u5F55\u91CC\u6CA1\u6709\u6587\u4EF6");
-  return { files, skipped: [] };
+  return { files, skipped: [], commit };
 }
 function createSkillMarket({ token, metricsAuthKey = () => token ?? "", isGithubAuthenticated = () => Boolean(token), fs: fsImpl = nodeFs, fetchImpl } = {}) {
   const state = {
@@ -6832,6 +7004,80 @@ function createSkillMarket({ token, metricsAuthKey = () => token ?? "", isGithub
     fetch: fetchImpl || fetch
   };
   const fs6 = fsImpl;
+  async function checkInstalledUpdates(skills, { signal } = {}) {
+    const lookupLimit = AbortSignal.timeout(25e3);
+    const deadline = signal ? AbortSignal.any([signal, lookupLimit]) : lookupLimit;
+    const lookupState = { ...state, fetch: (url, init) => state.fetch(url, {
+      ...init,
+      signal: init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline
+    }) };
+    const lookups = /* @__PURE__ */ new Map();
+    function once(key, request) {
+      if (!lookups.has(key)) lookups.set(key, request());
+      return lookups.get(key);
+    }
+    const entries = [];
+    const skipped = {};
+    const tasks = [];
+    for (const skill of skills) {
+      const target = installedSkillTarget(skill);
+      if (target.reason) skipped[target.reason] = (skipped[target.reason] ?? 0) + 1;
+      else tasks.push({ skill, target });
+    }
+    let index = 0;
+    await Promise.all(Array.from({ length: Math.min(4, tasks.length) }, async () => {
+      while (index < tasks.length) {
+        const slot = index++;
+        const { skill, target } = tasks[slot];
+        const row = { name: skill.name, id: skill.id, root: skill.root, pageUrl: skill.pageUrl, source: target.source };
+        try {
+          if (target.receiptError) throw new Error(target.receiptError);
+          if (deadline.aborted) throw new Error("\u672C\u6B21 Skill \u68C0\u67E5\u8D85\u65F6");
+          if (target.source === "github") {
+            const tree = (ref) => once(`tree:${target.repo.toLowerCase()}:${ref}`, () => githubJson(
+              `https://api.github.com/repos/${target.repo}/git/trees/${ref}?recursive=1`,
+              "GitHub skill tree",
+              lookupState
+            ));
+            const [installed, latest2] = await Promise.all([tree(target.ref), tree("HEAD")]);
+            const currentRevision = githubSkillTreeRevision(installed, target.dir);
+            const latestRevision = githubSkillTreeRevision(latest2, target.dir);
+            entries[slot] = { ...row, current: target.ref.slice(0, 7), status: currentRevision === latestRevision ? "current" : "changed" };
+            continue;
+          }
+          let version;
+          if (target.source === "clawhub") {
+            const body = await once(`clawhub:${target.owner.toLowerCase()}/${target.slug}`, () => clawHubSkill(target, lookupState.fetch));
+            version = body.latestVersion?.version;
+          } else {
+            const listing = await once(`skillhub:${target.slug}`, () => loadSkillhub({
+              refresh: true,
+              state: lookupState,
+              query: target.slug,
+              limit: 100
+            }));
+            const matches = listing.items.filter((item) => item.install?.slug === target.slug && item.pageUrl === target.pageUrl);
+            if (matches.length !== 1) throw new Error("SkillHub \u672A\u8FD4\u56DE\u552F\u4E00\u4E14\u53D1\u5E03\u8005\u5339\u914D\u7684\u6280\u80FD");
+            version = matches[0].version;
+          }
+          const latest = publishedVersion(version);
+          if (!latest) throw new Error("\u4E0A\u6E38\u672A\u8FD4\u56DE\u53EF\u6BD4\u8F83\u7684\u7248\u672C\u53F7");
+          const status = compareVersions(latest, target.current) > 0 ? "newer" : "current";
+          entries[slot] = { ...row, current: target.current, latest, status };
+        } catch (error) {
+          entries[slot] = { ...row, status: "failed", error: deadline.aborted ? "\u672C\u6B21 Skill \u68C0\u67E5\u8D85\u65F6" : clip2(error?.cause?.message ?? error?.message, 240) || "\u65E0\u6CD5\u8BFB\u53D6\u4E0A\u6E38\u7248\u672C" };
+        }
+      }
+    }));
+    return {
+      checked: tasks.length,
+      skipped,
+      entries,
+      current: entries.filter((row) => row.status === "current").length,
+      updatable: entries.filter((row) => row.status === "newer" || row.status === "changed").length,
+      failed: entries.filter((row) => row.status === "failed").length
+    };
+  }
   const metricCache = /* @__PURE__ */ new Map();
   const metricRevision = /* @__PURE__ */ new Map();
   const metricCooldown = /* @__PURE__ */ new Map();
@@ -6876,10 +7122,7 @@ function createSkillMarket({ token, metricsAuthKey = () => token ?? "", isGithub
           let raw;
           if (item.source === "clawhub") {
             const slug = item.install?.slug || item.name;
-            if (typeof slug !== "string" || !slug || slug.length > 200) throw new Error("\u6280\u80FD\u6765\u6E90\u7F3A\u5C11\u6709\u6548\u6807\u8BC6");
-            const body = await readJson(await fetchWithTimeout(`${CLAWHUB_BASE}/api/v1/skills/${encodeURIComponent(slug)}${item.install?.owner ? `?ownerHandle=${encodeURIComponent(item.install.owner)}` : ""}`, { fetchImpl: fetchImpl2, timeout: 8e3 }), "ClawHub statistics");
-            if (body?.skill?.slug !== slug) throw new Error("\u6765\u6E90\u8FD4\u56DE\u7684\u6280\u80FD\u6807\u8BC6\u4E0D\u5339\u914D");
-            if (item.install?.owner && body?.owner?.handle?.toLowerCase() !== item.install.owner.toLowerCase()) throw new Error("\u6765\u6E90\u8FD4\u56DE\u7684\u6280\u80FD\u53D1\u5E03\u8005\u4E0D\u5339\u914D\uFF0C\u672A\u66F4\u65B0\u7EDF\u8BA1");
+            const body = await clawHubSkill({ slug, owner: item.install?.owner }, fetchImpl2);
             raw = body.skill.stats;
           } else if (item.source === "skillhub") {
             const listing = await loadSkillhub({ refresh: true, state: { ...state, fetch: fetchImpl2 }, query: item.install?.slug || item.name, limit: 100 });
@@ -6993,7 +7236,7 @@ function createSkillMarket({ token, metricsAuthKey = () => token ?? "", isGithub
     };
     try {
       await refuseExisting();
-      const { files, skipped } = kind === "clawhub-zip" ? await clawhubFiles(item, state) : kind === "skillhub-zip" ? await skillhubFiles(item, state) : await githubDirFiles(item, state);
+      const { files, skipped, commit } = kind === "clawhub-zip" ? await clawhubFiles(item, state) : kind === "skillhub-zip" ? await skillhubFiles(item, state) : await githubDirFiles(item, state);
       if (!files.some((file) => file.path.toLowerCase() === "skill.md")) {
         throw new Error("\u4E0B\u8F7D\u7ED3\u679C\u91CC\u6CA1\u6709 SKILL.md\uFF0C\u4E0D\u6562\u5F80 skill \u76EE\u5F55\u91CC\u653E");
       }
@@ -7021,7 +7264,9 @@ function createSkillMarket({ token, metricsAuthKey = () => token ?? "", isGithub
           pageUrl,
           icon,
           emoji,
-          ...iconCandidates.length ? { iconCandidates } : {}
+          ...iconCandidates.length ? { iconCandidates } : {},
+          ...kind === "clawhub-zip" && item.install.version ? { marketVersion: item.install.version } : {},
+          ...commit ? { marketCommit: commit } : {}
         }), { flag: "wx" });
       }
       await refuseExisting();
@@ -7036,7 +7281,7 @@ function createSkillMarket({ token, metricsAuthKey = () => token ?? "", isGithub
       }
     }
   }
-  return { list, install, metrics, applyMetrics, sources: SKILL_MARKET_SOURCES };
+  return { list, install, metrics, applyMetrics, checkInstalledUpdates, sources: SKILL_MARKET_SOURCES };
 }
 var _internal = { skillhubItem, clawhubItem, pickGithubDir, frontmatter: parseFrontmatter, parseRepoRef };
 
@@ -10048,7 +10293,57 @@ async function apply(ctx) {
     return { removed, count: removed.length, ...await serversPayload() };
   }
   const selfUpdateCache = {};
-  const doCheckSelfUpdate = () => checkSelfUpdate({ moduleUrl: import.meta.url, cache: selfUpdateCache });
+  async function doCheckSelfUpdate({ force = false } = {}) {
+    const fetchImpl = async (url, init) => {
+      if (new URL(url).origin === "https://api.github.com") await refreshGithubAuth();
+      return fetch(url, { ...init, headers: withGithubAuth(url, init?.headers ?? {}) });
+    };
+    const result = await checkSelfUpdate({ moduleUrl: import.meta.url, cache: selfUpdateCache, force, fetchImpl });
+    if (force) emit({
+      kind: "update-check",
+      target: "plugin",
+      version: result.version,
+      latest: result.latest,
+      outcome: result.reason,
+      ...result.reason === "lookup-failed" ? { error: redactSecrets(result.hint) } : {}
+    });
+    return result;
+  }
+  async function doCheckSkillUpdates() {
+    const signal = AbortSignal.timeout(35e3);
+    let scan;
+    try {
+      scan = await readSkills({ dshHome: path7.dirname(dataDir()), includeMarketInstallations: true, signal });
+      signal.throwIfAborted();
+    } catch (error) {
+      if (signal.aborted) throw Object.assign(new Error("\u626B\u63CF\u5DF2\u5B89\u88C5\u7684 Skill \u8D85\u65F6"), { status: 504, cause: error });
+      throw error;
+    }
+    const { skills, roots, marketInstallations } = scan;
+    if (marketInstallations.some((row) => /^(?:github|official):/.test(row.marketId))) await refreshGithubAuth();
+    const report = await marketFor().checkInstalledUpdates([
+      ...skills.filter((row) => !row.marketId),
+      ...marketInstallations
+    ], { signal });
+    const rootErrors = roots.filter((root) => root.error && root.error !== "missing").map((root) => ({ label: root.label, error: redactSecrets(root.error) }));
+    const rootLabels = new Map(roots.map((root) => [root.id, root.label]));
+    const entries = report.entries.map((row) => ({
+      ...row,
+      rootLabel: rootLabels.get(row.root),
+      ...row.error ? { error: redactSecrets(row.error) } : {}
+    }));
+    const issues = entries.filter((row) => row.error).map((row) => `${row.name}: ${row.error}`).concat(rootErrors.map((root) => `${root.label}: ${root.error}`));
+    emit({
+      kind: "update-check",
+      target: "skill",
+      checked: report.checked,
+      failed: report.failed,
+      updatable: report.updatable,
+      skipped: Object.values(report.skipped).reduce((sum, count) => sum + count, 0),
+      ...issues.length ? { error: issues.slice(0, 5).join("\uFF1B") } : {}
+    });
+    return { ...report, entries, rootErrors };
+  }
   const doSelfUpdate = async () => {
     const result = await updateSelf({ moduleUrl: import.meta.url });
     emit({
@@ -11172,6 +11467,7 @@ async function apply(ctx) {
         await callStore.refresh({ strict: true });
         return json({ usage: summarizeSkillUsage(callStore.rows, callStore.now()) });
       })],
+      ["/api/overall-mcp/skills/updates", ["POST"], guard(async () => json(await doCheckSkillUpdates()))],
       ["/api/overall-mcp/skills/reveal", ["POST"], guard(async (req) => {
         const body = await readBody(req);
         const out = await revealSkill(typeof body?.id === "string" ? body.id : "");
@@ -11580,7 +11876,14 @@ async function apply(ctx) {
         const result = await doCheckUpdates();
         return json({ ...result, self: await doCheckSelfUpdate() });
       })],
-      ["/api/overall-mcp/self", ["GET"], guard(async () => json(await doCheckSelfUpdate()))],
+      ["/api/overall-mcp/mcp/updates", ["POST"], guard(async () => {
+        const result = await doCheckUpdates();
+        emit({ kind: "update-check", target: "mcp", checked: result.checked, failed: result.failed, updatable: result.updatable });
+        return json(result);
+      })],
+      ["/api/overall-mcp/self", ["GET"], guard(async (req) => json(await doCheckSelfUpdate({
+        force: new URL(req.url).searchParams.get("refresh") === "1"
+      })))],
       ["/api/overall-mcp/self-update", ["POST"], guard(async () => json(await doSelfUpdate()))],
       ["/api/overall-mcp/update", ["POST"], guard(async (req) => {
         const { name: name2, slot, from } = await readBody(req);

@@ -20,9 +20,7 @@
 //                 awesome-remote-mcp-servers / awesome-mcp-servers)
 //
 // Host API (Connection-authenticated same-origin fetch routes, index.js). The
-// list below is what this page actually calls; the host also serves /self and
-// /tools as documented read-only diagnostics (README.zh-CN.md) that the page
-// never touches:
+// list below is what this page actually calls:
 //   GET  /api/overall-mcp/servers
 //   GET  /api/overall-mcp/scan
 //   GET/POST /api/overall-mcp/catalog           { query?, source?, limit?, refresh? }
@@ -34,7 +32,9 @@
 //   GET  /api/overall-mcp/favorites
 //   POST /api/overall-mcp/set-enabled           { name, enabled, slot?, from? }
 //   POST /api/overall-mcp/set-source-enabled    { source, enabled }
-//   GET  /api/overall-mcp/updates
+//   POST /api/overall-mcp/mcp/updates
+//   POST /api/overall-mcp/skills/updates
+//   GET  /api/overall-mcp/self?refresh=1
 //   POST /api/overall-mcp/self-update
 //   POST /api/overall-mcp/update                { name, slot?, from? }
 //   POST /api/overall-mcp/remove                { name, slot?, from? }
@@ -2115,7 +2115,7 @@ window.__ModuleLoader__.load({
                 ".omkt-navigation{display:flex;align-items:center;gap:12px;overflow-x:auto;scrollbar-width:thin}",
                 ".omkt-navigation>.omkt-tabbar{border-bottom:0!important;flex:1 0 auto;overflow:visible!important}",
                 ".omkt-navigation .omkt-tab{font-size:14px!important;margin:0!important;padding:9px 4px 10px!important}",
-                "@container(max-width:560px){.omkt-navigation{gap:8px}.omkt-navigation .omkt-spaceswitch{gap:8px!important;padding-inline-end:8px!important}.omkt-navigation .omkt-tabbar{gap:6px!important}.omkt-navigation .omkt-tab,.omkt-navigation .omkt-spacep{font-size:13px!important}.omkt-directory-label{display:none}}",
+                "@container(max-width:560px){.omkt-navigation{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 7px}.omkt-navigation .omkt-spaceswitch{gap:6px!important;padding-inline-end:5px!important}.omkt-navigation .omkt-tabbar{gap:4px!important}.omkt-navigation .omkt-tab{padding-inline:3px!important}.omkt-navigation .omkt-tab,.omkt-navigation .omkt-spacep{font-size:13px!important}.omkt-directory-label{display:none}.omkt-resource-update{grid-row:2;grid-column:1/-1;justify-self:end;min-height:28px!important}}",
                 ".omkt-market-search{display:grid;gap:20px;align-items:center;margin:0;min-width:0}",
                 ".omkt-market-search>button,.omkt-reg-filters>button{display:inline-flex;align-items:center;justify-content:center;gap:8px}",
                 ".omkt-reg-filters>select{flex:0 1 218px;min-width:128px}",
@@ -3374,6 +3374,63 @@ function MarketCard({ item, stats, busy, installing, rank, usageSort, onInstall,
             return createElement("a", { key, href, target: "_blank", rel: "noopener noreferrer", className: "omkt-title omkt-skill-source", style: { ...style, display: "block", width: "fit-content", maxWidth: "100%", color: undefined }, title: `打开来源网页：${name}`, onClick: event => openExternal(event, href) }, name);
         }
 
+        function UpdateCheckStatus({ scope, state }) {
+            if (!state) return null;
+            if (state.restartRequired) return null;
+            if (state.installing) return createElement("div", { role: "status", style: styles.message }, "正在安装插件更新…");
+            const label = scope === "plugin" ? "插件" : scope === "mcp" ? "MCP" : "Skill";
+            const subject = scope === "plugin" ? label : ` ${label} `;
+            if (state.pending) return createElement("div", { role: "status", style: styles.message }, `正在检查${subject}更新…`);
+            if (state.error) return createElement("div", { role: "alert", style: styles.error }, `${label}${scope === "plugin" ? "" : " "}更新检查失败：${state.error}`);
+            const report = state.result;
+            if (scope === "plugin") {
+                const message = report.updateAvailable ? `插件有新版 v${report.latest}`
+                    : report.reason === "up-to-date" ? `插件 v${report.version} 已是最新`
+                        : report.hint || "当前安装方式没有可核对的发布版本";
+                return createElement("div", { role: report.reason === "lookup-failed" ? "alert" : "status", style: styles.message }, [
+                    message,
+                    report.updateAvailable && report.manual
+                        ? skillSourceLink({ item: { pageUrl: report.releaseUrl }, name: `查看 v${report.latest} 的更新说明`, key: "release" }) : null,
+                ]);
+            }
+            const skipped = scope === "skill" ? Object.values(report.skipped).reduce((sum, count) => sum + count, 0)
+                : report.entries.filter(row => !row.detectable).length;
+            const changed = scope === "skill" ? report.entries.filter(row => row.status === "changed").length : 0;
+            const unpinned = scope === "mcp" ? report.entries.filter(row => row.unpinned && !row.error).length : 0;
+            const failed = report.failed;
+            const current = report.checked - failed - report.updatable - unpinned;
+            const summary = `${label} 更新检查完成 · ${report.checked} 项可检查 · ${current} 项已是最新 · ${report.updatable - changed} 项有新版`
+                + (changed ? ` · ${changed} 项上游目录有变更` : "")
+                + (unpinned ? ` · ${unpinned} 项未固定版本` : "")
+                + (failed ? ` · ${failed} 项失败` : "")
+                + (skipped ? ` · ${skipped} 项跳过` : "")
+                + (report.rootErrors?.length ? ` · ${report.rootErrors.length} 个目录读取失败` : "");
+            const entries = scope === "skill" ? report.entries : report.entries.filter(row => row.detectable);
+            const details = [
+                ...entries.map(row => {
+                    let outcome = row.error;
+                    if (!outcome) {
+                        if (row.status === "changed") outcome = "上游目录有变更";
+                        else if (row.updateAvailable || row.status === "newer") outcome = `${row.current ?? "未固定版本"} → ${row.latest}`;
+                        else if (row.unpinned) outcome = `启动配置未固定版本（上游 v${row.latest}）`;
+                        else if (row.status === "current" && row.source === "github") outcome = `与上游目录一致（安装提交 ${row.current}）`;
+                        else outcome = `已是最新（${row.current ?? row.latest}）`;
+                    }
+                    return `${row.name}${row.rootLabel ? `（${row.rootLabel}）` : ""}：${outcome}`;
+                }),
+                ...Object.entries(report.skipped ?? {}).map(([reason, count]) => `${reason} · ${count} 项`),
+                ...(report.rootErrors ?? []).map(root => `${root.label}：${root.error}`),
+            ];
+            return createElement("div", { style: styles.message }, [
+                createElement("div", { key: "summary", role: "status" }, summary),
+                details.length ? createElement("details", { key: "details" }, [
+                    createElement("summary", { key: "label" }, "查看检查详情"),
+                    createElement("ul", { key: "rows", style: { maxHeight: "min(32vh, 240px)", overflowY: "auto", overflowWrap: "anywhere" } },
+                        details.map((line, i) => createElement("li", { key: i }, line))),
+                ]) : null,
+            ]);
+        }
+
         function SkillCard({ skill, busy, onOpen, onReveal, onRemove, rootLabel, usageLabel, initial }) {
             const meta = [Number.isFinite(skill.files) ? `${skill.files} 个文件` : "", byteText(skill.bytes)].filter(Boolean).join(" · ");
             return createElement("div", { className: "omkt-skillcard omkt-listrow omkt-skill-columns", style: styles.skillCard, "data-skill-initial": initial }, [
@@ -4545,10 +4602,9 @@ function Section({ close }) {
 			const [marketPage, setMarketPage] = useState(0);
 			const [pageSize, setPageSize] = useState(20);
 			const [detail, setDetail] = useState(null);
-			// The plugin's own update state, filled by 检查更新 (see
-			// `doCheckUpdates`). `null` means "not asked yet", which is why the
-			// head shows no update button on a fresh page.
-			const [selfUpdate, setSelfUpdate] = useState(null);
+            const [updateChecks, setUpdateChecks] = useState({});
+            const selfUpdate = updateChecks.plugin?.result;
+            const checkingUpdates = useRef(new Set());
 			// ---- update queue ----
 			// One queue for every update this page can start: a row's 「更新」 and
 			// 「全部更新」 run through the same runner below. `null` means "nothing
@@ -5763,58 +5819,50 @@ function Section({ close }) {
 					? `已清理 ${r.count} 条来源已删除的记录（${[...new Set(r.removed.map((x) => x.name))].join("、")}）`
 					: "没有需要清理的记录"),
 			);
-			// 「检查更新」 answers two questions at once: which mounted MCP
-			// servers have a newer package, and whether *this plugin* does. The
-			// second answer is what decides if the head shows an update button,
-			// so a refresh action (which the 分类 row already has as 刷新) never
-			// sits in the primary slot.
-			const doCheckUpdates = () => run(
-				async () => {
-					const body = await api("/updates", { method: "POST", timeoutMs: 300000 });
-					setSelfUpdate(body.self ?? null);
-					return body;
-				},
-				(r) => {
-					// Three outcomes, not two: a lookup can also have failed (the
-					// host counts those as `failed`). The two-way message this
-					// replaces called an offline run 「均已是最新版本」, which is a
-					// verdict nobody had.
-					const failed = r.failed ?? 0;
-					const ok = Math.max(0, r.checked - failed);
-					const parts = [];
-					if (r.updatable > 0) {
-						parts.push(`${r.checked} 个可检测，其中 ${r.updatable} 个有可用更新`
-							+ (failed > 0 ? `，${failed} 个查不到最新版本` : ""));
-					} else if (failed === 0) {
-						parts.push(`${r.checked} 个可检测，均已是最新版本`);
-					} else if (ok === 0) {
-						parts.push(`${r.checked} 个可检测，全部都查不到最新版本（网络或包注册表不可用）`);
-					} else {
-						parts.push(`${r.checked} 个可检测，${ok} 个已是最新、${failed} 个查不到最新版本`);
-					}
-					const self = r.self;
-					if (self) {
-						if (self.updateAvailable) parts.push(`插件 dsh-overall-mcp 有新版 v${self.latest}`);
-						else if (self.reason === "linked") parts.push("插件为 link 安装，跳过自身更新");
-						else if (self.reason === "up-to-date") parts.push(`插件 v${self.version} 已是最新`);
-						else if (self.hint) parts.push(self.hint);
-					}
-					return `检查完成：${parts.join("；")}`;
-				},
-			);
+            async function checkUpdateScope(scope) {
+                if (checkingUpdates.current.has(scope)
+                    || (scope === "mcp" && (actionRef.current || updateRunRef.current))
+                    || (scope === "plugin" && updateChecks.plugin?.restartRequired)) return;
+                checkingUpdates.current.add(scope);
+                if (scope === "mcp") { actionRef.current = true; setBusy(true); }
+                const settle = state => setUpdateChecks(previous => ({ ...previous, [scope]: state }));
+                settle({ pending: true });
+                try {
+                    const endpoint = { mcp: "/mcp/updates", skill: "/skills/updates", plugin: "/self?refresh=1" }[scope];
+                    const result = await api(endpoint, { method: scope === "plugin" ? "GET" : "POST", timeoutMs: scope === "mcp" ? 300000 : 45000 });
+                    if (scope === "plugin") {
+                        if (typeof result?.reason !== "string") throw new Error("插件更新响应格式无效");
+                    } else {
+                        if (!Array.isArray(result?.entries) || !["checked", "failed", "updatable"].every(key => Number.isInteger(result[key]))
+                            || (scope === "skill" && (!result.skipped || !Array.isArray(result.rootErrors)))) throw new Error("更新检查响应格式无效");
+                        if (scope === "mcp") await refresh();
+                    }
+                    settle({ result });
+                } catch (err) {
+                    settle({ error: String(err.message || err) });
+                } finally {
+                    checkingUpdates.current.delete(scope);
+                    if (scope === "mcp") { actionRef.current = false; setBusy(false); }
+                }
+            }
 
-			const doSelfUpdate = () => run(
-				async () => {
-					const body = await api("/self-update", { method: "POST", timeoutMs: 600000 });
-					setSelfUpdate(null);
-					return body;
-				},
-				(r) => {
-					if (r.ok) return `已将 dsh-overall-mcp 更新到 v${r.to}（重启 DSH 后生效）`;
-					const tail = [r.hint, r.command].filter(Boolean).join("：");
-					return tail || "插件自更新未执行";
-				},
-			);
+            async function doSelfUpdate() {
+                if (actionRef.current || updateRunRef.current || checkingUpdates.current.has("plugin") || updateChecks.plugin?.restartRequired) return;
+                checkingUpdates.current.add("plugin");
+                setUpdateChecks(previous => ({ ...previous, plugin: { ...previous.plugin, installing: true } }));
+                try {
+                    await run(async () => {
+                        const body = await api("/self-update", { method: "POST", timeoutMs: 600000 });
+                        if (body.ok) setUpdateChecks(previous => ({ ...previous, plugin: { restartRequired: true } }));
+                        return body;
+                    }, r => r.ok ? `已将 dsh-overall-mcp 更新到 v${r.to}（重启 DSH 后生效）`
+                        : [r.hint, r.command].filter(Boolean).join("：") || "插件自更新未执行");
+                } finally {
+                    checkingUpdates.current.delete("plugin");
+                    setUpdateChecks(previous => previous.plugin?.installing
+                        ? { ...previous, plugin: { ...previous.plugin, installing: false } } : previous);
+                }
+            }
 
 			/**
 			 * Write everything this page knows to a file the user owns.
@@ -5973,8 +6021,9 @@ function Section({ close }) {
 					from: row.from ?? row.update?.current ?? null,
 				}));
 				if (list.length === 0) return;
-				if (updateRunRef.current) return;
+				if (updateRunRef.current || actionRef.current) return;
 				updateRunRef.current = true;
+                setUpdateChecks(previous => ({ ...previous, mcp: null }));
 				const items = list.map((row) => ({ ...row, status: "pending", message: "" }));
 				setBusy(true); setError(""); setMessage("");
 				setUpdateJobs({
@@ -6486,7 +6535,7 @@ function Section({ close }) {
                             createElement("span", { key: "mark", style: { ...styles.brandTile, width: 40, height: 40, background: MCP_SOFT, color: T.brand } }, brandMark(24)),
                             createElement("strong", { key: "name", style: styles.pageTitle }, "全局 MCP & Skill"),
                             createElement("span", { key: "version", style: styles.versionChip, title: "插件版本" }, `v${CLIENT_VERSION}`),
-                            selfUpdate?.updateAvailable ? createElement("button", {
+                            selfUpdate?.updateAvailable && !selfUpdate.manual ? createElement("button", {
                                 key: "hd-self", type: "button", style: { ...styles.button, ...styles.primary }, title: `更新到 v${selfUpdate.latest}`, disabled: busy, onClick: doSelfUpdate,
                             }, `更新到 v${selfUpdate.latest}`) : null,
                         ]),
@@ -6499,7 +6548,10 @@ function Section({ close }) {
                             createElement(ActionMenu, { key: "more", label: "插件操作" }, [
                                 createElement("button", { key: "scan", type: "button", style: styles.textBtn, disabled: busy, onClick: doScan }, "重新扫描宿主机"),
                                 createElement("button", { key: "github", type: "button", style: styles.textBtn, onClick: () => { switchSpace("mcp"); setTab("registry"); setGhAccessPinned(value => !value); } }, "GitHub 访问设置"),
-                                createElement("button", { key: "hd-updates", type: "button", style: styles.textBtn, disabled: busy, onClick: doCheckUpdates }, "检查更新"),
+                                createElement("button", { key: "hd-updates", type: "button", style: styles.textBtn,
+                                    disabled: Boolean(updateChecks.plugin?.pending || updateChecks.plugin?.installing || updateChecks.plugin?.restartRequired),
+                                    title: updateChecks.plugin?.restartRequired ? "重启 DSH 后可再次检查插件更新" : undefined,
+                                    onClick: () => checkUpdateScope("plugin") }, "检查插件更新"),
                                 logButton,
                                 starPill(),
                                 close ? createElement("button", { key: "close", type: "button", style: styles.textBtn, onClick: close }, "关闭") : null,
@@ -6508,6 +6560,7 @@ function Section({ close }) {
                     ]),
                     staleSource ? createElement("div", { key: "stale", role: "status", style: styles.error }, "代码已更新，重启 DSH 后生效") : null,
                     statusError ? createElement("div", { key: "error", role: "alert", style: styles.error }, statusError) : null,
+                    createElement(UpdateCheckStatus, { key: "plugin-check", scope: "plugin", state: updateChecks.plugin }),
                 ]),
 				// 运行日志 — the host's own account of what this plugin did, which
 				// outlives the request that produced it and the process that knew
@@ -6604,8 +6657,15 @@ function Section({ close }) {
 								onClick: () => setTab("calls"),
 							}, "调用记录" + (callBadges.skill ? " (" + callBadges.skill + ")" : "")),
 						]),
-                    createElement("button", { key: "directory", type: "button", "aria-label": "管理目录源", title: "管理目录源", style: { ...styles.textBtn, display: "inline-flex", gap: 8, alignItems: "center", marginLeft: "auto", fontSize: 14, minHeight: 34, flexShrink: 0, whiteSpace: "nowrap" }, onClick: () => { switchSpace("mcp"); setTab("market"); setCatalogDetailsOpen(true); setSourcesOpen(true); } }, [createElement(UiIcon, { key: "icon", name: "layers", size: 17 }), createElement("span", { key: "label", className: "omkt-directory-label" }, "管理目录源")]),
+                    createElement("button", { key: "resource-updates", type: "button", className: "omkt-resource-update", "aria-label": space === "skill" ? "检查 Skill 更新" : "检查 MCP 更新",
+                        title: space === "skill" ? "检查 Skill 更新" : "检查 MCP 更新",
+                        style: { ...styles.textBtn, display: "inline-flex", gap: 6, alignItems: "center", minHeight: 34, flexShrink: 0, whiteSpace: "nowrap" },
+                        disabled: Boolean(updateChecks[space]?.pending || (space === "mcp" && busy)), onClick: () => checkUpdateScope(space),
+                    }, [createElement(UiIcon, { key: "icon", name: "refresh", size: 16 }),
+                        createElement("span", { key: "label" }, space === "skill" ? "检查 Skill 更新" : "检查 MCP 更新")]),
+                    createElement("button", { key: "directory", type: "button", "aria-label": "管理目录源", title: "管理目录源", style: { ...styles.textBtn, display: "inline-flex", gap: 8, alignItems: "center", fontSize: 14, minHeight: 34, flexShrink: 0, whiteSpace: "nowrap" }, onClick: () => { switchSpace("mcp"); setTab("market"); setCatalogDetailsOpen(true); setSourcesOpen(true); } }, [createElement(UiIcon, { key: "icon", name: "layers", size: 17 }), createElement("span", { key: "label", className: "omkt-directory-label" }, "管理目录源")]),
                 ]),
+                createElement(UpdateCheckStatus, { key: "resource-check", scope: space, state: updateChecks[space] }),
 
 				// ---------------- calls tab ----------------
 				// Read-only: every control on it filters what the host already

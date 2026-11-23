@@ -89,6 +89,8 @@ Install or upgrade the complete GitHub package with DSH (use the desired commit 
 
 Quit DSH before running the command. Use your profile name in place of `desktop` if needed. Packages installed through npm can use the panel's self-update action. Updating GitHub code does not publish an npm package.
 
+Use the MCP and Skill pages to check their respective installed items. Skill checks inspect each market installation and explain missing receipts. GitHub Skill installs record the exact downloaded commit. The plugin actions menu checks published GitHub Releases for GitHub installations and official release archives.
+
 **The host loads Skills when a session starts.** After adding or removing a Skill, restart DSH and use a new session. Discovery does not mean a running session has loaded it; Skills have no enable switch.
 
 ## Local index and network access

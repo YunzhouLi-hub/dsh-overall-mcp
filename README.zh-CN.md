@@ -89,6 +89,8 @@ dsh plugin --profile desktop add "github:YunzhouLi-hub/dsh-overall-mcp#main"
 
 运行命令前请完全退出 DSH。如果你使用其他配置，将 `desktop` 换成对应配置名。通过 npm 安装的插件可使用面板自更新。GitHub 上的代码更新与 npm 发包是两件独立的事。
 
+MCP 和 Skill 页面分别提供「检查 MCP 更新」与「检查 Skill 更新」。Skill 检查逐份核对已安装的市场技能。GitHub 技能安装时会记录实际下载的提交，缺少可核对凭据的旧安装会说明跳过原因。右上角「插件操作」里的「检查插件更新」只检查插件本身，GitHub 安装和官方安装包都会查询正式 Release。
+
 **Skill 在会话启动时由宿主加载。** 新增或移除后需重启 DSH，并在新会话中使用；已注册列表不表示当前会话已经加载，也没有 Skill 启用开关。
 
 ## 本地索引与网络
