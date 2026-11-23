@@ -7,7 +7,7 @@
 <p align="center"><a href="README.zh-CN.md">中文</a> | English</p>
 
 <p align="center">
- <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.8-4d6bfe" alt="version 1.0.8"></a>
+ <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.9-4d6bfe" alt="version 1.0.9"></a>
  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4d6bfe" alt="license MIT"></a>
  <img src="https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-4d6bfe" alt="node ^22.19 || >=24">
 </p>
