@@ -9,7 +9,7 @@ assert.equal(typeof apply, 'function', 'The published host must load and export 
 
 const cwd = fileURLToPath(new URL('..', import.meta.url));
 for (const args of [
-  ['--test', 'test/skill-index.test.mjs', 'test/skill-market.test.mjs', 'test/updates.test.mjs'],
+  ['--test', 'test/skill-index.test.mjs', 'test/skill-market.test.mjs', 'test/self-update.test.mjs', 'test/updates.test.mjs'],
   ['tools/render-detail.mjs'],
   ['tools/render-market-tab.mjs'],
 ]) {

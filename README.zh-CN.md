@@ -7,7 +7,7 @@
 <p align="center">中文 | <a href="README.md">English</a></p>
 
 <p align="center">
- <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.10-4d6bfe" alt="version 1.0.10"></a>
+ <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.11-4d6bfe" alt="version 1.0.11"></a>
  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4d6bfe" alt="license MIT"></a>
  <img src="https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-4d6bfe" alt="node ^22.19 || >=24">
 </p>
@@ -87,7 +87,7 @@ dsh plugin --profile desktop add "github:YunzhouLi-hub/dsh-overall-mcp#main"
 
 正式安装或升级请用 DSH 安装完整的 GitHub 插件包（可在 `#` 后指定提交），然后完全退出并重开 DSH。不要手动覆盖托管配置的 `node_modules` 中的个别文件；DSH 更新时可能从锁文件恢复旧版。开发请使用独立配置。
 
-运行命令前请完全退出 DSH。如果你使用其他配置，将 `desktop` 换成对应配置名。通过 npm 安装的插件可使用面板自更新。GitHub 上的代码更新与 npm 发包是两件独立的事。
+运行命令前请完全退出 DSH。如果你使用其他配置，将 `desktop` 换成对应配置名。通过 npm 安装或固定到官方 GitHub 提交的插件，在宿主支持时可使用页头的「更新到」按钮。需要手动安装时，页头的「获取」入口会打开该版本的发布页。
 
 MCP 和 Skill 页面分别提供「检查 MCP 更新」与「检查 Skill 更新」。Skill 检查逐份核对已安装的市场技能。GitHub 技能安装时会记录实际下载的提交，缺少可核对凭据的旧安装会说明跳过原因。右上角「插件操作」里的「检查插件更新」只检查插件本身，GitHub 安装和官方安装包都会查询正式 Release。
 

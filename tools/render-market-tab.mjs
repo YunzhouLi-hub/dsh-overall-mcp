@@ -447,6 +447,7 @@ let skillMetricsResponder = null;
 let selfInstallGate = null;
 let registryPagingRows = null;
 let registrySourceAction = null;
+let selfManual = false;
 let registryRowAction = null;
 let catalogGate = null;
 const catalogBodies = [];
@@ -697,10 +698,12 @@ globalThis.fetch = async (url, init) => {
         checked: true,
         updateAvailable: true,
         reason: 'newer-published',
+        ...(selfManual ? { manual: true, releaseUrl: 'https://github.com/YunzhouLi-hub/dsh-overall-mcp/releases/tag/v0.2.0' } : {}),
     });
   }
   if (path.startsWith('/self-update')) {
     calls.push('POST /self-update');
+    assert.equal(JSON.parse(init.body).version, '0.2.0');
     if (selfInstallGate) await selfInstallGate;
     return ok({ ok: true, updated: true, from: '0.1.0', to: '0.2.0', command: 'dsh plugin --profile desktop add dsh-overall-mcp@0.2.0', restartRequired: true });
   }
@@ -1764,6 +1767,16 @@ assert.equal(String(findByKey(registryNodes, 'authbody')[0]?.props?.style?.displ
 
 // --- 6b. clicking that button installs the plugin and says a restart is due --
 {
+  selfManual = true;
+  await buttonByText(walk(await render()), '检查插件更新').props.onClick();
+  const manual = walk(await render());
+  const release = findByKey(manual, 'hd-self-manual')[0];
+  assert.equal(release.type, 'a');
+  assert.equal(release.props.href, 'https://github.com/YunzhouLi-hub/dsh-overall-mcp/releases/tag/v0.2.0');
+  assert.equal(textOf(release), '获取 v0.2.0');
+  assert.equal(findByKey(manual, 'hd-self').length, 0);
+  selfManual = false;
+  await buttonByText(manual, '检查插件更新').props.onClick();
   const market = walk(await render());
   const updateBtn = findByKey(market, 'hd-self')[0];
   assert.ok(updateBtn, 'the update button is still there to click');

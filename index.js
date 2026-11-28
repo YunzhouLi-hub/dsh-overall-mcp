@@ -6,11 +6,11 @@ import { readFileSync as readReleaseFile } from "node:fs";
   const manifestUrl = new URL("./package.json", import.meta.url);
   try {
     const manifest = JSON.parse(readReleaseFile(manifestUrl, "utf8"));
-    if (manifest.version !== "1.0.10") throw new Error("package.json version does not match the host");
+    if (manifest.version !== "1.0.11") throw new Error("package.json version does not match the host");
     const digest = releaseHash("sha256").update(readReleaseFile(clientUrl)).digest("hex");
-    if (digest !== "39d7914383a61d1ea726ed2eab36c40828ce149b75d88a20fd367d22614a74a4") throw new Error("client/client.js does not match the host");
+    if (digest !== "e4f47ee4dd48bfacc633b166241b7aaa63f0a1ae486bb51a0e74601ab533931f") throw new Error("client/client.js does not match the host");
   } catch (cause) {
-    throw new Error("dsh-overall-mcp 1.0.10: 插件文件不完整或版本不一致，请用 DSH 重新安装完整插件包。原因：" + cause.message, { cause });
+    throw new Error("dsh-overall-mcp 1.0.11: 插件文件不完整或版本不一致，请用 DSH 重新安装完整插件包。原因：" + cause.message, { cause });
   }
 }
 
@@ -4785,6 +4785,7 @@ import path3 from "node:path";
 import { fileURLToPath } from "node:url";
 var PACKAGE_NAME = "dsh-overall-mcp";
 var PUBLIC_REPOSITORY = "YunzhouLi-hub/dsh-overall-mcp";
+var GITHUB_API = `https://api.github.com/repos/${PUBLIC_REPOSITORY}`;
 var DEFAULT_CACHE_MS = 10 * 60 * 1e3;
 async function readSelfPackage(moduleUrl) {
   const dir = path3.dirname(fileURLToPath(moduleUrl));
@@ -4840,7 +4841,7 @@ function isPublicReleaseArchive(spec, self) {
   return /^file:.+\.tgz$/i.test(spec) || /^https:\/\/github\.com\/yunzhouli-hub\/dsh-overall-mcp\/releases\/download\/[^/\s?#]+\/[^/\s?#]+\.tgz$/i.test(spec);
 }
 async function latestGitHubRelease(fetchImpl) {
-  const res = await fetchImpl(`https://api.github.com/repos/${PUBLIC_REPOSITORY}/releases/latest`, {
+  const res = await fetchImpl(`${GITHUB_API}/releases/latest`, {
     headers: { accept: "application/vnd.github+json", "user-agent": PACKAGE_NAME },
     signal: AbortSignal.timeout(8e3)
   });
@@ -4850,12 +4851,23 @@ async function latestGitHubRelease(fetchImpl) {
   if (!latest || body.draft === true || body.prerelease === true) throw new Error("GitHub \u672A\u8FD4\u56DE\u6709\u6548\u7684\u6B63\u5F0F\u7248\u672C");
   return { latest, tag: body.tag_name };
 }
+async function releaseCommit(tag, fetchImpl) {
+  const response = await fetchImpl(`${GITHUB_API}/commits/${encodeURIComponent(tag)}`, {
+    headers: { accept: "application/vnd.github+json", "user-agent": PACKAGE_NAME },
+    signal: AbortSignal.timeout(8e3)
+  });
+  if (!response.ok) throw new Error(`\u65E0\u6CD5\u8BFB\u53D6 GitHub \u53D1\u5E03\u6807\u7B7E ${tag}\uFF08HTTP ${response.status}\uFF09`);
+  const { sha } = await response.json();
+  if (typeof sha !== "string" || !/^[a-f0-9]{40}$/i.test(sha)) throw new Error(`GitHub \u53D1\u5E03\u6807\u7B7E ${tag} \u672A\u8FD4\u56DE\u5B8C\u6574\u63D0\u4EA4`);
+  return sha;
+}
 async function checkSelfUpdate({
   moduleUrl,
   fetchImpl = fetch,
   cacheMs = DEFAULT_CACHE_MS,
   force = false,
-  cache = null
+  cache = null,
+  pluginManager
 } = {}) {
   const self = await readSelfPackage(moduleUrl);
   const install = resolveInstall(fileURLToPath(moduleUrl));
@@ -4922,7 +4934,8 @@ async function checkSelfUpdate({
       hint: "\u6B64 Git \u6765\u6E90\u6CA1\u6709\u914D\u7F6E\u53EF\u6838\u5BF9\u7684\u6B63\u5F0F\u53D1\u5E03\u6E20\u9053"
     };
   }
-  const key = `${self.name}@${self.version}:${spec}`;
+  const managedGit = git && /#[a-f0-9]{40}$/i.test(spec.trim()) && typeof pluginManager?.updateBundle === "function";
+  const key = `${self.name}@${self.version}:${spec}:${managedGit}`;
   if (!force && cache && cacheMs > 0 && cache.key === key && Date.now() - cache.at < cacheMs) {
     return { ...cache.value, cached: true };
   }
@@ -4953,7 +4966,11 @@ async function checkSelfUpdate({
     latest,
     updateAvailable,
     reason: updateAvailable ? "newer-published" : "up-to-date",
-    ...githubRelease ? { manual: true, releaseUrl: `https://github.com/${PUBLIC_REPOSITORY}/releases/tag/${encodeURIComponent(tag)}` } : {}
+    ...githubRelease ? {
+      manual: !managedGit,
+      ...managedGit ? { releaseTag: tag } : {},
+      releaseUrl: `https://github.com/${PUBLIC_REPOSITORY}/releases/tag/${encodeURIComponent(tag)}`
+    } : {}
   };
   if (cache) Object.assign(cache, { key, at: Date.now(), value });
   return value;
@@ -5009,16 +5026,41 @@ async function runSelfUpdateCommand(file, args, { cwd, timeoutMs = 18e4 } = {}) 
     );
   });
 }
-async function updateSelf({ moduleUrl, fetchImpl = fetch, run = runSelfUpdateCommand, launcher = resolveLauncher() } = {}) {
-  const check = await checkSelfUpdate({ moduleUrl, fetchImpl, force: true });
+async function updateSelf({ moduleUrl, expectedVersion, pluginManager, fetchImpl = fetch, run = runSelfUpdateCommand, launcher = resolveLauncher() } = {}) {
+  const check = await checkSelfUpdate({ moduleUrl, fetchImpl, pluginManager, force: true });
   if (!check.checked) {
     return { ok: false, updated: false, reason: check.reason, hint: check.hint, command: null };
   }
   if (!check.updateAvailable) {
-    return { ok: false, updated: false, reason: check.reason, version: check.version, latest: check.latest, command: null };
+    return { ok: false, updated: false, reason: check.reason, version: check.version, latest: check.latest, hint: check.hint, command: null };
+  }
+  if (expectedVersion !== void 0 && expectedVersion !== check.latest) {
+    return { ok: false, updated: false, reason: "version-changed", latest: check.latest, hint: "\u6700\u65B0\u53D1\u5E03\u7248\u672C\u5DF2\u53D8\u5316\uFF0C\u8BF7\u91CD\u65B0\u68C0\u67E5\u540E\u518D\u66F4\u65B0", command: null };
   }
   if (check.manual) {
     return { ok: false, updated: false, reason: "manual", command: null, hint: "\u8BF7\u6253\u5F00 GitHub \u53D1\u5E03\u9875\u67E5\u770B\u5B89\u88C5\u8BF4\u660E" };
+  }
+  if (check.releaseTag) {
+    const sha = await releaseCommit(check.releaseTag, fetchImpl);
+    const spec = `github:${PUBLIC_REPOSITORY}#${sha}`;
+    const response = await pluginManager.updateBundle(check.name, check.latest, { spec });
+    const application = response?.result?.application;
+    const updated = response?.to === check.latest && response.result?.changed === true && (application === "applied" || application === "restart-required");
+    const restartRequired = updated && application === "restart-required";
+    const error = response?.result?.error;
+    const restoreError = response?.restore?.error;
+    return {
+      ok: updated,
+      updated,
+      restartRequired,
+      from: check.version,
+      to: check.latest,
+      ...updated ? {} : { reason: error?.code ?? application ?? "invalid-manager-response" },
+      hint: updated ? restartRequired ? `\u5DF2\u5B89\u88C5 v${check.latest}\uFF0C\u91CD\u542F DSH \u540E\u751F\u6548` : `\u5DF2\u66F4\u65B0\u5230 v${check.latest}` : [
+        error?.diagnostic || error?.code || (application === "cancelled" ? "\u66F4\u65B0\u5DF2\u53D6\u6D88" : "DSH \u672A\u786E\u8BA4\u63D2\u4EF6\u66F4\u65B0\u6210\u529F"),
+        restoreError && `\u6062\u590D\u539F\u7248\u672C\u5931\u8D25\uFF1A${restoreError.diagnostic || restoreError.code}`
+      ].filter(Boolean).join("\uFF1B")
+    };
   }
   if (!check.profileName) {
     return { ok: false, updated: false, reason: "unknown-profile", hint: "\u65E0\u6CD5\u786E\u5B9A\u5F53\u524D profile \u540D\u79F0", command: null };
@@ -10321,12 +10363,25 @@ async function apply(ctx) {
     return { removed, count: removed.length, ...await serversPayload() };
   }
   const selfUpdateCache = {};
-  async function doCheckSelfUpdate({ force = false } = {}) {
-    const fetchImpl = async (url, init) => {
+  let selfUpdateRunning = false;
+  let selfUpdateRestart = null;
+  const selfUpdateOptions = () => ({
+    moduleUrl: import.meta.url,
+    pluginManager: ctx.get?.("pluginManager"),
+    fetchImpl: async (url, init) => {
       if (new URL(url).origin === "https://api.github.com") await refreshGithubAuth();
       return fetch(url, { ...init, headers: withGithubAuth(url, init?.headers ?? {}) });
+    }
+  });
+  async function doCheckSelfUpdate({ force = false } = {}) {
+    const result = await checkSelfUpdate({ ...selfUpdateOptions(), cache: selfUpdateCache, force });
+    if (selfUpdateRestart) return {
+      ...result,
+      updateAvailable: false,
+      restartRequired: true,
+      reason: "restart-required",
+      hint: `\u5DF2\u5B89\u88C5 v${selfUpdateRestart}\uFF0C\u91CD\u542F DSH \u540E\u751F\u6548`
     };
-    const result = await checkSelfUpdate({ moduleUrl: import.meta.url, cache: selfUpdateCache, force, fetchImpl });
     if (force) emit({
       kind: "update-check",
       target: "plugin",
@@ -10372,17 +10427,32 @@ async function apply(ctx) {
     });
     return { ...report, entries, rootErrors };
   }
-  const doSelfUpdate = async () => {
-    const result = await updateSelf({ moduleUrl: import.meta.url });
-    emit({
-      kind: "update",
-      target: "dsh-overall-mcp",
-      updated: result?.updated === true,
-      ...result?.ok === false ? { error: result.reason ?? "failed" } : {},
-      ...result?.version ? { from: result.version } : {},
-      ...result?.latest ? { to: result.latest } : {}
-    });
-    return result;
+  const doSelfUpdate = async (expectedVersion) => {
+    if (selfUpdateRunning) throw Object.assign(new Error("\u6B63\u5728\u5B89\u88C5\u63D2\u4EF6\u66F4\u65B0"), { status: 409 });
+    if (selfUpdateRestart) throw Object.assign(new Error(`\u5DF2\u5B89\u88C5 v${selfUpdateRestart}\uFF0C\u91CD\u542F DSH \u540E\u751F\u6548`), { status: 409 });
+    selfUpdateRunning = true;
+    const operation = { kind: "update", target: "dsh-overall-mcp" };
+    try {
+      emit({ ...operation, action: "start", ...expectedVersion ? { to: expectedVersion } : {} });
+      const result = await updateSelf({ ...selfUpdateOptions(), expectedVersion });
+      for (const field of ["hint", "stdout", "stderr"]) {
+        if (result[field]) result[field] = redactSecrets(result[field]);
+      }
+      if (result.restartRequired) selfUpdateRestart = result.to;
+      emit({
+        ...operation,
+        updated: result.updated === true,
+        ...result.ok === false ? { error: result.hint ?? result.reason ?? "failed" } : {},
+        ...result.from ? { from: result.from } : {},
+        ...result.to ? { to: result.to } : {}
+      });
+      return result;
+    } catch (error) {
+      emit({ ...operation, updated: false, error: redactSecrets(error?.message ?? error) });
+      throw error;
+    } finally {
+      selfUpdateRunning = false;
+    }
   };
   async function doCheckUpdates() {
     const rows = registry.servers.filter((s) => s.enabled !== false);
@@ -11932,7 +12002,21 @@ async function apply(ctx) {
       ["/api/overall-mcp/self", ["GET"], guard(async (req) => json(await doCheckSelfUpdate({
         force: new URL(req.url).searchParams.get("refresh") === "1"
       })))],
-      ["/api/overall-mcp/self-update", ["POST"], guard(async () => json(await doSelfUpdate()))],
+      ["/api/overall-mcp/self-update", ["POST"], guard(async (req) => {
+        const raw = await req.text();
+        let body;
+        try {
+          body = raw ? JSON.parse(raw) : {};
+        } catch {
+          return json({ error: "invalid plugin update request" }, 400);
+        }
+        if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "invalid plugin update request" }, 400);
+        const { version } = body;
+        if (version !== void 0 && (typeof version !== "string" || !/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(version))) {
+          return json({ error: "invalid version" }, 400);
+        }
+        return json(await doSelfUpdate(version));
+      })],
       ["/api/overall-mcp/update", ["POST"], guard(async (req) => {
         const { name: name2, slot, from } = await readBody(req);
         if (typeof name2 !== "string") return json({ error: "name required" }, 400);

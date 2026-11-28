@@ -59,7 +59,7 @@ window.__ModuleLoader__.load({
 		// probe also checks CHANGELOG.md's newest section is this version, since
 		// a release note that stops at an older build tells a reader what
 		// changed in code they are not running.
-		const CLIENT_VERSION = "1.0.10";
+		const CLIENT_VERSION = "1.0.11";
 		// Where 「点个 star」 points. A constant, not a config: it is this
 		// plugin's own repository, and a panel that could be pointed at another
 		// repository would be asking for a star it does not deserve.
@@ -3395,7 +3395,7 @@ function MarketCard({ item, stats, busy, installing, rank, usageSort, onInstall,
                         : report.hint || "当前安装方式没有可核对的发布版本";
                 return createElement("div", { role: report.reason === "lookup-failed" ? "alert" : "status", style: styles.message }, [
                     message,
-                    report.updateAvailable && report.manual
+                    report.updateAvailable
                         ? skillSourceLink({ item: { pageUrl: report.releaseUrl }, name: `查看 v${report.latest} 的更新说明`, key: "release" }) : null,
                 ]);
             }
@@ -4614,6 +4614,7 @@ function Section({ close }) {
 			const [detail, setDetail] = useState(null);
             const [updateChecks, setUpdateChecks] = useState({});
             const selfUpdate = updateChecks.plugin?.result;
+            const releasePage = publicPageUrl(selfUpdate?.releaseUrl);
             const checkingUpdates = useRef(new Set());
 			// ---- update queue ----
 			// One queue for every update this page can start: a row's 「更新」 and
@@ -5862,10 +5863,11 @@ function Section({ close }) {
                 setUpdateChecks(previous => ({ ...previous, plugin: { ...previous.plugin, installing: true } }));
                 try {
                     await run(async () => {
-                        const body = await api("/self-update", { method: "POST", timeoutMs: 600000 });
-                        if (body.ok) setUpdateChecks(previous => ({ ...previous, plugin: { restartRequired: true } }));
+                        const body = await api("/self-update", { method: "POST", timeoutMs: 600000,
+                            body: JSON.stringify({ version: selfUpdate?.latest }) });
+                        if (body.ok) setUpdateChecks(previous => ({ ...previous, plugin: { restartRequired: body.restartRequired === true } }));
                         return body;
-                    }, r => r.ok ? `已将 dsh-overall-mcp 更新到 v${r.to}（重启 DSH 后生效）`
+                    }, r => r.ok ? `已将 dsh-overall-mcp 更新到 v${r.to}${r.restartRequired ? "（重启 DSH 后生效）" : ""}`
                         : [r.hint, r.command].filter(Boolean).join("：") || "插件自更新未执行");
                 } finally {
                     checkingUpdates.current.delete("plugin");
@@ -6546,9 +6548,15 @@ function Section({ close }) {
                             createElement("span", { key: "mark", style: { ...styles.brandTile, width: 40, height: 40, background: MCP_SOFT, color: T.brand } }, brandMark(24)),
                             createElement("strong", { key: "name", style: styles.pageTitle }, "全局 MCP & Skill"),
                             createElement("span", { key: "version", style: styles.versionChip, title: "插件版本" }, `v${CLIENT_VERSION}`),
-                            selfUpdate?.updateAvailable && !selfUpdate.manual ? createElement("button", {
-                                key: "hd-self", type: "button", style: { ...styles.button, ...styles.primary }, title: `更新到 v${selfUpdate.latest}`, disabled: busy, onClick: doSelfUpdate,
-                            }, `更新到 v${selfUpdate.latest}`) : null,
+                            selfUpdate?.updateAvailable
+                                ? selfUpdate.manual
+                                    ? (releasePage ? createElement("a", { key: "hd-self-manual", href: releasePage, target: "_blank",
+                                        rel: "noopener noreferrer", style: { ...styles.button, ...styles.primary, textDecoration: "none" },
+                                        onClick: event => openExternal(event, releasePage) }, `获取 v${selfUpdate.latest}`) : null)
+                                    : createElement("button", {
+                                        key: "hd-self", type: "button", style: { ...styles.button, ...styles.primary }, title: `更新到 v${selfUpdate.latest}`, disabled: busy, onClick: doSelfUpdate,
+                                    }, `更新到 v${selfUpdate.latest}`)
+                                : null,
                         ]),
                         createElement("div", { key: "actions", style: styles.headCol }, [
                             createElement("span", { key: "status", style: { ...styles.hint, display: "inline-flex", gap: 9, alignItems: "center", fontSize: 14, color: T.text } }, [
@@ -6560,8 +6568,8 @@ function Section({ close }) {
                                 createElement("button", { key: "scan", type: "button", style: styles.textBtn, disabled: busy, onClick: doScan }, "重新扫描宿主机"),
                                 createElement("button", { key: "github", type: "button", style: styles.textBtn, onClick: () => { switchSpace("mcp"); setTab("registry"); setGhAccessPinned(value => !value); } }, "GitHub 访问设置"),
                                 createElement("button", { key: "hd-updates", type: "button", style: styles.textBtn,
-                                    disabled: Boolean(updateChecks.plugin?.pending || updateChecks.plugin?.installing || updateChecks.plugin?.restartRequired),
-                                    title: updateChecks.plugin?.restartRequired ? "重启 DSH 后可再次检查插件更新" : undefined,
+                                    disabled: Boolean(updateChecks.plugin?.pending || updateChecks.plugin?.installing || updateChecks.plugin?.restartRequired || selfUpdate?.restartRequired),
+                                    title: updateChecks.plugin?.restartRequired || selfUpdate?.restartRequired ? "重启 DSH 后可再次检查插件更新" : undefined,
                                     onClick: () => checkUpdateScope("plugin") }, "检查插件更新"),
                                 logButton,
                                 starPill(),

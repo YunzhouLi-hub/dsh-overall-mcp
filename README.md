@@ -7,7 +7,7 @@
 <p align="center"><a href="README.zh-CN.md">中文</a> | English</p>
 
 <p align="center">
- <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.10-4d6bfe" alt="version 1.0.10"></a>
+ <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.11-4d6bfe" alt="version 1.0.11"></a>
  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4d6bfe" alt="license MIT"></a>
  <img src="https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-4d6bfe" alt="node ^22.19 || >=24">
 </p>
@@ -87,7 +87,7 @@ dsh plugin --profile desktop add "github:YunzhouLi-hub/dsh-overall-mcp#main"
 
 Install or upgrade the complete GitHub package with DSH (use the desired commit after `#` for a reproducible install), then fully quit and reopen DSH. Do not copy selected files into a managed profile’s `node_modules`; DSH can restore files from its lockfile during later updates. For local development, use a separate profile.
 
-Quit DSH before running the command. Use your profile name in place of `desktop` if needed. Packages installed through npm can use the panel's self-update action. Updating GitHub code does not publish an npm package.
+Quit DSH before running the command. Use your profile name in place of `desktop` if needed. The panel can update an npm package or an installation pinned to an official GitHub commit when the host supports it. For a manual installation, the header opens the release page for the new version.
 
 Use the MCP and Skill pages to check their respective installed items. Skill checks inspect each market installation and explain missing receipts. GitHub Skill installs record the exact downloaded commit. The plugin actions menu checks published GitHub Releases for GitHub installations and official release archives.
 
