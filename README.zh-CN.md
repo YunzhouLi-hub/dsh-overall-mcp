@@ -7,7 +7,7 @@
 <p align="center">中文 | <a href="README.md">English</a></p>
 
 <p align="center">
- <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.9-4d6bfe" alt="version 1.0.9"></a>
+ <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.10-4d6bfe" alt="version 1.0.10"></a>
  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4d6bfe" alt="license MIT"></a>
  <img src="https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-4d6bfe" alt="node ^22.19 || >=24">
 </p>
@@ -120,7 +120,7 @@ GitHub 登录是可选的。可在 GitHub 访问设置中检测本机 `gh` 登�
 
 ## 开发与验证
 
-GitHub 的 main 使用精简发布目录，包含运行代码、README、更新日志与截图；测试和截图生成工具保留在开发检出中。当前界面、统计、调用范围与安全修复均有回归检查，更新说明见 [CHANGELOG.md](CHANGELOG.md)。
+GitHub 的 main 包含运行代码、文档、截图和发布版离线检查。工作流会验证包完整性及部分 Skill、更新和界面流程。开发检出可用 `npm run verify:ci` 跑完整离线验证，实时目录探针用 `npm run test:catalog-live` 单独运行。更新说明见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 许可证
 

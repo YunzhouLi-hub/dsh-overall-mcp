@@ -1,0 +1,28 @@
+name: Verify published tree
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.x', '24.x']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Verify the host, Skill search and client flows
+        run: node tools/verify-published.mjs
+      - name: Verify the installable package contents
+        run: npm pack --dry-run --ignore-scripts

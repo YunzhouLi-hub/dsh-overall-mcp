@@ -7,7 +7,7 @@
 <p align="center"><a href="README.zh-CN.md">中文</a> | English</p>
 
 <p align="center">
- <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.9-4d6bfe" alt="version 1.0.9"></a>
+ <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.10-4d6bfe" alt="version 1.0.10"></a>
  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4d6bfe" alt="license MIT"></a>
  <img src="https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-4d6bfe" alt="node ^22.19 || >=24">
 </p>
@@ -120,7 +120,7 @@ The plugin reads existing host MCP configurations without rewriting those files.
 
 ## Development and verification
 
-GitHub main uses a compact publishing tree containing runtime code, READMEs, the changelog, and screenshots. Tests and image-generation tools remain in the development checkout. UI, counters, call-window behavior, and security fixes have regression checks. See [CHANGELOG.md](CHANGELOG.md) for changes.
+GitHub main contains the runtime, documentation, screenshots, and offline checks for the published build. Its workflow verifies package integrity and selected Skill, update, and UI flows. Run the full suite from the development checkout with `npm run verify:ci` and the live catalog probes separately with `npm run test:catalog-live`. See [CHANGELOG.md](CHANGELOG.md) for changes.
 
 ## License
 

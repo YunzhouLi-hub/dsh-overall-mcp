@@ -6,11 +6,11 @@ import { readFileSync as readReleaseFile } from "node:fs";
   const manifestUrl = new URL("./package.json", import.meta.url);
   try {
     const manifest = JSON.parse(readReleaseFile(manifestUrl, "utf8"));
-    if (manifest.version !== "1.0.9") throw new Error("package.json version does not match the host");
+    if (manifest.version !== "1.0.10") throw new Error("package.json version does not match the host");
     const digest = releaseHash("sha256").update(readReleaseFile(clientUrl)).digest("hex");
-    if (digest !== "f190a81a700535d20265f4193f274b4179927279770bee87dcbb4a82edefe2f0") throw new Error("client/client.js does not match the host");
+    if (digest !== "39d7914383a61d1ea726ed2eab36c40828ce149b75d88a20fd367d22614a74a4") throw new Error("client/client.js does not match the host");
   } catch (cause) {
-    throw new Error("dsh-overall-mcp 1.0.9: 插件文件不完整或版本不一致，请用 DSH 重新安装完整插件包。原因：" + cause.message, { cause });
+    throw new Error("dsh-overall-mcp 1.0.10: 插件文件不完整或版本不一致，请用 DSH 重新安装完整插件包。原因：" + cause.message, { cause });
   }
 }
 
@@ -5181,6 +5181,12 @@ import os2 from "node:os";
 import path4 from "node:path";
 import { createHash } from "node:crypto";
 var SKILL_FILE = "SKILL.md";
+function findSkillManifest(paths, prefix = "") {
+  const name2 = SKILL_FILE.toLowerCase();
+  const matches = paths.filter((file) => file.startsWith(prefix) && file.slice(prefix.length).toLowerCase() === name2);
+  if (matches.length > 1) throw new Error("\u53D1\u73B0\u591A\u4E2A\u4EC5\u5927\u5C0F\u5199\u4E0D\u540C\u7684 SKILL.md");
+  return matches[0];
+}
 var SKILL_ICON_METADATA = ".overall-mcp-icon.json";
 var SKILL_ICON_BYTES = 64 * 1024;
 var SKILL_ICON_TYPES = { ".png": "png", ".webp": "webp", ".jpg": "jpeg", ".jpeg": "jpeg", ".gif": "gif" };
@@ -5451,11 +5457,20 @@ async function readRoot(root, fs6, signal) {
   for (const name2 of dirs) {
     signal?.throwIfAborted();
     const dir = path4.join(root.dir, name2);
-    const file = path4.join(dir, SKILL_FILE);
+    let file = path4.join(dir, SKILL_FILE);
     let text;
     let modifiedAt = null;
     try {
-      text = await fs6.readFile(file, "utf8");
+      try {
+        text = await fs6.readFile(file, "utf8");
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+        const files2 = await fs6.readdir(dir, { withFileTypes: true });
+        const manifest = findSkillManifest(files2.filter((entry) => entry.isFile()).map((entry) => entry.name));
+        if (!manifest) continue;
+        file = path4.join(dir, manifest);
+        text = await fs6.readFile(file, "utf8");
+      }
     } catch (error) {
       if (error?.code !== "ENOENT") {
         const issue = `${name2}/${SKILL_FILE} \u8BFB\u53D6\u5931\u8D25\uFF1A${String(error?.message ?? error)}`;
@@ -6556,11 +6571,11 @@ async function readDownload(response, maxBytes = MAX_INSTALL_BYTES) {
 function nowMs() {
   return Date.now();
 }
-function filterByQuery(items, query) {
+function filterByQuery(items, query, collection) {
   const term = typeof query === "string" ? query.trim().toLowerCase() : "";
   if (!term) return items;
   return items.filter(
-    (item) => `${item.id} ${item.install?.slug ?? ""} ${item.install?.repo ?? ""} ${item.owner ?? ""} ${item.name} ${item.title} ${item.summary} ${item.category ?? ""}`.toLowerCase().includes(term)
+    (item) => collection && item.collection === collection || `${item.id} ${item.install?.slug ?? ""} ${item.install?.repo ?? ""} ${item.owner ?? ""} ${item.name} ${item.title} ${item.summary} ${item.category ?? ""}`.toLowerCase().includes(term)
   );
 }
 function clip2(text, limit) {
@@ -6569,6 +6584,18 @@ function clip2(text, limit) {
   return flat.length > limit ? `${flat.slice(0, limit - 1)}\u2026` : flat;
 }
 var featuredRepos = new Map(featured_skills_default.map(({ repo }) => [repo.toLowerCase(), repo]));
+var featuredSearchAliases = /* @__PURE__ */ new Map([["superpower", "obra/superpowers"]]);
+function skillMarketSearch(query) {
+  const text = typeof query === "string" ? query.trim() : "";
+  const githubPath = /^https?:\/\/(?:www\.)?github\.com\/([\w.-]+\/[\w.-]+)(?=[/?#]|$)/i.exec(text)?.[1];
+  const repo = parseRepoRef(githubPath ?? text);
+  const normalized = repo?.repo ? `${repo.owner}/${repo.repo}` : text;
+  const term = normalized.toLowerCase();
+  const exact = featuredRepos.get(term) ?? featuredRepos.get(featuredSearchAliases.get(term));
+  if (exact || term.includes("/") || term.length < 3) return { query: normalized, collection: exact };
+  const names = [...featuredRepos].filter(([key]) => key.split("/")[1] === term);
+  return { query: normalized, collection: names.length === 1 ? names[0][1] : void 0 };
+}
 var featuredSkills = new Map(featured_skills_default.flatMap(({ repo, root, ref, skills }) => skills.map(({ name: name2, title, description }) => {
   const dir = `${root}/${name2}`;
   const id = `github:${repo}:${dir}`;
@@ -6599,7 +6626,8 @@ function withFeaturedGithubSkills(rows, query = "") {
     const dir = row.install.dir;
     return dir !== "" && !featuredSkills.has(`github:${repo}:${dir}`);
   });
-  return discovered.concat(filterByQuery([...featuredSkills.values()], query));
+  const search = skillMarketSearch(query);
+  return discovered.concat(filterByQuery([...featuredSkills.values()], search.query, search.collection));
 }
 async function fetchWithTimeout(url, { headers = {}, timeout = REQUEST_TIMEOUT_MS, fetchImpl = fetch } = {}) {
   const response = await fetchImpl(url, {
@@ -6895,16 +6923,6 @@ async function loadGithub({ refresh = false, state, query, limit }) {
   state.github.set(key, { at: nowMs(), items });
   return { at: nowMs(), items, total: Number.isFinite(body.total_count) ? body.total_count : items.length, nextCursor: null };
 }
-function pickGithubDir(files, dir) {
-  if (!dir) {
-    const root = files.find((file) => /^SKILL\.md$/i.test(file.path));
-    if (root) return "";
-    return null;
-  }
-  const prefix = `${dir.replace(/\/+$/, "")}/`;
-  if (!files.some((file) => file.path.toLowerCase() === `${prefix}skill.md`.toLowerCase())) return null;
-  return prefix;
-}
 function installedSkillTarget(skill) {
   const id = skill.marketId;
   if (!id) return { reason: "\u672A\u8BB0\u5F55\u5E02\u573A\u6765\u6E90" };
@@ -6941,7 +6959,8 @@ function installedSkillTarget(skill) {
 function githubSkillTreeRevision(body, dir) {
   if (body?.truncated || !Array.isArray(body?.tree)) throw new Error("GitHub \u672A\u8FD4\u56DE\u5B8C\u6574\u6587\u4EF6\u6811");
   const prefix = dir ? dir + "/" : "";
-  if (!body.tree.some((entry) => entry.type === "blob" && entry.path === prefix + "SKILL.md")) {
+  const blobs = body.tree.filter((entry) => entry.type === "blob").map((entry) => entry.path);
+  if (!findSkillManifest(blobs, prefix)) {
     throw new Error(`GitHub \u76EE\u5F55 ${dir || "\u6839\u76EE\u5F55"} \u672A\u627E\u5230 SKILL.md`);
   }
   if (!dir) {
@@ -6973,9 +6992,10 @@ async function githubDirFiles(item, state) {
     state
   );
   if (tree.truncated) throw new Error("\u8FD9\u4E2A\u4ED3\u5E93\u592A\u5927\uFF0CGitHub \u622A\u65AD\u4E86\u6587\u4EF6\u5217\u8868\uFF0C\u65E0\u6CD5\u6309\u76EE\u5F55\u5B89\u88C5");
-  const blobs = (tree.tree || []).filter((entry) => entry.type === "blob").map((entry) => entry.path);
-  const prefix = pickGithubDir(blobs.map((p) => ({ path: p })), target.dir);
-  if (prefix === null) throw new Error(`\u8FD9\u4E2A\u4ED3\u5E93\u5728 ${target.dir || "\u6839\u76EE\u5F55"} \u91CC\u6CA1\u6709 SKILL.md`);
+  if (!Array.isArray(tree.tree)) throw new Error("GitHub \u672A\u8FD4\u56DE\u5B8C\u6574\u6587\u4EF6\u6811");
+  const blobs = tree.tree.filter((entry) => entry.type === "blob").map((entry) => entry.path);
+  const prefix = target.dir ? target.dir.replace(/\/+$/, "") + "/" : "";
+  if (!findSkillManifest(blobs, prefix)) throw new Error(`\u8FD9\u4E2A\u4ED3\u5E93\u5728 ${target.dir || "\u6839\u76EE\u5F55"} \u91CC\u6CA1\u6709 SKILL.md`);
   const wanted = blobs.filter((p) => p.startsWith(prefix));
   if (wanted.length > 5e3) throw new Error("skill contains more than 5000 files");
   const files = [];
@@ -7178,6 +7198,7 @@ function createSkillMarket({ token, metricsAuthKey = () => token ?? "", isGithub
     };
   }
   async function list({ source = "all", query = "", limit = 20, refresh = false } = {}) {
+    query = skillMarketSearch(query).query;
     const wanted = source && source !== "all" ? [source] : SKILL_MARKET_SOURCES;
     const size = Math.min(Math.max(Number(limit) || 20, 1), 60);
     const sources = [];
@@ -7237,7 +7258,8 @@ function createSkillMarket({ token, metricsAuthKey = () => token ?? "", isGithub
     try {
       await refuseExisting();
       const { files, skipped, commit } = kind === "clawhub-zip" ? await clawhubFiles(item, state) : kind === "skillhub-zip" ? await skillhubFiles(item, state) : await githubDirFiles(item, state);
-      if (!files.some((file) => file.path.toLowerCase() === "skill.md")) {
+      const manifest = findSkillManifest(files.map((file) => file.path));
+      if (!manifest) {
         throw new Error("\u4E0B\u8F7D\u7ED3\u679C\u91CC\u6CA1\u6709 SKILL.md\uFF0C\u4E0D\u6562\u5F80 skill \u76EE\u5F55\u91CC\u653E");
       }
       await fs6.mkdir(path5.dirname(targetDir), { recursive: true });
@@ -7245,14 +7267,15 @@ function createSkillMarket({ token, metricsAuthKey = () => token ?? "", isGithub
       const written = [];
       for (const file of files) {
         if (file.path.toLowerCase() === SKILL_ICON_METADATA) continue;
-        const destination = path5.join(stage, ...file.path.split("/"));
+        const filename = file.path === manifest ? SKILL_FILE : file.path;
+        const destination = path5.join(stage, ...filename.split("/"));
         const relative = path5.relative(stage, destination);
         if (!relative || file.path.includes("\\") || file.path.includes(":") || relative.startsWith("..") || path5.isAbsolute(relative)) {
           throw new Error(` refusing to write outside the target: ${file.path}`);
         }
         await fs6.mkdir(path5.dirname(destination), { recursive: true });
         await fs6.writeFile(destination, file.bytes, { flag: "wx" });
-        written.push(file.path);
+        written.push(filename);
       }
       const icon = declaredIcon(item);
       const emoji = declaredEmoji(item);
@@ -7283,7 +7306,7 @@ function createSkillMarket({ token, metricsAuthKey = () => token ?? "", isGithub
   }
   return { list, install, metrics, applyMetrics, checkInstalledUpdates, sources: SKILL_MARKET_SOURCES };
 }
-var _internal = { skillhubItem, clawhubItem, pickGithubDir, frontmatter: parseFrontmatter, parseRepoRef };
+var _internal = { skillhubItem, clawhubItem, frontmatter: parseFrontmatter, parseRepoRef };
 
 // lib/skill-index.js
 var { skillhubItem: skillhubItem2, clawhubItem: clawhubItem2 } = _internal;
@@ -7922,7 +7945,8 @@ function infoFor(row) {
 }
 var titleOrder = new Intl.Collator(void 0, { sensitivity: "base", numeric: true });
 function querySkillRows(rows, { query = "", source = "all", category = "all", sort = "default", offset = 0, limit = 20 } = {}) {
-  const term = typeof query === "string" ? query.trim().toLowerCase() : "";
+  const search = skillMarketSearch(query);
+  const term = search.query.toLowerCase();
   const wanted = source && source !== "all" ? String(source) : null;
   const available = Array.isArray(rows) ? rows : [];
   const matches = [];
@@ -7930,13 +7954,15 @@ function querySkillRows(rows, { query = "", source = "all", category = "all", so
   for (const row of available) {
     if (wanted && row.source !== wanted) continue;
     const info = infoFor(row);
-    if (term && !info.text.includes(term)) continue;
+    const exactCollection = Boolean(search.collection && row.collection === search.collection);
+    if (term && !exactCollection && !info.text.includes(term)) continue;
     categories[info.category] = (categories[info.category] ?? 0) + 1;
     if (category !== "all" && info.category !== category) continue;
-    matches.push({ row, info });
+    matches.push({ row, info, exactCollection });
   }
   matches.sort((a, b) => {
     if (sort === "name") return titleOrder.compare(a.info.title || a.info.name, b.info.title || b.info.name) || a.row.id.localeCompare(b.row.id);
+    if (sort === "default" && a.exactCollection !== b.exactCollection) return a.exactCollection ? -1 : 1;
     return compareRows(a.row, b.row, true);
   });
   let ranked = matches;
@@ -9497,10 +9523,10 @@ async function apply(ctx) {
   let skillWalkStop = null;
   let skillWalkEnded = null;
   let skillWalkWriteError = null;
-  async function readSkillIndex({ force = false } = {}) {
-    if (!force && skillWalk && skillIndexLoaded) return skillIndexDoc;
+  async function readSkillIndex() {
+    if (skillWalk && skillIndexLoaded) return skillIndexDoc;
     const stamp = await skillIndexFileStamp();
-    if (!force && skillIndexLoaded && stamp === skillIndexKnownStamp) return skillIndexDoc;
+    if (skillIndexLoaded && !skillIndexDamaged && stamp === skillIndexKnownStamp) return skillIndexDoc;
     const { doc, damaged } = await readSkillIndexDocument(skillIndexFile, (file, enc) => fs5.readFile(file, enc));
     skillIndexDoc = doc;
     skillIndexDamaged = damaged;
@@ -9512,8 +9538,9 @@ async function apply(ctx) {
   async function skillIndexFileStamp() {
     try {
       const info = await fs5.stat(skillIndexFile);
-      return `${info.mtimeMs}:${info.size}`;
-    } catch {
+      return `${info.ino}:${info.ctimeMs}:${info.mtimeMs}:${info.size}`;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
       return "missing";
     }
   }
@@ -9522,9 +9549,10 @@ async function apply(ctx) {
     skillIndexKnownStamp = await skillIndexFileStamp();
     skillIndexDoc = doc;
     skillIndexLoaded = true;
+    skillIndexDamaged = null;
   }
-  async function skillIndexPayload({ refresh = false } = {}) {
-    const doc = await readSkillIndex({ force: refresh });
+  async function skillIndexPayload() {
+    const doc = await readSkillIndex();
     return doc?.rows?.length ? doc : null;
   }
   function stopSkillWalk(reason = "user") {
@@ -9665,7 +9693,7 @@ async function apply(ctx) {
   }
   async function skillMarketPayload({ source = "all", query = "", category = "all", sort = "default", limit = 20, offset = 0, refresh = false } = {}) {
     const auth = await refreshGithubAuth();
-    const index = await skillIndexPayload({ refresh });
+    const index = await skillIndexPayload();
     const options = { source, query, category, sort, limit, offset };
     let out;
     if (index) {
@@ -10396,11 +10424,12 @@ async function apply(ctx) {
     entry.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     entry.updateCheck = { at: (/* @__PURE__ */ new Date()).toISOString(), current: check.latest, latest: check.latest, updateAvailable: false };
     await save();
-    const wasConnected = fibers.has(name2);
-    if (wasConnected) await disconnect(name2);
-    const conn = entry.enabled !== false ? await connect(entry) : { ok: true, deferred: true };
+    const mounted = fibers.has(name2);
+    const restart = entry.enabled !== false && mounted && Boolean(entry.serverName);
+    if (restart) await disconnect(name2);
+    const conn = entry.enabled === false || mounted && !restart ? { ok: true, deferred: true } : await connect(entry);
     log?.info?.(`overall-mcp: updated ${name2} from ${previous} to ${check.latest}`);
-    return { name: name2, updated: true, package: check.pkg, from: previous, to: check.latest, reconnected: wasConnected, connect: conn };
+    return { name: name2, updated: true, package: check.pkg, from: previous, to: check.latest, reconnected: restart && conn.ok && !conn.skipped, connect: conn };
   }
   const catalogCache = createCatalogCache();
   const CATALOG_QUERY_MAX = 200;
@@ -10412,6 +10441,7 @@ async function apply(ctx) {
   let githubWalkProgress = null;
   let githubCrawlStop = null;
   let githubCrawlEnded = null;
+  let githubCrawlWriteError = null;
   async function readGithubIndex() {
     if (!githubIndexLoaded) {
       const { doc, damaged } = await readIndexDocument(githubIndexFile, (file, enc) => fs5.readFile(file, enc));
@@ -10440,11 +10470,18 @@ async function apply(ctx) {
     const stop = { controller: new AbortController(), reason: null };
     githubCrawlStop = stop;
     githubCrawlEnded = null;
+    githubCrawlWriteError = null;
     githubCrawl = (async () => {
       log?.info?.("overall-mcp: walking the GitHub index");
       githubWalkProgress = { requests: 0, rows: 0 };
       emit({ kind: "census", action: "start", force: force === true });
       let lastWrite = 0;
+      let checkpoint = null;
+      const reportWriteFailure = (phase, error) => {
+        githubCrawlWriteError = `MCP \u666E\u67E5${phase}\u4FDD\u5B58\u5931\u8D25\uFF1A${redactSecrets(error?.message ?? error)}`;
+        log?.warn?.(githubCrawlWriteError);
+        emit({ kind: "census", action: "write-failed", phase, error: githubCrawlWriteError });
+      };
       const walk = await crawlGithubRepos({
         search: searchGithubRepos,
         signal: stop.controller.signal,
@@ -10465,18 +10502,21 @@ async function apply(ctx) {
         onProgress: ({ requests, rows: rows2, items }) => {
           githubWalkProgress = { requests, rows: rows2 };
           const stamp = Date.now();
-          if (rows2 === 0 || stamp - lastWrite < 5e3) return;
+          if (rows2 === 0 || checkpoint || stamp - lastWrite < 5e3) return;
           lastWrite = stamp;
           const at = new Date(stamp).toISOString();
           const merged = mergeIndexRows(held?.rows ?? [], [...items.values()], { at });
-          void writeJson(githubIndexFile, indexDocumentOf({
+          checkpoint = writeJson(githubIndexFile, indexDocumentOf({
             at,
             rows: merged,
             queries: [...BASE_QUERIES],
             requests,
             complete: false,
             partial: `\u6B63\u5728\u6293\u53D6\uFF08\u5DF2\u6536 ${rows2} \u884C\uFF09`
-          })).catch(() => {
+          })).then(() => {
+            githubCrawlWriteError = null;
+          }).catch((error) => reportWriteFailure("\u8FDB\u5EA6", error)).finally(() => {
+            checkpoint = null;
           });
         }
       });
@@ -10490,7 +10530,14 @@ async function apply(ctx) {
         complete: walk.complete,
         partial
       });
-      await writeJson(githubIndexFile, doc);
+      await checkpoint;
+      try {
+        await writeJson(githubIndexFile, doc);
+        githubCrawlWriteError = null;
+      } catch (error) {
+        reportWriteFailure("\u6700\u7EC8\u7ED3\u679C", error);
+        throw error;
+      }
       githubIndexDoc = doc;
       githubIndexLoaded = true;
       githubIndexDamaged = null;
@@ -10537,6 +10584,7 @@ async function apply(ctx) {
       walking: githubCrawl !== null,
       progress: githubWalkProgress,
       ended: githubCrawlEnded,
+      writeError: githubCrawlWriteError,
       loaded: githubIndexLoaded,
       damaged: githubIndexDamaged ?? null
     };

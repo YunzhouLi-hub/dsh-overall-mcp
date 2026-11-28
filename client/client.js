@@ -59,7 +59,7 @@ window.__ModuleLoader__.load({
 		// probe also checks CHANGELOG.md's newest section is this version, since
 		// a release note that stops at an older build tells a reader what
 		// changed in code they are not running.
-		const CLIENT_VERSION = "1.0.9";
+		const CLIENT_VERSION = "1.0.10";
 		// Where 「点个 star」 points. A constant, not a config: it is this
 		// plugin's own repository, and a panel that could be pointed at another
 		// repository would be asking for a star it does not deserve.
@@ -150,6 +150,12 @@ window.__ModuleLoader__.load({
 		 * Returns nothing: the anchor keeps `target="_blank"`, so every path
 		 * where this function does not act still ends in a working link.
 		 */
+		function publicPageUrl(href) {
+			if (typeof href !== "string" || !/^https?:\/\/[^/]/i.test(href) || /[\u0000-\u0020\u007f\\]/.test(href)) return null;
+			const url = URL.parse(href);
+			return url && !url.username && !url.password ? url.href : null;
+		}
+
 		function openExternal(event, url) {
 			if (typeof url !== "string" || !/^https?:/i.test(url)) return;
 			if (event.defaultPrevented || event.button !== 0) return;
@@ -3030,7 +3036,9 @@ function MarketCard({ item, stats, busy, installing, rank, usageSort, onInstall,
 			// Prefer the upstream's own site over the repository for "官网"; a
 			// GitHub repository is the source of truth for the local-server lists,
 			// and the two Awesome lists only ever have that.
-			const homepage = item.homepage && item.homepage !== item.repository ? item.homepage : null;
+			const repositoryPage = publicPageUrl(item.repository);
+			const homepage = [item.homepage, enriched?.homepage].map(publicPageUrl)
+				.find(url => url && url.replace(/\/$/, "") !== repositoryPage?.replace(/\/$/, ""));
 			const installCmd = item.install
 				? item.install.transport === "stdio"
 					? [item.install.command, ...(item.install.args ?? [])].join(" ")
@@ -3367,10 +3375,8 @@ function MarketCard({ item, stats, busy, installing, rank, usageSort, onInstall,
         }
 
         function skillSourceLink({ item, name, style, key = "name" }) {
-            const href = item.pageUrl;
-            if (typeof href !== "string" || !/^https?:\/\/[^/]/i.test(href) || /[\u0000-\u0020\u007f\\]/.test(href)) return null;
-            const url = URL.parse(href);
-            if (!url || url.username || url.password) return null;
+            const href = publicPageUrl(item.pageUrl);
+            if (!href) return null;
             return createElement("a", { key, href, target: "_blank", rel: "noopener noreferrer", className: "omkt-title omkt-skill-source", style: { ...style, display: "block", width: "fit-content", maxWidth: "100%", color: undefined }, title: `打开来源网页：${name}`, onClick: event => openExternal(event, href) }, name);
         }
 
@@ -3405,12 +3411,16 @@ function MarketCard({ item, stats, busy, installing, rank, usageSort, onInstall,
                 + (failed ? ` · ${failed} 项失败` : "")
                 + (skipped ? ` · ${skipped} 项跳过` : "")
                 + (report.rootErrors?.length ? ` · ${report.rootErrors.length} 个目录读取失败` : "");
-            const entries = scope === "skill" ? report.entries : report.entries.filter(row => row.detectable);
             const details = [
-                ...entries.map(row => {
+                ...report.entries.map(row => {
                     let outcome = row.error;
                     if (!outcome) {
-                        if (row.status === "changed") outcome = "上游目录有变更";
+                        if (scope === "mcp" && !row.detectable) {
+                            const reason = row.reason === "not launched through a package runner"
+                                ? "启动配置未使用可比较版本的软件包运行器"
+                                : row.reason || "缺少可比较的版本信息";
+                            outcome = "已跳过 · " + reason;
+                        } else if (row.status === "changed") outcome = "上游目录有变更";
                         else if (row.updateAvailable || row.status === "newer") outcome = `${row.current ?? "未固定版本"} → ${row.latest}`;
                         else if (row.unpinned) outcome = `启动配置未固定版本（上游 v${row.latest}）`;
                         else if (row.status === "current" && row.source === "github") outcome = `与上游目录一致（安装提交 ${row.current}）`;
@@ -6459,7 +6469,7 @@ function Section({ close }) {
 			// button and then wonder why the other one kept going.
 			const census = hostStatus?.census ?? null;
 			const censusWalk = census?.progress ?? null;
-			const censusLine = !census
+			const censusStatus = !census
 				? "宿主插件还是旧版本，读不到普查状态"
 				: census.walking
 					? [
@@ -6474,6 +6484,7 @@ function Section({ close }) {
 						typeof census.partial === "string" && census.partial ? `没读完：${clipReason(census.partial, 40)}` : null,
 						census.damaged ? `文件损坏：${census.damaged}` : null,
 					].filter(Boolean).join(" · ");
+			const censusLine = [censusStatus, census?.writeError].filter(Boolean).join(" · ");
 
 			// The recovery walk, in the same shape: what is on disk, whether a
 			// pass is running, how far through its own plan it is, and — the file
